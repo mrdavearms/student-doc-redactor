@@ -320,11 +320,13 @@ class PIIDetector:
 
         # Check for family keywords
         for keyword in self.FAMILY_KEYWORDS:
-            pattern = re.compile(keyword + r'[:\s]+([A-Z][a-z]+(?: [A-Z][a-z]+)*)', re.IGNORECASE)
+            # Match keyword followed by colon/space, then a capitalized name
+            # Use word boundary before keyword to avoid matching within words
+            pattern = re.compile(r'\b' + keyword + r'[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', re.IGNORECASE)
             for match in pattern.finditer(line):
                 name = match.group(1)
-                # Skip if it's a known professional title or common word
-                if name.lower() not in ['dr', 'mr', 'mrs', 'ms', 'miss', 'the', 'and', 'or']:
+                # Skip common words, articles, prepositions, and professional titles
+                if name.lower() not in ['dr', 'mr', 'mrs', 'ms', 'miss', 'the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'from', 'by', 'as', 'is', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'can', 'could', 'may', 'might', 'must', 'shall']:
                     context = self._get_context(line, match.start(1), match.end(1))
                     category = 'Parent/Guardian' if any(k in keyword.lower() for k in ['mother', 'father', 'parent', 'mum', 'dad', 'guardian', 'carer']) else 'Family member'
                     matches.append(PIIMatch(
