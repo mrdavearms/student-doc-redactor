@@ -22,23 +22,18 @@ class DocumentConverter:
         Returns:
             Tuple of (is_installed, message)
         """
-        try:
-            result = subprocess.run(
-                [self.soffice_path, '--version'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                return True, f"LibreOffice found: {result.stdout.strip()}"
-            else:
-                return False, "LibreOffice not responding correctly"
-        except FileNotFoundError:
-            return False, "LibreOffice not found. Please install via: brew install --cask libreoffice"
-        except subprocess.TimeoutExpired:
-            return False, "LibreOffice check timed out"
-        except Exception as e:
-            return False, f"Error checking LibreOffice: {str(e)}"
+        # First, just check if the file exists (fast)
+        if not Path(self.soffice_path).exists():
+            # Also check common alternative locations
+            alt_path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+            if Path(alt_path).exists():
+                self.soffice_path = alt_path
+                return True, "LibreOffice found"
+            return False, "LibreOffice not found. Install via: brew install --cask libreoffice"
+
+        # File exists, assume it's working
+        # (Running --version can be slow on first launch)
+        return True, "LibreOffice installed"
 
     def convert_to_pdf(self, input_file: Path, output_dir: Path) -> Tuple[bool, str, Path]:
         """
