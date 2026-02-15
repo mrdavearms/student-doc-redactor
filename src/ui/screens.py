@@ -21,18 +21,22 @@ def folder_selection_screen():
 
     # Folder selection
     st.markdown("#### Select Input Folder")
+
+    # Show helpful tip for getting folder path
+    st.info("💡 **How to get the folder path**: In Finder, right-click the folder → hold Option key → select 'Copy \"foldername\" as Pathname' → paste below")
+
+    # Quick sample folder button
+    sample_folder = "/Users/davidarmstrong/Antigravity/redaction tool/sample"
+    if st.button("📂 Use Sample Folder (Joe Bloggs)", use_container_width=True):
+        st.session_state.folder_path = Path(sample_folder)
+        st.rerun()
+
     folder_input = st.text_input(
         "Folder path containing student documents:",
-        value=st.session_state.folder_path or "",
+        value=str(st.session_state.folder_path) if st.session_state.folder_path else "",
         placeholder="/Users/username/Documents/Student_Docs",
-        help="Enter the full path to the folder containing PDF and Word documents"
+        help="Paste the full path to the folder containing PDF and Word documents"
     )
-
-    # Browse button helper
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        if st.button("📂 Browse", use_container_width=True):
-            st.info("💡 Tip: You can also paste the folder path directly in the field above")
 
     if folder_input and Path(folder_input).exists():
         st.session_state.folder_path = Path(folder_input)
