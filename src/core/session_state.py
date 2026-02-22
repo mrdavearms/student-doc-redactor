@@ -47,6 +47,10 @@ def init_session_state():
         st.session_state.log_content = ''
     if 'processing_complete' not in st.session_state:
         st.session_state.processing_complete = False
+    if 'verification_failures' not in st.session_state:
+        st.session_state.verification_failures = []
+    if 'ocr_warnings' not in st.session_state:
+        st.session_state.ocr_warnings = []
 
 def reset_session():
     """Reset all session state variables for processing a new folder"""

@@ -37,13 +37,13 @@ class PIIDetector:
     ADDRESS_PATTERN = r'\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory)\s+\d{4}'
 
     # Medicare number pattern
-    MEDICARE_PATTERN = r'\d{4}\s*\d{5}\s*\d{1}'
+    MEDICARE_PATTERN = r'\b\d{4}\s?\d{5}\s?\d\b'
 
     # Centrelink CRN pattern
     CRN_PATTERN = r'\b[A-Z0-9]{9}\b'
 
     # Student ID pattern (3 uppercase letters + digits)
-    STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d+\b'
+    STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d{3,}\b'
 
     # DOB label patterns (must precede date)
     DOB_LABELS = [
@@ -124,6 +124,9 @@ class PIIDetector:
         # Add fuzzy variations (common misspellings/variations)
         # For now, just exact matches - fuzzy logic can be added later
 
+        # Filter out variations too short to be reliable (min 3 chars)
+        # Always preserve the student's full name regardless of length
+        variations = [v for v in variations if len(v) >= 3 or v == self.student_name]
         return variations
 
     def detect_pii_in_text(self, text: str, page_num: int) -> List[PIIMatch]:
@@ -239,6 +242,8 @@ class PIIDetector:
     def _detect_medicare(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
         """Detect Medicare numbers"""
         matches = []
+        if 'medicare' not in line.lower():
+            return matches
         pattern = re.compile(self.MEDICARE_PATTERN)
         for match in pattern.finditer(line):
             context = self._get_context(line, match.start(), match.end())

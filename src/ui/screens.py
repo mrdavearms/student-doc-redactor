@@ -25,12 +25,6 @@ def folder_selection_screen():
     # Show helpful tip for getting folder path
     st.info("💡 **How to get the folder path**: In Finder, right-click the folder → hold Option key → select 'Copy \"foldername\" as Pathname' → paste below")
 
-    # Quick sample folder button
-    sample_folder = "/Users/davidarmstrong/Antigravity/redaction tool/sample"
-    if st.button("📂 Use Sample Folder (Joe Bloggs)", use_container_width=True):
-        st.session_state.folder_path = Path(sample_folder)
-        st.rerun()
-
     folder_input = st.text_input(
         "Folder path containing student documents:",
         value=str(st.session_state.folder_path) if st.session_state.folder_path else "",
@@ -196,8 +190,8 @@ def conversion_status_screen():
                 session_state.navigate_to('folder_selection')
         with col3:
             if st.button("Continue →", use_container_width=True, type="primary"):
-                # Extract text and detect PII
-                _process_documents_for_pii()
+                with st.spinner("Extracting text and detecting PII..."):
+                    _process_documents_for_pii()
                 session_state.navigate_to('document_review')
 
 
@@ -414,7 +408,8 @@ def final_confirmation_screen():
     with col3:
         disabled = (folder_action == "Cancel") if folder_action else False
         if st.button("✅ Create Redacted Documents", use_container_width=True, type="primary", disabled=disabled):
-            _perform_redaction(folder_action)
+            with st.spinner("Redacting documents..."):
+                _perform_redaction(folder_action)
             session_state.navigate_to('completion')
 
 
@@ -462,6 +457,16 @@ def _perform_redaction(folder_action):
             if st.session_state.user_selections.get(key, False):
                 selected_matches.append(match)
 
+        # Check for OCR pages — redaction won't work on image-only pages
+        ocr_pages = st.session_state.detected_pii.get(doc, {}).get('text_data', {}).get('ocr_pages', [])
+        ocr_item_count = sum(1 for m in selected_matches if m.page_num in ocr_pages)
+        if ocr_item_count > 0:
+            logger.add_flagged_file(
+                doc.name,
+                f"Contains {ocr_item_count} item(s) on image-only pages that could not be automatically redacted — manual review required"
+            )
+            st.session_state.ocr_warnings.append((doc.name, ocr_item_count))
+
         # Create redaction items
         redaction_items = []
         for match in selected_matches:
@@ -489,6 +494,24 @@ def _perform_redaction(folder_action):
         if success:
             successfully_redacted += 1
 
+            # Verify redaction worked — spot-check the first high-confidence non-OCR match
+            verify_candidate = next(
+                (m for m in selected_matches if m.confidence == 'high' and m.page_num not in ocr_pages),
+                None
+            )
+            if verify_candidate:
+                is_redacted, v_msg = redactor.verify_redaction(output_path, verify_candidate.text)
+                if not is_redacted:
+                    logger.add_flagged_file(
+                        doc.name,
+                        f"VERIFICATION FAILED: '{verify_candidate.text}' still found after redaction"
+                    )
+                    st.session_state.verification_failures.append((doc.name, verify_candidate.text))
+                    successfully_redacted -= 1
+        else:
+            logger.add_flagged_file(doc.name, f"Redaction failed: {message}")
+            st.session_state.verification_failures.append((doc.name, f"[Redaction error] {message}"))
+
     # Add flagged files to log
     for flagged_file in st.session_state.conversion_results.get('password_protected', []):
         logger.add_flagged_file(flagged_file.name, "Password protected (skipped)")
@@ -500,8 +523,8 @@ def _perform_redaction(folder_action):
     logger.set_totals(len(st.session_state.documents), successfully_redacted)
 
     # Generate and save log
-    log_path = logger.save_log()
     st.session_state.log_content = logger.generate_log()
+    logger.save_log()
     st.session_state.processing_complete = True
 
 
@@ -515,6 +538,16 @@ def completion_screen():
         return
 
     st.success(f"✓ Successfully processed documents!")
+
+    verification_failures = st.session_state.get('verification_failures', [])
+    ocr_warnings = st.session_state.get('ocr_warnings', [])
+
+    if verification_failures:
+        st.error(f"⚠️ {len(verification_failures)} document(s) failed redaction verification — the original text may still be present. Review the log and check these files manually.")
+
+    if ocr_warnings:
+        total_ocr_items = sum(count for _, count in ocr_warnings)
+        st.warning(f"⚠️ {total_ocr_items} item(s) across {len(ocr_warnings)} document(s) are on image-only (scanned) pages and could not be automatically redacted — manual review required.")
 
     # Show redacted folder
     st.markdown("#### Redacted Documents")

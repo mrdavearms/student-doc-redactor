@@ -24,11 +24,14 @@ class DocumentConverter:
         """
         # First, just check if the file exists (fast)
         if not Path(self.soffice_path).exists():
-            # Also check common alternative locations
-            alt_path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
-            if Path(alt_path).exists():
-                self.soffice_path = alt_path
-                return True, "LibreOffice found"
+            # Check alternative locations (Intel Mac Homebrew, app bundle)
+            for alt_path in [
+                "/usr/local/bin/soffice",  # Intel Mac Homebrew
+                "/Applications/LibreOffice.app/Contents/MacOS/soffice",  # App bundle
+            ]:
+                if Path(alt_path).exists():
+                    self.soffice_path = alt_path
+                    return True, "LibreOffice found"
             return False, "LibreOffice not found. Install via: brew install --cask libreoffice"
 
         # File exists, assume it's working

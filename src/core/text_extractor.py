@@ -54,18 +54,16 @@ class TextExtractor:
         }
 
         try:
-            doc = fitz.open(str(pdf_path))
-            result['total_pages'] = len(doc)
+            with fitz.open(str(pdf_path)) as doc:
+                result['total_pages'] = len(doc)
 
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                page_data = self._extract_page_text(page, page_num + 1)
-                result['pages'][page_num + 1] = page_data
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    page_data = self._extract_page_text(page, page_num + 1)
+                    result['pages'][page_num + 1] = page_data
 
-                if page_data['method'] == 'ocr':
-                    result['ocr_pages'].append(page_num + 1)
-
-            doc.close()
+                    if page_data['method'] == 'ocr':
+                        result['ocr_pages'].append(page_num + 1)
 
         except Exception as e:
             raise Exception(f"Error extracting text from PDF: {str(e)}")
