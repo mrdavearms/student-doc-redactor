@@ -3,10 +3,13 @@ Redaction Engine
 Permanently redacts PII from PDFs by removing underlying text and adding black boxes.
 """
 
+import io
 import fitz  # PyMuPDF
 from pathlib import Path
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
+from PIL import Image
+import pytesseract
 
 @dataclass
 class RedactionItem:
@@ -58,8 +61,11 @@ class PDFRedactor:
                 # Apply all redactions on this page
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-            # Save redacted document
-            doc.save(str(output_pdf), garbage=4, deflate=True)
+            # Strip metadata before saving
+            self._strip_metadata(doc)
+
+            # Save redacted document (clean=True removes incremental save data)
+            doc.save(str(output_pdf), garbage=4, deflate=True, clean=True)
             doc.close()
 
             return True, f"Successfully redacted {len(redaction_items)} items"
@@ -125,6 +131,68 @@ class PDFRedactor:
 
         except Exception as e:
             return False, f"Error verifying redaction: {str(e)}"
+
+    def _strip_metadata(self, doc: fitz.Document):
+        """Strip all identifying metadata from the PDF"""
+        doc.set_metadata({
+            "author": "",
+            "title": "",
+            "subject": "",
+            "creator": "",
+            "producer": "",
+            "keywords": "",
+            "creationDate": "",
+            "modDate": "",
+        })
+
+        # Remove XMP metadata
+        doc.del_xml_metadata()
+
+        # Remove embedded files
+        if hasattr(doc, 'embfile_count') and doc.embfile_count() > 0:
+            for name in list(doc.embfile_names()):
+                doc.embfile_del(name)
+
+    def verify_redaction_ocr(self, pdf_path: Path, redacted_texts: List[str]) -> Tuple[bool, List[str]]:
+        """
+        Verify redaction by rendering pages as images, OCR-ing them,
+        and checking that no redacted strings remain visible.
+
+        Args:
+            pdf_path: Path to the redacted PDF
+            redacted_texts: List of text strings that should have been redacted
+
+        Returns:
+            Tuple of (all_clean, list_of_failure_messages)
+        """
+        failures = []
+
+        try:
+            doc = fitz.open(str(pdf_path))
+
+            for page_idx in range(len(doc)):
+                page = doc[page_idx]
+
+                # Render page at 300 DPI for reliable OCR
+                pix = page.get_pixmap(dpi=300)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+
+                # OCR the rendered image
+                ocr_text = pytesseract.image_to_string(img).lower()
+
+                # Check each redacted string
+                for text in redacted_texts:
+                    if len(text) >= 3 and text.lower() in ocr_text:
+                        failures.append(
+                            f"Page {page_idx + 1}: '{text}' still visible after redaction"
+                        )
+
+            doc.close()
+
+        except Exception as e:
+            failures.append(f"OCR verification error: {str(e)}")
+
+        return (len(failures) == 0, failures)
 
     def create_redacted_copy(self, input_pdf: Path, output_folder: Path, redactions: List[RedactionItem]) -> Tuple[bool, str, Path]:
         """

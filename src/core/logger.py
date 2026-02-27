@@ -17,7 +17,7 @@ class LogEntry:
     line_num: int
     text: str
     category: str
-    confidence: str
+    confidence: float
     notes: str = ""
 
 class RedactionLogger:
@@ -81,7 +81,8 @@ class RedactionLogger:
             entries.sort(key=lambda e: (e.page_num, e.line_num))
 
             for entry in entries:
-                line = f"Page {entry.page_num}, Line {entry.line_num}: \"{entry.text}\" [{entry.category}] [{entry.confidence} confidence]"
+                conf_label = 'high' if entry.confidence >= 0.8 else ('medium' if entry.confidence >= 0.5 else 'low')
+                line = f"Page {entry.page_num}, Line {entry.line_num}: \"{entry.text}\" [{entry.category}] [{conf_label} confidence]"
                 lines.append(line)
 
                 if entry.notes:
@@ -132,10 +133,11 @@ class RedactionLogger:
         for entry in self.log_entries:
             category_counts[entry.category] = category_counts.get(entry.category, 0) + 1
 
-        # Count by confidence
+        # Count by confidence (bucket into high/medium/low)
         confidence_counts = {}
         for entry in self.log_entries:
-            confidence_counts[entry.confidence] = confidence_counts.get(entry.confidence, 0) + 1
+            label = 'high' if entry.confidence >= 0.8 else ('medium' if entry.confidence >= 0.5 else 'low')
+            confidence_counts[label] = confidence_counts.get(label, 0) + 1
 
         return {
             'total_redactions': len(self.log_entries),

@@ -193,7 +193,7 @@ class TestNameDetection:
         name_matches = _matches_for_category(matches, "Student name")
         assert len(name_matches) > 0
         for m in name_matches:
-            assert m.confidence == "high"
+            assert m.confidence >= 0.8
 
     def test_dotted_initial_format_detected(self):
         # "J. Smith" should be detected when present in text
@@ -291,7 +291,7 @@ class TestContextualNameDetection:
         parent_matches = _matches_for_category(matches, "Parent/Guardian (user-provided)")
         assert len(parent_matches) > 0
         for m in parent_matches:
-            assert m.confidence == "high"
+            assert m.confidence >= 0.8
 
     def test_user_provided_parent_name_case_insensitive(self):
         detector = PIIDetector("Tom Jones", parent_names=["Sandra Jones"])
@@ -307,7 +307,7 @@ class TestContextualNameDetection:
         family_matches = _matches_for_category(matches, "Family member (user-provided)")
         assert len(family_matches) > 0
         for m in family_matches:
-            assert m.confidence == "high"
+            assert m.confidence >= 0.8
 
     def test_keyword_without_following_name_does_not_crash(self):
         # A line that ends with the keyword and no name after it must not raise
@@ -353,7 +353,7 @@ class TestContextualNameDetection:
         parent_matches = _matches_for_category(matches, "Parent/Guardian")
         assert len(parent_matches) > 0
         for m in parent_matches:
-            assert m.confidence == "medium"
+            assert 0.5 <= m.confidence < 0.8
 
     def test_user_provided_parent_name_not_in_text_produces_no_match(self):
         detector = PIIDetector("Tom Jones", parent_names=["Sandra Jones"])

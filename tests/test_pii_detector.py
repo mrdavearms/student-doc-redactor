@@ -185,12 +185,12 @@ class TestStudentIDDetection:
         # Student is "Jane Bloggs", surname prefix = "FEN"
         matches = self._student_id_matches("FEN1234")
         assert len(matches) == 1
-        assert matches[0].confidence == 'high'
+        assert matches[0].confidence >= 0.8
 
     def test_non_matching_prefix_gives_medium_confidence(self):
         matches = self._student_id_matches("ZZZ9999")
         assert len(matches) == 1
-        assert matches[0].confidence == 'medium'
+        assert 0.5 <= matches[0].confidence < 0.8
 
 
 class TestDOBDetection:

@@ -12,11 +12,22 @@ class PIIMatch:
     """Represents a detected PII item"""
     text: str
     category: str
-    confidence: str  # 'high', 'medium', 'low'
+    confidence: float  # 0.0 to 1.0
     page_num: int
     line_num: int
     context: str  # Surrounding text for display
+    source: str = 'regex'  # Detection source: 'regex', 'presidio', 'gliner'
     bbox: Tuple[float, float, float, float] = None  # Bounding box coordinates (x0, y0, x1, y1)
+
+    @property
+    def confidence_label(self) -> str:
+        """Map numeric confidence to display label"""
+        if self.confidence >= 0.8:
+            return 'high'
+        elif self.confidence >= 0.5:
+            return 'medium'
+        else:
+            return 'low'
 
 class PIIDetector:
     """Detects PII in text using pattern matching and contextual analysis"""
@@ -183,7 +194,7 @@ class PIIDetector:
                 matches.append(PIIMatch(
                     text=match.group(),
                     category='Student name',
-                    confidence='high',
+                    confidence=0.95,
                     page_num=page_num,
                     line_num=line_num,
                     context=context
@@ -200,7 +211,7 @@ class PIIDetector:
                 matches.append(PIIMatch(
                     text=match.group(),
                     category='Phone number',
-                    confidence='high',
+                    confidence=0.95,
                     page_num=page_num,
                     line_num=line_num,
                     context=context
@@ -216,7 +227,7 @@ class PIIDetector:
             matches.append(PIIMatch(
                 text=match.group(),
                 category='Email address',
-                confidence='high',
+                confidence=0.95,
                 page_num=page_num,
                 line_num=line_num,
                 context=context
@@ -232,7 +243,7 @@ class PIIDetector:
             matches.append(PIIMatch(
                 text=match.group(),
                 category='Address',
-                confidence='high',
+                confidence=0.95,
                 page_num=page_num,
                 line_num=line_num,
                 context=context
@@ -250,7 +261,7 @@ class PIIDetector:
             matches.append(PIIMatch(
                 text=match.group(),
                 category='Medicare number',
-                confidence='high',
+                confidence=0.95,
                 page_num=page_num,
                 line_num=line_num,
                 context=context
@@ -268,7 +279,7 @@ class PIIDetector:
                 matches.append(PIIMatch(
                     text=match.group(),
                     category='Centrelink CRN',
-                    confidence='medium',
+                    confidence=0.65,
                     page_num=page_num,
                     line_num=line_num,
                     context=context
@@ -284,7 +295,7 @@ class PIIDetector:
             id_text = match.group()
             surname_prefix = self.student_name.split()[-1][:3].upper() if ' ' in self.student_name else self.student_name[:3].upper()
 
-            confidence = 'high' if id_text[:3] == surname_prefix else 'medium'
+            confidence = 0.95 if id_text[:3] == surname_prefix else 0.65
             context = self._get_context(line, match.start(), match.end())
             matches.append(PIIMatch(
                 text=match.group(),
@@ -312,7 +323,7 @@ class PIIDetector:
                     matches.append(PIIMatch(
                         text=match.group(),
                         category='Date of birth',
-                        confidence='high',
+                        confidence=0.95,
                         page_num=page_num,
                         line_num=line_num,
                         context=context
@@ -337,7 +348,7 @@ class PIIDetector:
                     matches.append(PIIMatch(
                         text=name,
                         category=category,
-                        confidence='medium',
+                        confidence=0.65,
                         page_num=page_num,
                         line_num=line_num,
                         context=context
@@ -351,7 +362,7 @@ class PIIDetector:
                 matches.append(PIIMatch(
                     text=match.group(),
                     category='Parent/Guardian (user-provided)',
-                    confidence='high',
+                    confidence=0.95,
                     page_num=page_num,
                     line_num=line_num,
                     context=context
@@ -364,7 +375,7 @@ class PIIDetector:
                 matches.append(PIIMatch(
                     text=match.group(),
                     category='Family member (user-provided)',
-                    confidence='high',
+                    confidence=0.95,
                     page_num=page_num,
                     line_num=line_num,
                     context=context

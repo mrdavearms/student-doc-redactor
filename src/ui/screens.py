@@ -10,6 +10,7 @@ from src.core import session_state
 from src.core.document_converter import DocumentConverter
 from src.core.text_extractor import TextExtractor
 from src.core.pii_detector import PIIDetector, PIIMatch
+from src.core.pii_orchestrator import PIIOrchestrator
 from src.core.redactor import PDFRedactor, RedactionItem
 from src.core.logger import RedactionLogger, LogEntry
 import subprocess
@@ -205,10 +206,10 @@ def _process_documents_for_pii():
     parent_list = [n.strip() for n in st.session_state.parent_names.split(',') if n.strip()]
     family_list = [n.strip() for n in st.session_state.family_names.split(',') if n.strip()]
 
-    detector = PIIDetector(
+    detector = PIIOrchestrator(
         student_name=st.session_state.student_name,
         parent_names=parent_list,
-        family_names=family_list
+        family_names=family_list,
     )
 
     extractor = TextExtractor()
@@ -293,7 +294,7 @@ def document_review_screen():
                 'high': '🟢',
                 'medium': '🟡',
                 'low': '🔴'
-            }.get(match.confidence, '⚪')
+            }.get(match.confidence_label, '⚪')
 
             # Create checkbox with details
             col1, col2 = st.columns([1, 20])
@@ -307,7 +308,7 @@ def document_review_screen():
 
             with col2:
                 st.markdown(f"""
-                **Page {match.page_num}, Line {match.line_num}** {conf_color} {match.confidence.title()} confidence
+                **Page {match.page_num}, Line {match.line_num}** {conf_color} {match.confidence_label.title()} confidence
 
                 Category: `{match.category}`
 
@@ -494,19 +495,16 @@ def _perform_redaction(folder_action):
         if success:
             successfully_redacted += 1
 
-            # Verify redaction worked — spot-check the first high-confidence non-OCR match
-            verify_candidate = next(
-                (m for m in selected_matches if m.confidence == 'high' and m.page_num not in ocr_pages),
-                None
-            )
-            if verify_candidate:
-                is_redacted, v_msg = redactor.verify_redaction(output_path, verify_candidate.text)
-                if not is_redacted:
-                    logger.add_flagged_file(
-                        doc.name,
-                        f"VERIFICATION FAILED: '{verify_candidate.text}' still found after redaction"
+            # Verify redaction with OCR — render pages as images and check no redacted text is visible
+            redacted_texts = [m.text for m in selected_matches if m.page_num not in ocr_pages]
+            if redacted_texts:
+                all_clean, ocr_failures = redactor.verify_redaction_ocr(output_path, redacted_texts)
+                if not all_clean:
+                    for failure_msg in ocr_failures:
+                        logger.add_flagged_file(doc.name, f"VERIFICATION FAILED: {failure_msg}")
+                    st.session_state.verification_failures.append(
+                        (doc.name, f"{len(ocr_failures)} item(s) still visible after redaction")
                     )
-                    st.session_state.verification_failures.append((doc.name, verify_candidate.text))
                     successfully_redacted -= 1
         else:
             logger.add_flagged_file(doc.name, f"Redaction failed: {message}")
