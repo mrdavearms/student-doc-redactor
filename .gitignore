@@ -35,9 +35,14 @@ wheels/
 .DS_Store
 Thumbs.db
 
+# Node / Electron
+node_modules/
+
 # Application specific
 *.log
 redacted/
+sample/redacted_*/
+sample/redaction_log.txt
 .temp_converted/
 
 # Sensitive data (don't commit real student documents)

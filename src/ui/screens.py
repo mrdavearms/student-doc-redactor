@@ -1,30 +1,28 @@
 """
 Streamlit UI Screens
-All 5 screens for the Student Doc Redactor application.
+Thin UI layer — all business logic delegated to services.
 """
 
 import streamlit as st
 from pathlib import Path
-import time
-from src.core import session_state
-from src.core.document_converter import DocumentConverter
-from src.core.text_extractor import TextExtractor
-from src.core.pii_detector import PIIDetector, PIIMatch
-from src.core.pii_orchestrator import PIIOrchestrator
-from src.core.redactor import PDFRedactor, RedactionItem
-from src.core.logger import RedactionLogger, LogEntry
 import subprocess
+from src.core import session_state
+from src.core.pii_detector import PIIMatch
+from src.services.conversion_service import ConversionService
+from src.services.detection_service import DetectionService
+from src.services.redaction_service import RedactionService, RedactionRequest
+
 
 def folder_selection_screen():
     """Screen 1: Folder Selection and Setup"""
 
-    st.markdown("### 📁 Step 1: Select Folder and Enter Student Details")
+    st.markdown("### Step 1: Select Folder and Enter Student Details")
 
     # Folder selection
     st.markdown("#### Select Input Folder")
 
-    # Show helpful tip for getting folder path
-    st.info("💡 **How to get the folder path**: In Finder, right-click the folder → hold Option key → select 'Copy \"foldername\" as Pathname' → paste below")
+    st.info("**How to get the folder path**: In Finder, right-click the folder "
+            "-> hold Option key -> select 'Copy \"foldername\" as Pathname' -> paste below")
 
     folder_input = st.text_input(
         "Folder path containing student documents:",
@@ -35,9 +33,9 @@ def folder_selection_screen():
 
     if folder_input and Path(folder_input).exists():
         st.session_state.folder_path = Path(folder_input)
-        st.success(f"✓ Folder found: {folder_input}")
+        st.success(f"Folder found: {folder_input}")
     elif folder_input:
-        st.error("❌ Folder not found. Please check the path.")
+        st.error("Folder not found. Please check the path.")
 
     st.divider()
 
@@ -80,168 +78,141 @@ def folder_selection_screen():
     )
 
     if not can_proceed:
-        st.warning("⚠️ Please select a valid folder and enter the student's name to continue")
+        st.warning("Please select a valid folder and enter the student's name to continue")
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("🚀 Start Processing", disabled=not can_proceed, use_container_width=True, type="primary"):
-            # Navigate to conversion status
+        if st.button("Start Processing", disabled=not can_proceed, use_container_width=True, type="primary"):
             session_state.navigate_to('conversion_status')
 
 
 def conversion_status_screen():
     """Screen 2: Conversion Status"""
 
-    st.markdown("### ⚙️ Step 2: Document Conversion")
+    st.markdown("### Step 2: Document Conversion")
 
-    # Check dependencies
+    # Check dependencies via service
     st.markdown("#### Checking Dependencies...")
-    converter = DocumentConverter()
-
-    libreoffice_ok, libreoffice_msg = converter.check_libreoffice_installed()
+    service = ConversionService()
+    deps = service.check_dependencies()
 
     col1, col2 = st.columns(2)
     with col1:
-        if libreoffice_ok:
-            st.success(f"✓ LibreOffice: {libreoffice_msg}")
+        if deps.libreoffice_ok:
+            st.success(f"LibreOffice: {deps.libreoffice_message}")
         else:
-            st.error(f"❌ LibreOffice: {libreoffice_msg}")
-
+            st.error(f"LibreOffice: {deps.libreoffice_message}")
     with col2:
-        extractor = TextExtractor()
-        if extractor.tesseract_available:
-            st.success("✓ Tesseract OCR: Available")
+        if deps.tesseract_ok:
+            st.success("Tesseract OCR: Available")
         else:
-            st.warning("⚠️ Tesseract OCR: Not available (OCR features disabled)")
+            st.warning("Tesseract OCR: Not available (OCR features disabled)")
 
-    if not libreoffice_ok:
+    if not deps.can_convert_word:
         st.error("Cannot proceed without LibreOffice. Please install it first.")
-        if st.button("← Back"):
+        if st.button("Back"):
             session_state.navigate_to('folder_selection')
         return
 
     st.divider()
 
-    # Process documents
+    # Process documents via service
     st.markdown("#### Processing Documents...")
 
     with st.spinner("Converting Word documents and checking PDFs..."):
-        results = converter.process_folder(st.session_state.folder_path)
+        results = service.process_folder(st.session_state.folder_path)
         st.session_state.conversion_results = results
 
     # Display results
     st.markdown("#### Conversion Results")
 
-    total_files = (
-        len(results['pdf_files'])
-        + len(results['converted_files'])
-        + len(results['failed_conversions'])
-        + len(results['password_protected'])
-    )
-
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Files", total_files)
+        st.metric("Total Files", results.total_files)
     with col2:
-        st.metric("PDFs Ready", len(results['pdf_files']) + len(results['converted_files']))
+        st.metric("PDFs Ready", results.processable_count)
     with col3:
-        st.metric("Converted", len(results['converted_files']))
+        st.metric("Converted", len(results.converted_files))
     with col4:
-        flagged_count = len(results['failed_conversions']) + len(results['password_protected'])
-        st.metric("Flagged", flagged_count)
+        st.metric("Flagged", results.flagged_count)
 
     # Show details
-    if results['pdf_files']:
-        with st.expander(f"✓ Original PDFs ({len(results['pdf_files'])})"):
-            for pdf in results['pdf_files']:
-                st.text(f"  ✓ {pdf.name}")
+    if results.pdf_files:
+        with st.expander(f"Original PDFs ({len(results.pdf_files)})"):
+            for pdf in results.pdf_files:
+                st.text(f"  {pdf.name}")
 
-    if results['converted_files']:
-        with st.expander(f"✓ Converted from Word ({len(results['converted_files'])})"):
-            for pdf in results['converted_files']:
-                st.text(f"  ✓ {pdf.name}")
+    if results.converted_files:
+        with st.expander(f"Converted from Word ({len(results.converted_files)})"):
+            for pdf in results.converted_files:
+                st.text(f"  {pdf.name}")
 
-    if results['password_protected']:
-        with st.expander(f"⚠️ Password Protected ({len(results['password_protected'])})", expanded=True):
-            st.warning("These files are password protected and will be skipped. Please unlock them manually if needed.")
-            for pdf in results['password_protected']:
-                st.text(f"  ⚠️ {pdf.name}")
+    if results.password_protected:
+        with st.expander(f"Password Protected ({len(results.password_protected)})", expanded=True):
+            st.warning("These files are password protected and will be skipped. "
+                       "Please unlock them manually if needed.")
+            for pdf in results.password_protected:
+                st.text(f"  {pdf.name}")
 
-    if results['failed_conversions']:
-        with st.expander(f"❌ Failed Conversions ({len(results['failed_conversions'])})", expanded=True):
+    if results.failed_conversions:
+        with st.expander(f"Failed Conversions ({len(results.failed_conversions)})", expanded=True):
             st.error("These files could not be converted and will be skipped.")
-            for file_path, reason in results['failed_conversions']:
-                st.text(f"  ❌ {file_path.name}: {reason}")
+            for file_path, reason in results.failed_conversions:
+                st.text(f"  {file_path.name}: {reason}")
 
     st.divider()
 
     # Continue button
-    processable_files = len(results['pdf_files']) + len(results['converted_files'])
-
-    if processable_files == 0:
+    if results.processable_count == 0:
         st.error("No files available for processing. Please check your folder and try again.")
-        if st.button("← Back to Folder Selection"):
+        if st.button("Back to Folder Selection"):
             session_state.navigate_to('folder_selection')
     else:
-        st.info(f"✓ Ready to process {processable_files} documents")
+        st.info(f"Ready to process {results.processable_count} documents")
 
         col1, col2, col3 = st.columns([1, 2, 1])
         with col1:
-            if st.button("← Back", use_container_width=True):
+            if st.button("Back", use_container_width=True):
                 session_state.navigate_to('folder_selection')
         with col3:
-            if st.button("Continue →", use_container_width=True, type="primary"):
+            if st.button("Continue", use_container_width=True, type="primary"):
                 with st.spinner("Extracting text and detecting PII..."):
-                    _process_documents_for_pii()
+                    _run_detection()
                 session_state.navigate_to('document_review')
 
 
-def _process_documents_for_pii():
-    """Helper function to extract text and detect PII"""
-
+def _run_detection():
+    """Run PII detection via service and store results in session state."""
     results = st.session_state.conversion_results
-    all_pdfs = results['pdf_files'] + results['converted_files']
+    all_pdfs = results.all_processable_pdfs
 
-    # Initialize detector
     parent_list = [n.strip() for n in st.session_state.parent_names.split(',') if n.strip()]
     family_list = [n.strip() for n in st.session_state.family_names.split(',') if n.strip()]
 
-    detector = PIIOrchestrator(
+    service = DetectionService(
         student_name=st.session_state.student_name,
         parent_names=parent_list,
         family_names=family_list,
     )
 
-    extractor = TextExtractor()
+    detection_results = service.detect_all(all_pdfs)
 
-    # Process each PDF
-    detected_pii = {}
-
-    for pdf_path in all_pdfs:
-        # Extract text
-        text_data = extractor.extract_text_from_pdf(pdf_path)
-
-        # Detect PII in each page
-        pii_matches = []
-        for page_num, page_data in text_data['pages'].items():
-            matches = detector.detect_pii_in_text(page_data['text'], page_num)
-            pii_matches.extend(matches)
-
-        # Store results
-        detected_pii[pdf_path] = {
-            'matches': pii_matches,
-            'text_data': text_data
+    # Store in session state (convert DetectionResults to the dict format screens expect)
+    st.session_state.detected_pii = {
+        doc: {
+            'matches': doc_pii.matches,
+            'text_data': doc_pii.text_data,
         }
-
-    st.session_state.detected_pii = detected_pii
-    st.session_state.documents = all_pdfs
+        for doc, doc_pii in detection_results.pii_by_document.items()
+    }
+    st.session_state.documents = detection_results.documents
     st.session_state.current_doc_index = 0
 
 
 def document_review_screen():
     """Screen 3: Document Review"""
 
-    st.markdown("### 📋 Step 3: Review Detected PII")
+    st.markdown("### Step 3: Review Detected PII")
 
     if not st.session_state.documents:
         st.error("No documents to review")
@@ -255,26 +226,26 @@ def document_review_screen():
     st.progress((current_idx + 1) / total_docs, text=f"Document {current_idx + 1} of {total_docs}")
 
     # Document name
-    st.markdown(f"#### 📄 {current_doc.name}")
+    st.markdown(f"#### {current_doc.name}")
 
     # Get PII matches for current document
     doc_data = st.session_state.detected_pii.get(current_doc, {})
     matches = doc_data.get('matches', [])
 
     if not matches:
-        st.info("✓ No PII detected in this document")
+        st.info("No PII detected in this document")
     else:
         st.markdown(f"**Found {len(matches)} potential PII items**")
 
         # Select/Deselect all buttons
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("✓ Select All", use_container_width=True):
+            if st.button("Select All", use_container_width=True):
                 for i in range(len(matches)):
                     st.session_state.user_selections[f"{current_doc}_{i}"] = True
                 st.rerun()
         with col2:
-            if st.button("✗ Deselect All", use_container_width=True):
+            if st.button("Deselect All", use_container_width=True):
                 for i in range(len(matches)):
                     st.session_state.user_selections[f"{current_doc}_{i}"] = False
                 st.rerun()
@@ -285,18 +256,15 @@ def document_review_screen():
         for idx, match in enumerate(matches):
             key = f"{current_doc}_{idx}"
 
-            # Default to checked
             if key not in st.session_state.user_selections:
                 st.session_state.user_selections[key] = True
 
-            # Confidence color
             conf_color = {
                 'high': '🟢',
                 'medium': '🟡',
                 'low': '🔴'
             }.get(match.confidence_label, '⚪')
 
-            # Create checkbox with details
             col1, col2 = st.columns([1, 20])
             with col1:
                 checked = st.checkbox(
@@ -322,7 +290,7 @@ def document_review_screen():
 
     with col1:
         if current_idx > 0:
-            if st.button("← Previous Document", use_container_width=True):
+            if st.button("Previous Document", use_container_width=True):
                 st.session_state.current_doc_index -= 1
                 st.rerun()
 
@@ -332,18 +300,18 @@ def document_review_screen():
 
     with col3:
         if current_idx < total_docs - 1:
-            if st.button("Next Document →", use_container_width=True, type="primary"):
+            if st.button("Next Document", use_container_width=True, type="primary"):
                 st.session_state.current_doc_index += 1
                 st.rerun()
         else:
-            if st.button("Review Summary →", use_container_width=True, type="primary"):
+            if st.button("Review Summary", use_container_width=True, type="primary"):
                 session_state.navigate_to('final_confirmation')
 
 
 def final_confirmation_screen():
     """Screen 4: Final Confirmation"""
 
-    st.markdown("### ✅ Step 4: Final Confirmation")
+    st.markdown("### Step 4: Final Confirmation")
 
     st.markdown("#### Ready to create redacted documents")
 
@@ -373,21 +341,20 @@ def final_confirmation_screen():
 
     if category_counts:
         for category, count in sorted(category_counts.items()):
-            st.text(f"  • {category}: {count}")
+            st.text(f"  {category}: {count}")
     else:
         st.info("No items selected for redaction")
 
     st.divider()
 
-    # Warning
-    st.warning("⚠️ This action cannot be undone. Original files will not be modified.")
+    st.warning("This action cannot be undone. Original files will not be modified.")
 
     # Check for existing redacted folder
     redacted_folder = st.session_state.folder_path / "redacted"
     folder_action = None
 
     if redacted_folder.exists():
-        st.info("📁 A 'redacted' folder already exists")
+        st.info("A 'redacted' folder already exists")
         folder_action = st.radio(
             "Choose an action:",
             ["Overwrite existing folder", "Create new folder (redacted_2)", "Cancel"],
@@ -399,161 +366,83 @@ def final_confirmation_screen():
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col1:
-        if st.button("← Back to Review", use_container_width=True):
+        if st.button("Back to Review", use_container_width=True):
             session_state.navigate_to('document_review')
 
     with col2:
-        if st.button("❌ Cancel", use_container_width=True):
+        if st.button("Cancel", use_container_width=True):
             session_state.navigate_to('folder_selection')
 
     with col3:
         disabled = (folder_action == "Cancel") if folder_action else False
-        if st.button("✅ Create Redacted Documents", use_container_width=True, type="primary", disabled=disabled):
+        if st.button("Create Redacted Documents", use_container_width=True, type="primary", disabled=disabled):
             with st.spinner("Redacting documents..."):
-                _perform_redaction(folder_action)
+                _run_redaction(folder_action)
             session_state.navigate_to('completion')
 
 
-def _perform_redaction(folder_action):
-    """Helper function to perform actual redaction"""
+def _run_redaction(folder_action_label):
+    """Run redaction via service and store results in session state."""
+    # Map UI label to service action
+    action_map = {
+        "Overwrite existing folder": "overwrite",
+        "Create new folder (redacted_2)": "new",
+        None: None,
+    }
+    folder_action = action_map.get(folder_action_label)
 
-    # Determine output folder
-    redacted_folder = st.session_state.folder_path / "redacted"
+    service = RedactionService()
+    request = RedactionRequest(
+        folder_path=st.session_state.folder_path,
+        student_name=st.session_state.student_name,
+        documents=st.session_state.documents,
+        detected_pii=st.session_state.detected_pii,
+        user_selections=st.session_state.user_selections,
+        folder_action=folder_action,
+    )
 
-    if folder_action == "Overwrite existing folder":
-        # Delete existing folder
-        import shutil
-        if redacted_folder.exists():
-            shutil.rmtree(redacted_folder)
-        redacted_folder.mkdir()
-    elif folder_action == "Create new folder (redacted_2)":
-        # Find next available number
-        counter = 2
-        while (st.session_state.folder_path / f"redacted_{counter}").exists():
-            counter += 1
-        redacted_folder = st.session_state.folder_path / f"redacted_{counter}"
-        redacted_folder.mkdir()
-    else:
-        # No existing folder
-        redacted_folder.mkdir(exist_ok=True)
+    results = service.execute(request)
 
-    st.session_state.redacted_folder = redacted_folder
-
-    # Initialize logger
-    logger = RedactionLogger(st.session_state.folder_path, st.session_state.student_name)
-
-    # Initialize redactor
-    redactor = PDFRedactor()
-
-    # Process each document
-    successfully_redacted = 0
-
-    for doc in st.session_state.documents:
-        matches = st.session_state.detected_pii.get(doc, {}).get('matches', [])
-
-        # Filter to only selected items
-        selected_matches = []
-        for idx, match in enumerate(matches):
-            key = f"{doc}_{idx}"
-            if st.session_state.user_selections.get(key, False):
-                selected_matches.append(match)
-
-        # Check for OCR pages — redaction won't work on image-only pages
-        ocr_pages = st.session_state.detected_pii.get(doc, {}).get('text_data', {}).get('ocr_pages', [])
-        ocr_item_count = sum(1 for m in selected_matches if m.page_num in ocr_pages)
-        if ocr_item_count > 0:
-            logger.add_flagged_file(
-                doc.name,
-                f"Contains {ocr_item_count} item(s) on image-only pages that could not be automatically redacted — manual review required"
-            )
-            st.session_state.ocr_warnings.append((doc.name, ocr_item_count))
-
-        # Create redaction items
-        redaction_items = []
-        for match in selected_matches:
-            redaction_items.append(RedactionItem(
-                page_num=match.page_num,
-                text=match.text,
-                bbox=match.bbox
-            ))
-
-            # Add to log
-            logger.add_entry(LogEntry(
-                document_name=doc.name,
-                output_name=f"{doc.stem}_redacted.pdf",
-                page_num=match.page_num,
-                line_num=match.line_num,
-                text=match.text,
-                category=match.category,
-                confidence=match.confidence
-            ))
-
-        # Perform redaction
-        output_path = redacted_folder / f"{doc.stem}_redacted.pdf"
-        success, message = redactor.redact_pdf(doc, output_path, redaction_items)
-
-        if success:
-            successfully_redacted += 1
-
-            # Verify redaction with OCR — render pages as images and check no redacted text is visible
-            redacted_texts = [m.text for m in selected_matches if m.page_num not in ocr_pages]
-            if redacted_texts:
-                all_clean, ocr_failures = redactor.verify_redaction_ocr(output_path, redacted_texts)
-                if not all_clean:
-                    for failure_msg in ocr_failures:
-                        logger.add_flagged_file(doc.name, f"VERIFICATION FAILED: {failure_msg}")
-                    st.session_state.verification_failures.append(
-                        (doc.name, f"{len(ocr_failures)} item(s) still visible after redaction")
-                    )
-                    successfully_redacted -= 1
-        else:
-            logger.add_flagged_file(doc.name, f"Redaction failed: {message}")
-            st.session_state.verification_failures.append((doc.name, f"[Redaction error] {message}"))
-
-    # Add flagged files to log
-    for flagged_file in st.session_state.conversion_results.get('password_protected', []):
-        logger.add_flagged_file(flagged_file.name, "Password protected (skipped)")
-
-    for file_path, reason in st.session_state.conversion_results.get('failed_conversions', []):
-        logger.add_flagged_file(file_path.name, reason)
-
-    # Set totals
-    logger.set_totals(len(st.session_state.documents), successfully_redacted)
-
-    # Generate and save log
-    st.session_state.log_content = logger.generate_log()
-    logger.save_log()
+    # Store results in session state
+    st.session_state.redacted_folder = results.redacted_folder
+    st.session_state.log_content = results.log_content
+    st.session_state.verification_failures = results.verification_failures
+    st.session_state.ocr_warnings = results.ocr_warnings
     st.session_state.processing_complete = True
 
 
 def completion_screen():
     """Screen 5: Completion"""
 
-    st.markdown("### 🎉 Step 5: Processing Complete")
+    st.markdown("### Step 5: Processing Complete")
 
     if not st.session_state.processing_complete:
         st.error("Processing not complete")
         return
 
-    st.success(f"✓ Successfully processed documents!")
+    st.success("Successfully processed documents!")
 
     verification_failures = st.session_state.get('verification_failures', [])
     ocr_warnings = st.session_state.get('ocr_warnings', [])
 
     if verification_failures:
-        st.error(f"⚠️ {len(verification_failures)} document(s) failed redaction verification — the original text may still be present. Review the log and check these files manually.")
+        st.error(f"{len(verification_failures)} document(s) failed redaction verification "
+                 "- the original text may still be present. "
+                 "Review the log and check these files manually.")
 
     if ocr_warnings:
         total_ocr_items = sum(count for _, count in ocr_warnings)
-        st.warning(f"⚠️ {total_ocr_items} item(s) across {len(ocr_warnings)} document(s) are on image-only (scanned) pages and could not be automatically redacted — manual review required.")
+        st.warning(f"{total_ocr_items} item(s) across {len(ocr_warnings)} document(s) "
+                   "are on image-only (scanned) pages and could not be automatically "
+                   "redacted - manual review required.")
 
     # Show redacted folder
     st.markdown("#### Redacted Documents")
-    st.info(f"📁 Saved to: `{st.session_state.redacted_folder}`")
+    st.info(f"Saved to: `{st.session_state.redacted_folder}`")
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("📂 Open Redacted Folder", use_container_width=True):
+        if st.button("Open Redacted Folder", use_container_width=True):
             subprocess.run(['open', str(st.session_state.redacted_folder)])
 
     st.divider()
@@ -561,7 +450,7 @@ def completion_screen():
     # Display log
     st.markdown("#### Redaction Log")
 
-    with st.expander("📜 View Full Log", expanded=True):
+    with st.expander("View Full Log", expanded=True):
         st.code(st.session_state.log_content, language=None)
 
     st.divider()
@@ -569,6 +458,6 @@ def completion_screen():
     # Process another folder
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("🔄 Process Another Folder", use_container_width=True, type="primary"):
+        if st.button("Process Another Folder", use_container_width=True, type="primary"):
             session_state.reset_session()
             st.rerun()

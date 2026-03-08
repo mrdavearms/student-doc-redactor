@@ -1,0 +1,165 @@
+import { useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { FolderOpen, User, Users, ArrowRight } from 'lucide-react';
+import { useStore } from '../store';
+import { api } from '../api';
+
+export default function FolderSelection() {
+  const {
+    folderPath, studentName, parentNames, familyNames,
+    folderValid,
+    setFolderPath, setStudentName, setParentNames, setFamilyNames,
+    setFolderValid, navigateTo,
+  } = useStore();
+
+  const [validating, setValidating] = useState(false);
+
+  const validateFolder = useCallback(async (path: string) => {
+    setFolderPath(path);
+    if (!path.trim()) {
+      setFolderValid(false);
+      return;
+    }
+    setValidating(true);
+    try {
+      const res = await api.validateFolder(path.trim());
+      setFolderValid(res.exists && res.is_directory);
+    } catch {
+      setFolderValid(false);
+    } finally {
+      setValidating(false);
+    }
+  }, [setFolderPath, setFolderValid]);
+
+  const canProceed = folderValid && studentName.trim().length > 0;
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-2xl font-semibold text-slate-800">Select Folder & Student Details</h2>
+        <p className="text-slate-500 mt-1">Choose the folder containing student documents and enter identifying information.</p>
+      </div>
+
+      {/* Folder selection */}
+      <motion.section
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="bg-white rounded-xl border border-slate-200 p-6 space-y-4"
+      >
+        <div className="flex items-center gap-2 text-slate-700 font-medium">
+          <FolderOpen size={18} className="text-primary-500" />
+          Input Folder
+        </div>
+
+        <p className="text-xs text-slate-400">
+          In Finder, right-click the folder → hold Option → select "Copy as Pathname" → paste below.
+        </p>
+
+        <input
+          type="text"
+          value={folderPath}
+          onChange={(e) => validateFolder(e.target.value)}
+          placeholder="/Users/username/Documents/Student_Docs"
+          className={`
+            w-full px-4 py-2.5 rounded-lg border text-sm transition-colors
+            focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400
+            ${folderValid ? 'border-emerald-300 bg-emerald-50/50' : folderPath ? 'border-red-300 bg-red-50/30' : 'border-slate-200'}
+          `}
+        />
+
+        {validating && <p className="text-xs text-slate-400">Checking folder...</p>}
+        {!validating && folderPath && folderValid && (
+          <p className="text-xs text-emerald-600">Folder found</p>
+        )}
+        {!validating && folderPath && !folderValid && (
+          <p className="text-xs text-red-500">Folder not found — check the path</p>
+        )}
+      </motion.section>
+
+      {/* Student details */}
+      <motion.section
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="bg-white rounded-xl border border-slate-200 p-6 space-y-5"
+      >
+        <div className="flex items-center gap-2 text-slate-700 font-medium">
+          <User size={18} className="text-primary-500" />
+          Student Information
+        </div>
+
+        <div>
+          <label className="block text-sm text-slate-600 mb-1.5">
+            Student full name <span className="text-red-400">*</span>
+          </label>
+          <input
+            type="text"
+            value={studentName}
+            onChange={(e) => setStudentName(e.target.value)}
+            placeholder="e.g., John Smith"
+            className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm text-slate-600 mb-1.5">
+              <Users size={14} className="inline mr-1 text-slate-400" />
+              Parent/Guardian names
+            </label>
+            <input
+              type="text"
+              value={parentNames}
+              onChange={(e) => setParentNames(e.target.value)}
+              placeholder="Jane Smith, Robert Smith"
+              className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated</p>
+          </div>
+
+          <div>
+            <label className="block text-sm text-slate-600 mb-1.5">
+              <Users size={14} className="inline mr-1 text-slate-400" />
+              Other family members
+            </label>
+            <input
+              type="text"
+              value={familyNames}
+              onChange={(e) => setFamilyNames(e.target.value)}
+              placeholder="Emma Smith, Tom Smith"
+              className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated</p>
+          </div>
+        </div>
+      </motion.section>
+
+      {/* Warning + proceed */}
+      {!canProceed && (
+        <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
+          Please select a valid folder and enter the student's name to continue.
+        </p>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          disabled={!canProceed}
+          onClick={() => navigateTo('conversion_status')}
+          className={`
+            flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
+            ${canProceed
+              ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow'
+              : 'bg-slate-100 text-slate-300 cursor-not-allowed'
+            }
+          `}
+        >
+          Start Processing <ArrowRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
