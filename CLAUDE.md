@@ -6,8 +6,8 @@
 
 A local Mac Streamlit app that redacts PII from student assessment PDFs and Word documents. Built for Australian teachers and school psychologists. All processing is local — no internet, no cloud services at runtime.
 
-- **Repo**: https://gitlab.com/davearmswork/bulk-redaction-tool
-- **Branches**: `test` (development) → `main` (stable). Always push to `test` first.
+- **Repo**: https://github.com/mrdavearms/student-doc-redactor (primary) · https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
+- **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
 - **Run**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `source venv/bin/activate && pytest tests/ -v` (142 tests, ~30s)
 - **Python**: 3.13+ (required for spaCy compatibility — the `venv/` dir uses 3.13, `venv_old/` is a legacy 3.14 venv that can be ignored)
@@ -237,7 +237,7 @@ Run with output: `pytest tests/ -v -s`
 - **Signature detection**: Listed in roadmap, not implemented.
 - **Batch processing** (multiple students at once): Not implemented.
 - **`venv_old/`**: Legacy venv from Python 3.14 era. Not used. Can be deleted once confirmed stable on 3.13 venv.
-- **`GITHUB_SETUP.md`, `GIT_WORKFLOW.md`, `FINAL_SUMMARY.md`**: Legacy docs from early development. Outdated — they reference GitHub rather than GitLab. README.md is now the authoritative documentation.
+- **`GITHUB_SETUP.md`, `GIT_WORKFLOW.md`, `FINAL_SUMMARY.md`**: Legacy docs from early development. Outdated — may reference implementation details that have changed. README.md is now the authoritative user documentation.
 
 ---
 
