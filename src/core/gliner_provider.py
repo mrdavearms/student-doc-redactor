@@ -23,6 +23,8 @@ GLINER_CATEGORY_MAP = {
 }
 
 # Entity labels to request from GLiNER
+# NOTE: "date" and "location" are intentionally excluded — general meeting dates
+# and suburbs are not PII in this context. Only "date of birth" is relevant.
 ENTITY_LABELS = [
     "person",
     "address",
@@ -30,15 +32,13 @@ ENTITY_LABELS = [
     "email",
     "date of birth",
     "identification number",
-    "date",
-    "location",
 ]
 
 
 class GLiNERDetector:
     """Wraps GLiNER zero-shot NER for PII detection."""
 
-    def __init__(self, model_name: str = "urchade/gliner_multi_pii-v1", threshold: float = 0.5):
+    def __init__(self, model_name: str = "urchade/gliner_multi_pii-v1", threshold: float = 0.65):
         self.model_name = model_name
         self.threshold = threshold
         self.model = None

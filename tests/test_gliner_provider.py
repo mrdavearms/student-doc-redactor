@@ -69,3 +69,37 @@ class TestGLiNERDetector:
         )
         person_matches = [m for m in matches if "person" in m.category.lower() or "name" in m.category.lower()]
         assert any("Patricia" in m.text or "Henderson" in m.text for m in person_matches)
+
+    def test_general_date_not_detected(self, detector):
+        """Meeting dates and review dates must NOT be flagged — only DOB should be."""
+        matches = detector.detect(
+            "Annual review meeting scheduled for 15 March 2025.",
+            page_num=1,
+        )
+        date_matches = [m for m in matches if "date" in m.category.lower()]
+        assert len(date_matches) == 0, (
+            f"General meeting date should not be flagged, got: {[m.text for m in date_matches]}"
+        )
+
+    def test_location_suburb_not_detected(self, detector):
+        """General suburbs and cities must NOT be flagged as PII."""
+        matches = detector.detect(
+            "The student lives in Parramatta and attends school in Blacktown.",
+            page_num=1,
+        )
+        location_matches = [m for m in matches if "location" in m.category.lower()]
+        assert len(location_matches) == 0, (
+            f"General suburb names should not be flagged, got: {[m.text for m in location_matches]}"
+        )
+
+    def test_threshold_filters_low_confidence_proper_nouns(self, detector):
+        """With threshold 0.65, vague proper nouns below threshold must not appear."""
+        # 'Ritalin' and 'Minecraft' were flagged as persons at threshold 0.5
+        matches = detector.detect(
+            "The student takes Ritalin daily and enjoys playing Minecraft.",
+            page_num=1,
+        )
+        person_matches = [m for m in matches if "person" in m.category.lower()]
+        flagged_texts = [m.text for m in person_matches]
+        assert "Ritalin" not in flagged_texts, "Medication names must not be flagged as persons"
+        assert "Minecraft" not in flagged_texts, "Game names must not be flagged as persons"
