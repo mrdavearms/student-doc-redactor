@@ -162,23 +162,25 @@ def conversion_status_screen():
 
     st.divider()
 
-    # Continue button
+    # Auto-run detection
     if results.processable_count == 0:
         st.error("No files available for processing. Please check your folder and try again.")
         if st.button("Back to Folder Selection"):
             session_state.navigate_to('folder_selection')
     else:
-        st.info(f"Ready to process {results.processable_count} documents")
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col1:
-            if st.button("Back", use_container_width=True):
-                session_state.navigate_to('folder_selection')
-        with col3:
-            if st.button("Continue", use_container_width=True, type="primary"):
-                with st.spinner("Extracting text and detecting PII..."):
+        if st.session_state.get('detected_pii'):
+            # Detection already completed — navigate directly
+            session_state.navigate_to('document_review')
+        else:
+            st.info(f"Ready to process {results.processable_count} documents")
+            try:
+                with st.spinner("Scanning for PII..."):
                     _run_detection()
                 session_state.navigate_to('document_review')
+            except Exception as e:
+                st.error(f"Detection failed: {e}")
+                if st.button("Back to Folder Selection"):
+                    session_state.navigate_to('folder_selection')
 
 
 def _run_detection():
