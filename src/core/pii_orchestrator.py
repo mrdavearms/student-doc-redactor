@@ -131,15 +131,16 @@ class PIIOrchestrator:
         regex_matches = self.regex_detector.detect_pii_in_text(text, page_num)
         all_matches.extend(regex_matches)
 
-        # 2. Presidio (if available)
+        # 2. Presidio (if available) — filter results shorter than 3 chars to
+        #    prevent single-character matches from erasing partial words during redaction
         if self.presidio_analyzer:
             presidio_matches = self._run_presidio(text, page_num)
-            all_matches.extend(presidio_matches)
+            all_matches.extend(m for m in presidio_matches if len(m.text) >= 3)
 
-        # 3. GLiNER (if available)
+        # 3. GLiNER (if available) — same length guard
         if self.gliner_detector:
             gliner_matches = self.gliner_detector.detect(text, page_num)
-            all_matches.extend(gliner_matches)
+            all_matches.extend(m for m in gliner_matches if len(m.text) >= 3)
 
         # Deduplicate and return
         return self._deduplicate(all_matches)

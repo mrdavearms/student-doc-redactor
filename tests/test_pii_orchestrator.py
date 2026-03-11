@@ -62,6 +62,34 @@ class TestOrchestratorBasic:
         matches = orch.detect_pii_in_text("Uncle Dave picked him up.", page_num=1)
         assert any("Uncle Dave" in m.text for m in matches)
 
+    def test_ner_result_shorter_than_3_chars_is_filtered(self):
+        """A 1-2 char NER result must never reach the output list."""
+        orch = PIIOrchestrator("Jo Li")
+        short_match = PIIMatch(
+            text="Jo", category="Person name (NER)", confidence=0.9,
+            page_num=1, line_num=1, context="Jo Li", source="presidio"
+        )
+        orch._run_presidio = lambda text, page_num: [short_match]
+        orch.presidio_analyzer = object()  # non-None to trigger presidio path
+        orch.gliner_detector = None  # isolate: only test the length filter
+        matches = orch.detect_pii_in_text("Jo Li lives here.", page_num=1)
+        short_ner = [m for m in matches if m.source == "presidio" and len(m.text) < 3]
+        assert len(short_ner) == 0, f"Short NER result slipped through: {short_ner}"
+
+    def test_ner_result_exactly_3_chars_is_kept(self):
+        """A 3-char NER result must not be filtered out by the length guard."""
+        orch = PIIOrchestrator("Tom Jones")
+        three_char = PIIMatch(
+            text="Ann", category="Person name (NER)", confidence=0.9,
+            page_num=1, line_num=1, context="Ann called the school.", source="presidio"
+        )
+        orch._run_presidio = lambda text, page_num: [three_char]
+        orch.presidio_analyzer = object()
+        orch.gliner_detector = None  # isolate: prevent GLiNER from deduplicating the match
+        matches = orch.detect_pii_in_text("Ann called the school.", page_num=1)
+        ner_ann = [m for m in matches if m.source == "presidio" and m.text == "Ann"]
+        assert len(ner_ann) == 1
+
 
 # ---------------------------------------------------------------------------
 # Deduplication Tests
