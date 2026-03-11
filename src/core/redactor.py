@@ -89,19 +89,45 @@ class PDFRedactor:
 
     def _redact_text_search(self, page: fitz.Page, text: str):
         """
-        Search for text and redact all instances
+        Search for text and redact all whole-word instances.
 
-        Args:
-            page: PyMuPDF page object
-            text: Text to search for and redact
+        For texts ≤ 6 characters, each match rect is verified against the page
+        word list to avoid partial-word erasure (e.g. 'Ann' inside 'Annual').
+        Texts shorter than 3 characters are skipped entirely.
         """
-        # Search for text (case-insensitive)
-        text_instances = page.search_for(text, flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        if len(text) < 3:
+            return
 
-        for rect in text_instances:
-            # Add padding
-            rect = rect + (-1, -1, 1, 1)
-            page.add_redact_annot(rect, fill=(0, 0, 0))
+        text_instances = page.search_for(text, flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        if not text_instances:
+            return
+
+        if len(text) <= 6:
+            # Short text: verify each rect aligns with a complete word to avoid partial erasure
+            word_rects = [(fitz.Rect(w[:4]), w[4]) for w in page.get_text("words")]
+            for rect in text_instances:
+                if self._is_whole_word_match(rect, text, word_rects):
+                    page.add_redact_annot(rect + (-1, -1, 1, 1), fill=(0, 0, 0))
+        else:
+            for rect in text_instances:
+                page.add_redact_annot(rect + (-1, -1, 1, 1), fill=(0, 0, 0))
+
+    def _is_whole_word_match(
+        self,
+        match_rect: fitz.Rect,
+        text: str,
+        word_rects: list,
+    ) -> bool:
+        """
+        Return True if match_rect substantially overlaps a word whose text
+        exactly equals `text` (case-insensitive).
+        """
+        for word_rect, word_text in word_rects:
+            if word_text.strip().lower() == text.strip().lower():
+                intersection = match_rect & word_rect
+                if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
+                    return True
+        return False
 
     def verify_redaction(self, pdf_path: Path, original_text: str) -> Tuple[bool, str]:
         """
