@@ -237,6 +237,27 @@ def document_review_screen():
 
     current_idx = st.session_state.current_doc_index
     total_docs = len(st.session_state.documents)
+    # ── Auto-skip zero-PII documents ─────────────────────────────────────
+    docs_with_pii = [
+        i for i, doc in enumerate(st.session_state.documents)
+        if st.session_state.detected_pii.get(doc, {}).get('matches', [])
+    ]
+    future_pii = [i for i in docs_with_pii if i >= current_idx]
+    if not future_pii:
+        session_state.navigate_to('final_confirmation')
+        return
+    next_pii_idx = future_pii[0]
+    if next_pii_idx != current_idx:
+        skipped_names = [
+            st.session_state.documents[i].name
+            for i in range(current_idx, next_pii_idx)
+        ]
+        st.session_state.current_doc_index = next_pii_idx
+        current_idx = next_pii_idx
+        st.info(
+            f"Skipped {len(skipped_names)} document(s) with no PII detected: "
+            + ", ".join(skipped_names)
+        )
     current_doc = st.session_state.documents[current_idx]
 
     # Progress indicator
