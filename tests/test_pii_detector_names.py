@@ -370,3 +370,38 @@ class TestContextualNameDetection:
         found_texts = _matched_texts(parent_matches)
         assert any("Sandra" in t for t in found_texts)
         assert any("Bob" in t for t in found_texts)
+
+
+# ---------------------------------------------------------------------------
+# Contextual Name Exclude List Tests
+# ---------------------------------------------------------------------------
+
+class TestContextualNameExcludeList:
+
+    def test_dad_after_carer_not_extracted_as_name(self):
+        """'Dad' after a keyword is a relationship word, not a person name."""
+        detector = PIIDetector("Jane Smith")
+        matches = detector.detect_pii_in_text("Carer: Dad", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        flagged_texts = [m.text for m in contextual]
+        assert "Dad" not in flagged_texts, f"'Dad' should not be extracted as a name, got: {flagged_texts}"
+
+    def test_mum_after_carer_not_extracted_as_name(self):
+        detector = PIIDetector("Jane Smith")
+        matches = detector.detect_pii_in_text("Carer: Mum", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        assert not any(m.text in ("Mum", "Mom") for m in contextual)
+
+    def test_mother_after_lives_with_not_extracted(self):
+        detector = PIIDetector("Jane Smith")
+        matches = detector.detect_pii_in_text("Lives with Mother and siblings.", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        assert not any(m.text == "Mother" for m in contextual)
+
+    def test_real_name_after_carer_still_extracted(self):
+        """A real name after 'Carer:' must still be captured."""
+        detector = PIIDetector("Jane Smith")
+        matches = detector.detect_pii_in_text("Carer: Sarah Thompson", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        assert any("Sarah" in m.text or "Thompson" in m.text for m in contextual), \
+            "Real name after 'Carer:' should be extracted"

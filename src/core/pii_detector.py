@@ -29,6 +29,28 @@ class PIIMatch:
         else:
             return 'low'
 
+
+# Words that must never be extracted as a person name from contextual detection.
+# Stored at module level for O(1) lookup on every match.
+_CONTEXTUAL_NAME_EXCLUDE = {
+    # Titles
+    'dr', 'mr', 'mrs', 'ms', 'miss',
+    # Family relationship words — these are roles, not names
+    'dad', 'mum', 'mom', 'mother', 'father',
+    'brother', 'sister', 'sibling',
+    'guardian', 'parent', 'carer', 'caregiver',
+    'nan', 'nana', 'grandmother', 'grandfather', 'grandma', 'grandpa',
+    # Articles, prepositions
+    'the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for',
+    'with', 'from', 'by', 'as',
+    # Auxiliary verbs
+    'is', 'are', 'was', 'were', 'been', 'be',
+    'have', 'has', 'had', 'do', 'does', 'did',
+    'will', 'would', 'should', 'can', 'could',
+    'may', 'might', 'must', 'shall',
+}
+
+
 class PIIDetector:
     """Detects PII in text using pattern matching and contextual analysis"""
 
@@ -342,7 +364,7 @@ class PIIDetector:
             for match in pattern.finditer(line):
                 name = match.group(1)
                 # Skip common words, articles, prepositions, and professional titles
-                if name.lower() not in ['dr', 'mr', 'mrs', 'ms', 'miss', 'the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'from', 'by', 'as', 'is', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'can', 'could', 'may', 'might', 'must', 'shall']:
+                if name.lower() not in _CONTEXTUAL_NAME_EXCLUDE:
                     context = self._get_context(line, match.start(1), match.end(1))
                     category = 'Parent/Guardian' if any(k in keyword.lower() for k in ['mother', 'father', 'parent', 'mum', 'dad', 'guardian', 'carer']) else 'Family member'
                     matches.append(PIIMatch(
