@@ -7,6 +7,9 @@ import streamlit as st
 from pathlib import Path
 import sys
 
+# Add src/core to path so bare imports in core modules resolve correctly
+sys.path.insert(0, str(Path(__file__).parent / "src" / "core"))
+
 # Import modules
 from src.ui import screens
 from src.core import session_state
