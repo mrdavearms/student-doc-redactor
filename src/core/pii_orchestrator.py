@@ -8,6 +8,11 @@ from typing import List, Optional
 from pii_detector import PIIDetector, PIIMatch
 
 
+# Presidio entity types that are too broad for this use case.
+# LOCATION/GPE/FAC flag general suburbs/cities that are not student PII.
+# DATE_TIME flags meeting and review dates that must not be redacted.
+PRESIDIO_SKIP_TYPES = {"LOCATION", "GPE", "FAC", "DATE_TIME"}
+
 # Category mapping from Presidio entity types to our display categories
 PRESIDIO_CATEGORY_MAP = {
     "PERSON": "Person name (NER)",
@@ -147,12 +152,16 @@ class PIIOrchestrator:
             results = self.presidio_analyzer.analyze(
                 text=text,
                 language="en",
-                score_threshold=0.4,
+                score_threshold=0.55,
             )
 
             lines = text.split("\n")
 
             for result in results:
+                # Skip entity types that are too broad for PII redaction
+                if result.entity_type in PRESIDIO_SKIP_TYPES:
+                    continue
+
                 # Map Presidio entity type to our category
                 category = PRESIDIO_CATEGORY_MAP.get(result.entity_type, f"{result.entity_type} (NER)")
 

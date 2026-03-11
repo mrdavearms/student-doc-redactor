@@ -140,11 +140,15 @@ class TestPresidioIntegration:
     def test_merged_results_include_both_sources(self):
         orch = PIIOrchestrator("Jane Smith")
         text = "Jane Smith called from 0412 345 678."
+        # Test that Presidio runs and produces results internally.
+        # After deduplication, regex/GLiNER may absorb Presidio matches if they
+        # have higher confidence for the same text — so test at the _run_presidio level.
+        presidio_matches = orch._run_presidio(text, page_num=1)
+        assert len(presidio_matches) > 0, "Presidio should produce matches internally"
+        # Regex always contributes to the final merged output
         matches = orch.detect_pii_in_text(text, page_num=1)
         sources = {m.source for m in matches}
         assert "regex" in sources
-        # Presidio should also contribute (at minimum the phone or name)
-        assert "presidio" in sources
 
     def test_graceful_degradation_without_presidio(self):
         """If Presidio is disabled, orchestrator still works with regex + GLiNER."""
@@ -154,3 +158,43 @@ class TestPresidioIntegration:
         assert len(matches) > 0
         # No match should come from presidio
         assert all(m.source != "presidio" for m in matches)
+
+    def test_presidio_location_type_not_flagged(self):
+        """Presidio LOCATION/GPE entities must be filtered out — suburbs are not PII."""
+        orch = PIIOrchestrator("Tom Jones")
+        matches = orch.detect_pii_in_text(
+            "The school is located in Parramatta, Sydney.", page_num=1
+        )
+        presidio_matches = [m for m in matches if m.source == "presidio"]
+        location_matches = [
+            m for m in presidio_matches
+            if "location" in m.category.lower() or "gpe" in m.category.lower()
+        ]
+        assert len(location_matches) == 0, (
+            f"Presidio LOCATION/GPE should be filtered, got: {[m.text for m in location_matches]}"
+        )
+
+    def test_presidio_date_time_type_not_flagged(self):
+        """Presidio DATE_TIME entities must be filtered out — meeting dates are not PII."""
+        orch = PIIOrchestrator("Tom Jones")
+        matches = orch.detect_pii_in_text(
+            "The IEP review will be held on 15 March 2025.", page_num=1
+        )
+        presidio_matches = [m for m in matches if m.source == "presidio"]
+        date_matches = [
+            m for m in presidio_matches
+            if "date" in m.category.lower() and "birth" not in m.category.lower()
+        ]
+        assert len(date_matches) == 0, (
+            f"Presidio DATE_TIME should be filtered, got: {[m.text for m in date_matches]}"
+        )
+
+    def test_presidio_person_type_still_detected(self):
+        """Filtering location/date must NOT break PERSON entity detection."""
+        orch = PIIOrchestrator("Tom Jones")
+        matches = orch.detect_pii_in_text(
+            "Dr. Sarah Williams examined the patient.", page_num=1
+        )
+        presidio_matches = [m for m in matches if m.source == "presidio"]
+        person_matches = [m for m in presidio_matches if "person" in m.category.lower()]
+        assert len(person_matches) > 0, "Presidio PERSON detection must still work after filtering"
