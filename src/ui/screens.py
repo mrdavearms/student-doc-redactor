@@ -216,6 +216,21 @@ def document_review_screen():
 
     st.markdown("### Step 3: Review Detected PII")
 
+    # ── Accept All shortcut ──────────────────────────────────────────────
+    if st.button(
+        "✓ Accept All & Continue to Summary",
+        use_container_width=True,
+        type="primary",
+        help="Mark all detected PII across every document for redaction and skip to the summary.",
+    ):
+        for doc in st.session_state.documents:
+            matches = st.session_state.detected_pii.get(doc, {}).get('matches', [])
+            for i in range(len(matches)):
+                st.session_state.user_selections[f"{doc}_{i}"] = True
+        session_state.navigate_to('final_confirmation')
+    st.caption("All detected PII will be marked for redaction — or review each document below.")
+    st.divider()
+
     if not st.session_state.documents:
         st.error("No documents to review")
         return
