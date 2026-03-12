@@ -234,6 +234,83 @@ class PDFRedactor:
         except Exception:
             return False
 
+    def _match_and_redact_ocr_words(
+        self,
+        draw: 'ImageDraw.ImageDraw',
+        ocr_words: list,
+        items: List['RedactionItem'],
+        padding: int = 4,
+    ) -> int:
+        """
+        Draw black rectangles over OCR words that match any PII item.
+
+        Shared helper used by both _redact_ocr_page() (full-page OCR) and
+        _redact_embedded_images() (per-image OCR).
+
+        Args:
+            draw: PIL ImageDraw instance already bound to the target image.
+            ocr_words: List of (word_text, (x0, y0, x1, y1)) tuples in pixel space.
+            items: RedactionItems to locate and cover.
+            padding: Extra pixels of coverage around each matched bbox.
+
+        Returns:
+            Number of PII word-groups successfully redacted.
+        """
+        redacted_count = 0
+
+        for item in items:
+            pii_text = item.text.strip()
+            if len(pii_text) < 3:
+                continue
+
+            pii_lower = pii_text.lower()
+            pii_words = pii_lower.split()
+
+            if len(pii_words) == 1:
+                # Single-word PII: match individual OCR words
+                for ocr_word, pixel_bbox in ocr_words:
+                    ocr_lower = ocr_word.lower()
+                    # Preserve curly apostrophes in cleaned form
+                    ocr_clean = re.sub(r"[^\w'\u2019]", '', ocr_lower)
+                    if (
+                        ocr_clean == pii_lower
+                        or ocr_clean == pii_lower + "'s"
+                        or ocr_clean == pii_lower + "\u2019s"
+                        or ocr_clean.rstrip(".,;:!?") == pii_lower
+                        # Exact match for PII with special chars (emails, URLs)
+                        or (not pii_lower.isalpha() and pii_lower in ocr_lower)
+                    ):
+                        x0, y0, x1, y1 = pixel_bbox
+                        draw.rectangle(
+                            [x0 - padding, y0 - padding, x1 + padding, y1 + padding],
+                            fill="black",
+                        )
+                        redacted_count += 1
+            else:
+                # Multi-word PII (e.g. "Joe Bloggs"): find consecutive OCR words
+                for start_idx in range(len(ocr_words) - len(pii_words) + 1):
+                    match = True
+                    for wi, pii_w in enumerate(pii_words):
+                        ocr_w = ocr_words[start_idx + wi][0]
+                        ocr_clean = re.sub(r"[^\w']", '', ocr_w.lower())
+                        if ocr_clean != pii_w and ocr_clean.rstrip(".,;:!?") != pii_w:
+                            match = False
+                            break
+                    if match:
+                        first_bbox = ocr_words[start_idx][1]
+                        last_bbox = ocr_words[start_idx + len(pii_words) - 1][1]
+                        x0 = min(first_bbox[0], last_bbox[0])
+                        y0 = min(first_bbox[1], last_bbox[1])
+                        x1 = max(first_bbox[2], last_bbox[2])
+                        y1 = max(first_bbox[3], last_bbox[3])
+                        draw.rectangle(
+                            [x0 - padding, y0 - padding, x1 + padding, y1 + padding],
+                            fill="black",
+                        )
+                        redacted_count += 1
+
+        return redacted_count
+
     def _redact_ocr_page(self, page: fitz.Page, items: List['RedactionItem']) -> int:
         """
         Redact PII on an image-only page using OCR to locate words.
@@ -291,61 +368,9 @@ class PDFRedactor:
         if not ocr_words:
             return 0
 
-        # Draw black rectangles directly on the PIL image (pixel space)
+        # Draw black rectangles over matching PII words via the shared helper
         draw = ImageDraw.Draw(img)
-        redacted_count = 0
-        padding = 4  # pixels of extra coverage around each match
-
-        for item in items:
-            pii_text = item.text.strip()
-            if len(pii_text) < 3:
-                continue
-
-            pii_lower = pii_text.lower()
-            pii_words = pii_lower.split()
-
-            if len(pii_words) == 1:
-                # Single-word PII: match individual OCR words
-                for ocr_word, pixel_bbox in ocr_words:
-                    ocr_lower = ocr_word.lower()
-                    # Preserve curly apostrophes in cleaned form
-                    ocr_clean = re.sub(r"[^\w'\u2019]", '', ocr_lower)
-                    if (
-                        ocr_clean == pii_lower
-                        or ocr_clean == pii_lower + "'s"
-                        or ocr_clean == pii_lower + "\u2019s"
-                        or ocr_clean.rstrip(".,;:!?") == pii_lower
-                        # Exact match for PII with special chars (emails, URLs)
-                        or (not pii_lower.isalpha() and pii_lower in ocr_lower)
-                    ):
-                        x0, y0, x1, y1 = pixel_bbox
-                        draw.rectangle(
-                            [x0 - padding, y0 - padding, x1 + padding, y1 + padding],
-                            fill="black",
-                        )
-                        redacted_count += 1
-            else:
-                # Multi-word PII (e.g. "Joe Bloggs"): find consecutive OCR words
-                for start_idx in range(len(ocr_words) - len(pii_words) + 1):
-                    match = True
-                    for wi, pii_w in enumerate(pii_words):
-                        ocr_w = ocr_words[start_idx + wi][0]
-                        ocr_clean = re.sub(r"[^\w']", '', ocr_w.lower())
-                        if ocr_clean != pii_w and ocr_clean.rstrip(".,;:!?") != pii_w:
-                            match = False
-                            break
-                    if match:
-                        first_bbox = ocr_words[start_idx][1]
-                        last_bbox = ocr_words[start_idx + len(pii_words) - 1][1]
-                        x0 = min(first_bbox[0], last_bbox[0])
-                        y0 = min(first_bbox[1], last_bbox[1])
-                        x1 = max(first_bbox[2], last_bbox[2])
-                        y1 = max(first_bbox[3], last_bbox[3])
-                        draw.rectangle(
-                            [x0 - padding, y0 - padding, x1 + padding, y1 + padding],
-                            fill="black",
-                        )
-                        redacted_count += 1
+        redacted_count = self._match_and_redact_ocr_words(draw, ocr_words, items)
 
         if redacted_count == 0:
             return 0
