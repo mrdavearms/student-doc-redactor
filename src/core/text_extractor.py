@@ -3,6 +3,8 @@ Text Extractor
 Extracts text from PDFs using native text layer and OCR fallback.
 """
 
+import os
+
 import fitz  # PyMuPDF
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -14,7 +16,13 @@ class TextExtractor:
     """Extracts text from PDF documents with OCR support"""
 
     def __init__(self):
-        # Check if Tesseract is available
+        from binary_resolver import resolve_tesseract, resolve_tessdata
+        tesseract_path = resolve_tesseract()
+        if tesseract_path:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        tessdata_path = resolve_tessdata()
+        if tessdata_path:
+            os.environ.setdefault("TESSDATA_PREFIX", tessdata_path)
         self.tesseract_available = self._check_tesseract()
 
     def _check_tesseract(self) -> bool:
