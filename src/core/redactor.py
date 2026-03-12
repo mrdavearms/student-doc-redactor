@@ -311,6 +311,81 @@ class PDFRedactor:
 
         return redacted_count
 
+    def _redact_embedded_images(self, page: fitz.Page, items: list) -> int:
+        """
+        Scan each embedded image on a page with OCR and black out any PII found.
+
+        Used for hybrid pages (text layer + embedded images) where text-layer
+        redaction misses PII baked into the image pixels.
+
+        Returns the total number of words redacted across all images on the page.
+        """
+        images = page.get_images(full=True)
+        if not images:
+            return 0
+        if not self._check_tesseract():
+            return 0
+
+        try:
+            from binary_resolver import resolve_tesseract, resolve_tessdata
+            tesseract_path = resolve_tesseract()
+            if tesseract_path:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            tessdata_path = resolve_tessdata()
+            if tessdata_path:
+                os.environ.setdefault("TESSDATA_PREFIX", tessdata_path)
+        except ImportError:
+            pass
+
+        doc = page.parent
+        total_redacted = 0
+
+        for img_info in images:
+            xref = img_info[0]
+            try:
+                img_dict = doc.extract_image(xref)
+            except Exception:
+                continue
+            if not img_dict or not img_dict.get('image'):
+                continue
+
+            img_bytes = img_dict['image']
+            try:
+                pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            except Exception:
+                continue
+
+            ocr_data = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DICT)
+            ocr_words = []
+            for i in range(len(ocr_data['text'])):
+                word = ocr_data['text'][i].strip()
+                if not word:
+                    continue
+                x = ocr_data['left'][i]
+                y = ocr_data['top'][i]
+                w = ocr_data['width'][i]
+                h = ocr_data['height'][i]
+                ocr_words.append((word, (x, y, x + w, y + h)))
+
+            if not ocr_words:
+                continue
+
+            draw = ImageDraw.Draw(pil_img)
+            redacted_count = self._match_and_redact_ocr_words(draw, ocr_words, items)
+            if redacted_count == 0:
+                continue
+
+            out_buf = io.BytesIO()
+            pil_img.save(out_buf, format="PNG")
+            out_buf.seek(0)
+            try:
+                page.replace_image(xref, stream=out_buf.read())
+            except Exception:
+                continue
+            total_redacted += redacted_count
+
+        return total_redacted
+
     def _redact_ocr_page(self, page: fitz.Page, items: List['RedactionItem']) -> int:
         """
         Redact PII on an image-only page using OCR to locate words.
