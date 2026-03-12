@@ -119,6 +119,14 @@ class PDFRedactor:
                 # Apply all redactions on this page
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
+                # Delete form widgets whose values contain redacted PII.
+                # apply_redactions() only removes content-stream text; AcroForm
+                # widget field values live in annotation dictionaries and survive
+                # redaction.  Deleting the widget is the only reliable way to
+                # remove the data.
+                redacted_texts = [item.text.lower() for item in items]
+                self._delete_pii_widgets(page, redacted_texts)
+
             # Strip metadata before saving
             self._strip_metadata(doc)
 
@@ -178,14 +186,60 @@ class PDFRedactor:
     ) -> bool:
         """
         Return True if match_rect substantially overlaps a word whose text
-        exactly equals `text` (case-insensitive).
+        equals `text` (case-insensitive), optionally followed by non-alphanumeric
+        characters (possessives like "Joe's", trailing punctuation like "Joe,").
         """
+        needle = text.strip().lower()
         for word_rect, word_text in word_rects:
-            if word_text.strip().lower() == text.strip().lower():
+            word_clean = word_text.strip().lower()
+            # Exact match, or word starts with needle and the remainder is non-alpha
+            # e.g. "joe's" starts with "joe" and "'s" has no [a-z0-9]
+            if word_clean == needle or (
+                word_clean.startswith(needle)
+                and not any(c.isalnum() for c in word_clean[len(needle):])
+            ):
                 intersection = match_rect & word_rect
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
                     return True
         return False
+
+    def _delete_pii_widgets(self, page: fitz.Page, redacted_texts: list):
+        """
+        Delete form widgets whose field values contain any of the redacted texts.
+
+        PDF form fields (AcroForm widgets) store values in annotation
+        dictionaries, which apply_redactions() does not touch. The only
+        reliable way to remove the data is to delete the widget entirely.
+
+        Args:
+            page: PyMuPDF page object (already redacted).
+            redacted_texts: Lowercased PII strings that were redacted on this page.
+        """
+        try:
+            widgets = list(page.widgets())
+        except Exception:
+            return  # Page has no widgets or widget API unavailable
+
+        # Collect field names to delete (don't modify iterator while iterating)
+        names_to_delete = []
+        for w in widgets:
+            val = (w.field_value or "").strip().lower()
+            if not val:
+                continue
+            for pii in redacted_texts:
+                if pii in val:
+                    names_to_delete.append(w.field_name)
+                    break
+
+        # Delete each widget in a fresh iterator pass to avoid invalidation
+        for name in names_to_delete:
+            try:
+                for w in page.widgets():
+                    if w.field_name == name:
+                        page.delete_widget(w)
+                        break
+            except Exception:
+                pass  # Widget already removed or page changed
 
     def verify_redaction(self, pdf_path: Path, original_text: str) -> Tuple[bool, str]:
         """
@@ -204,6 +258,16 @@ class PDFRedactor:
 
             for page in doc:
                 all_text += page.get_text()
+
+                # Also check form widget field values — these live outside the
+                # content stream and are invisible to get_text().
+                try:
+                    for w in page.widgets():
+                        val = w.field_value
+                        if val and isinstance(val, str):
+                            all_text += " " + val
+                except Exception:
+                    pass
 
             doc.close()
 

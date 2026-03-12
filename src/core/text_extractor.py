@@ -80,7 +80,9 @@ class TextExtractor:
 
     def _extract_page_text(self, page: fitz.Page, page_num: int) -> Dict:
         """
-        Extract text from a single page, using OCR if needed
+        Extract text from a single page, using OCR if needed.
+        Also extracts values from PDF form widgets (AcroForm fields),
+        which are stored in a separate layer from the content stream.
 
         Args:
             page: PyMuPDF page object
@@ -92,6 +94,11 @@ class TextExtractor:
         # Try native text extraction first
         text = page.get_text()
         blocks = page.get_text("dict")["blocks"]
+
+        # Extract form widget values (AcroForm fields live outside the content stream)
+        widget_text = self._extract_widget_values(page)
+        if widget_text:
+            text = text.rstrip() + "\n" + widget_text
 
         # Check if page has meaningful text
         if len(text.strip()) > 50:  # Arbitrary threshold - adjust as needed
@@ -119,6 +126,27 @@ class TextExtractor:
                 'confidence': 0.5,  # Low confidence
                 'blocks': self._format_blocks(blocks, page_num)
             }
+
+    def _extract_widget_values(self, page: fitz.Page) -> str:
+        """
+        Extract text values from PDF form widgets (AcroForm fields).
+
+        Form field values live in a separate layer from the page content stream
+        and are invisible to page.get_text(). This method reads them via the
+        widget API so the PII detector can find names in filled form fields.
+
+        Returns:
+            Newline-joined string of non-empty widget values, or empty string.
+        """
+        values = []
+        try:
+            for widget in page.widgets():
+                val = widget.field_value
+                if val and isinstance(val, str) and val.strip():
+                    values.append(val.strip())
+        except Exception:
+            pass  # Page has no widgets or widget API unavailable
+        return "\n".join(values)
 
     def _ocr_page(self, page: fitz.Page) -> Tuple[str, float]:
         """
