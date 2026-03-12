@@ -427,6 +427,9 @@ def _run_redaction(folder_action_label):
     }
     folder_action = action_map.get(folder_action_label)
 
+    _parent_list = [n.strip() for n in st.session_state.parent_names.split(',') if n.strip()]
+    _family_list = [n.strip() for n in st.session_state.family_names.split(',') if n.strip()]
+
     service = RedactionService()
     request = RedactionRequest(
         folder_path=st.session_state.folder_path,
@@ -435,6 +438,8 @@ def _run_redaction(folder_action_label):
         detected_pii=st.session_state.detected_pii,
         user_selections=st.session_state.user_selections,
         folder_action=folder_action,
+        parent_names=_parent_list,
+        family_names=_family_list,
     )
 
     results = service.execute(request)
@@ -444,6 +449,7 @@ def _run_redaction(folder_action_label):
     st.session_state.log_content = results.log_content
     st.session_state.verification_failures = results.verification_failures
     st.session_state.ocr_warnings = results.ocr_warnings
+    st.session_state.document_results = results.document_results
     st.session_state.processing_complete = True
 
 
@@ -475,6 +481,20 @@ def completion_screen():
     # Show redacted folder
     st.markdown("#### Redacted Documents")
     st.info(f"Saved to: `{st.session_state.redacted_folder}`")
+
+    # Filename mapping table — shows original → redacted name for audit trail
+    document_results = st.session_state.get('document_results', [])
+    if document_results:
+        renamed = [
+            r for r in document_results
+            if r.output_path and r.output_path.name != f"{Path(r.document_name).stem}_redacted.pdf"
+        ]
+        if renamed:
+            st.markdown("**Filename changes (PII removed from names):**")
+            for r in renamed:
+                original_stem = Path(r.document_name).stem
+                new_name = r.output_path.name
+                st.markdown(f"- `{original_stem}.pdf` → `{new_name}`")
 
     col1, col2 = st.columns([1, 1])
     with col1:

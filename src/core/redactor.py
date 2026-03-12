@@ -4,12 +4,70 @@ Permanently redacts PII from PDFs by removing underlying text and adding black b
 """
 
 import io
+import re
 import fitz  # PyMuPDF
 from pathlib import Path
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 from PIL import Image
 import pytesseract
+
+
+def strip_pii_from_filename(stem: str, name_variations: List[str]) -> str:
+    """
+    Remove PII name tokens from a filename stem, preserving document-type words.
+
+    Args:
+        stem: Filename without extension (e.g. "Joe Bloggs DIP Vineland Report 2025")
+        name_variations: List of name strings to strip (student, parents, family).
+                         Entries shorter than 3 chars are ignored.
+
+    Returns:
+        Cleaned stem, or "document" if the result is too short to be meaningful.
+    """
+    if not name_variations:
+        return stem
+
+    # Normalize underscores → spaces so word boundaries work on "Bloggs_Joe_..." format
+    result = stem.replace('_', ' ')
+
+    # Sort longest-first: strip "Joe Bloggs" before "Joe" to avoid orphaned fragments
+    sorted_variations = sorted(name_variations, key=len, reverse=True)
+
+    for variation in sorted_variations:
+        if len(variation) < 3:
+            continue
+        pattern = re.compile(r'\b' + re.escape(variation) + r'\b', re.IGNORECASE)
+        result = pattern.sub('', result)
+
+    # Remove possessive remnants: "Joe's" → "'s" → ""
+    result = re.sub(r"'s\b", '', result)
+
+    # Collapse runs of spaces
+    result = re.sub(r' {2,}', ' ', result)
+
+    # Remove empty brackets left by name removal: "( )", "[]", "(  )"
+    result = re.sub(r'\(\s*\)', '', result)
+    result = re.sub(r'\[\s*\]', '', result)
+
+    # Collapse double separators: "Plan -  - Report" or "Plan - - Report" → "Plan - Report"
+    result = re.sub(r'(\s*-\s*){2,}', ' - ', result)
+
+    # Remove orphaned separator before an opening bracket: "Plan - (T1 2024)" → "Plan (T1 2024)"
+    result = re.sub(r'\s*-\s*(?=[\(\[])', ' ', result)
+
+    # Strip leading/trailing separators and whitespace
+    result = result.strip(' -_,.')
+
+    # Final space normalise
+    result = re.sub(r' {2,}', ' ', result).strip()
+
+    # Fallback: if result is empty or too short to be a real name, use generic label
+    if len(result) < 3:
+        return 'document'
+
+    return result
+
 
 @dataclass
 class RedactionItem:
