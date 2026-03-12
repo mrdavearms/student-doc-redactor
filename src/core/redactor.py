@@ -108,6 +108,7 @@ class PDFRedactor:
 
             # Apply redactions page by page
             ocr_redacted_count = 0
+            image_redacted_count = 0
             for page_num, items in redactions_by_page.items():
                 page = doc[page_num - 1]  # Convert to 0-indexed
 
@@ -129,7 +130,13 @@ class PDFRedactor:
                     # Apply all redactions on this page
                     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-                # Delete form widgets whose values contain redacted PII.
+                # Stage 2: Scan every embedded image on this page for PII.
+                # Runs on ALL pages — text-layer, image-only, and hybrid.
+                # This catches PII in embedded screenshots, email printouts,
+                # logos with names, etc. that text-layer redaction cannot reach.
+                image_redacted_count += self._redact_embedded_images(page, items)
+
+                # Stage 3: Delete form widgets whose values contain redacted PII.
                 # apply_redactions() only removes content-stream text; AcroForm
                 # widget field values live in annotation dictionaries and survive
                 # redaction.  Deleting the widget is the only reliable way to

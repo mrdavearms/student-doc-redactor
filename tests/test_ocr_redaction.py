@@ -431,6 +431,42 @@ class TestRedactPdfRouting:
         assert success is True
         mock_text_search.assert_called()
 
+    @patch.object(PDFRedactor, '_redact_embedded_images', return_value=2)
+    @patch.object(PDFRedactor, '_is_image_only_page', return_value=False)
+    def test_embedded_images_scanned_on_text_pages(self, mock_is_img, mock_embed_redact, tmp_path):
+        """Text pages should ALSO have embedded images scanned for PII."""
+        page, doc = _make_text_page("Joe attended school")
+        input_pdf = tmp_path / "input.pdf"
+        doc.save(str(input_pdf))
+        doc.close()
+
+        output_pdf = tmp_path / "output.pdf"
+        items = [RedactionItem(page_num=1, text="Joe")]
+
+        success, msg = self.redactor.redact_pdf(input_pdf, output_pdf, items)
+
+        assert success is True
+        mock_embed_redact.assert_called_once()
+
+    @patch.object(PDFRedactor, '_redact_embedded_images', return_value=0)
+    @patch.object(PDFRedactor, '_redact_ocr_page', return_value=1)
+    @patch.object(PDFRedactor, '_is_image_only_page', return_value=True)
+    def test_embedded_images_scanned_on_ocr_pages_too(self, mock_is_img, mock_ocr, mock_embed_redact, tmp_path):
+        """Image-only pages should ALSO run per-image scanning after OCR page redaction."""
+        doc = fitz.open()
+        doc.new_page()
+        input_pdf = tmp_path / "input.pdf"
+        doc.save(str(input_pdf))
+        doc.close()
+
+        output_pdf = tmp_path / "output.pdf"
+        items = [RedactionItem(page_num=1, text="Joe")]
+
+        success, msg = self.redactor.redact_pdf(input_pdf, output_pdf, items)
+
+        assert success is True
+        mock_embed_redact.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # Service layer tests — OCR items not skipped
