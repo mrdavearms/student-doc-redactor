@@ -405,3 +405,61 @@ class TestContextualNameExcludeList:
         contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
         assert any("Sarah" in m.text or "Thompson" in m.text for m in contextual), \
             "Real name after 'Carer:' should be extracted"
+
+
+# ---------------------------------------------------------------------------
+# Parenthetical and Comma-Separated Contextual Name Tests
+# ---------------------------------------------------------------------------
+
+class TestContextualNameParenthetical:
+    """Names after family keywords in parentheses or after commas."""
+
+    def test_father_name_in_parentheses(self):
+        """'his father (Nick)' should detect 'Nick' as Parent/Guardian."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text("his father (Nick) reported the behaviour", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        found_texts = [m.text for m in contextual]
+        assert any("Nick" in t for t in found_texts), f"Expected 'Nick' in {found_texts}"
+
+    def test_sister_name_after_comma(self):
+        """'his sister, Summer,' should detect 'Summer' as Family member."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text("his sister, Summer, was also present", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        found_texts = [m.text for m in contextual]
+        assert any("Summer" in t for t in found_texts), f"Expected 'Summer' in {found_texts}"
+
+    def test_mother_name_in_parentheses(self):
+        """'Mother (Jane Smith)' should detect 'Jane Smith'."""
+        detector = PIIDetector("Tom Jones")
+        matches = detector.detect_pii_in_text("Mother (Jane Smith) was contacted", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        found_texts = [m.text for m in contextual]
+        assert any("Jane" in t for t in found_texts), f"Expected 'Jane' in {found_texts}"
+
+    def test_partner_keyword_in_parentheses(self):
+        """'his partner (Steph)' — 'partner' is not currently a keyword but should be
+        handled if added. For now this tests the parenthetical pattern with existing keywords."""
+        # Using 'Carer' as it's an existing keyword
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text("Carer (Steph) visited the school", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        found_texts = [m.text for m in contextual]
+        assert any("Steph" in t for t in found_texts), f"Expected 'Steph' in {found_texts}"
+
+    def test_pronoun_father_parenthetical_pattern(self):
+        """'his father (Nick)' with pronoun prefix should detect name."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text("Joe lives with his father (Nick) and sister", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        found_texts = [m.text for m in contextual]
+        assert any("Nick" in t for t in found_texts), f"Expected 'Nick' in {found_texts}"
+
+    def test_parenthetical_excludes_relationship_words(self):
+        """'Father (Dad)' — 'Dad' is a relationship word, not a name."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text("Father (Dad) was present", page_num=1)
+        contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
+        found_texts = [m.text for m in contextual]
+        assert "Dad" not in found_texts, f"'Dad' should not be flagged as name, got {found_texts}"

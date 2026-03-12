@@ -186,17 +186,20 @@ class PDFRedactor:
     ) -> bool:
         """
         Return True if match_rect substantially overlaps a word whose text
-        equals `text` (case-insensitive), optionally followed by non-alphanumeric
-        characters (possessives like "Joe's", trailing punctuation like "Joe,").
+        equals `text` (case-insensitive), optionally followed by a possessive
+        suffix ('s / 's) or non-alphanumeric characters (punctuation like ",").
         """
         needle = text.strip().lower()
         for word_rect, word_text in word_rects:
             word_clean = word_text.strip().lower()
-            # Exact match, or word starts with needle and the remainder is non-alpha
-            # e.g. "joe's" starts with "joe" and "'s" has no [a-z0-9]
-            if word_clean == needle or (
-                word_clean.startswith(needle)
-                and not any(c.isalnum() for c in word_clean[len(needle):])
+            if not word_clean.startswith(needle):
+                continue
+            remainder = word_clean[len(needle):]
+            # Exact match, possessive suffix, or purely non-alphanumeric tail
+            if (
+                not remainder
+                or remainder in ("'s", "\u2019s")
+                or not any(c.isalnum() for c in remainder)
             ):
                 intersection = match_rect & word_rect
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
