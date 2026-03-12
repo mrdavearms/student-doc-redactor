@@ -9,7 +9,7 @@ A local Mac Streamlit app that redacts PII from student assessment PDFs and Word
 - **Repo**: https://github.com/mrdavearms/student-doc-redactor (primary) · https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
 - **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
 - **Run**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `source venv/bin/activate && pytest tests/ -v` (142 tests, ~30s)
+- **Test**: `source venv/bin/activate && pytest tests/ -v` (212 tests, ~30s)
 - **Python**: 3.13+ (required for spaCy compatibility — the `venv/` dir uses 3.13, `venv_old/` is a legacy 3.14 venv that can be ignored)
 
 ---
@@ -33,6 +33,27 @@ PIIOrchestrator
 
 All three engines produce `PIIMatch` objects. The orchestrator merges and deduplicates by `(text.lower(), page_num, line_num)`.
 
+### Redaction Pipeline
+
+`redactor.py` handles the actual redaction. It uses **dual paths** based on page type:
+
+```
+redact_pdf(input_pdf, output_pdf, redaction_items)
+│
+├── For each page:
+│   ├── _is_image_only_page(page)?
+│   │   ├── YES → _redact_ocr_page(page, items)    # PIL ImageDraw path
+│   │   └── NO  → _redact_text_search(page, text)  # PyMuPDF annotation path
+│   │             + page.apply_redactions(images=PDF_REDACT_IMAGE_NONE)
+│   │
+│   └── _delete_pii_widgets(page, redacted_texts)   # AcroForm cleanup (always)
+│
+├── _strip_metadata(doc)                             # Author, XMP, embedded files
+└── doc.save(output_pdf)
+```
+
+The service layer (`src/services/redaction_service.py`) orchestrates this and handles filename redaction, OCR warnings, and audit log entries.
+
 ### Screen Flow
 
 `app.py` routes based on `st.session_state.current_screen`:
@@ -52,12 +73,18 @@ Navigation is handled by `session_state.navigate_to(screen_name)`, which sets th
 | `src/core/pii_detector.py` | Regex engine + `PIIMatch` dataclass definition |
 | `src/core/presidio_recognizers.py` | 6 custom Australian Presidio recognizers |
 | `src/core/gliner_provider.py` | GLiNER zero-shot NER wrapper |
-| `src/core/redactor.py` | PyMuPDF redaction, metadata stripping, OCR verification |
+| `src/core/redactor.py` | **Dual-path redaction** (text-layer + OCR image), widget deletion, metadata stripping |
 | `src/core/text_extractor.py` | Text + OCR extraction from PDFs |
 | `src/core/document_converter.py` | LibreOffice Word → PDF conversion |
+| `src/core/binary_resolver.py` | Cross-platform Tesseract/LibreOffice path resolution |
 | `src/core/logger.py` | Audit log generation and save |
 | `src/core/session_state.py` | All `st.session_state` keys and `navigate_to()` |
 | `src/ui/screens.py` | All 5 Streamlit screens (largest file) |
+| `src/services/conversion_service.py` | Framework-agnostic conversion business logic |
+| `src/services/detection_service.py` | Framework-agnostic PII detection business logic |
+| `src/services/redaction_service.py` | Framework-agnostic redaction orchestration |
+| `backend/main.py` | FastAPI API layer for desktop app (Phase 2) |
+| `desktop/` | Electron + React + Vite frontend (Phase 2) |
 
 ---
 
@@ -127,9 +154,72 @@ Both `_init_presidio()` and `_init_gliner()` catch all exceptions and set the de
 
 `_strip_metadata()` is called inside `redact_pdf()` before `doc.save()`. It strips author, title, subject, creator, producer, keywords, creation date, modification date, XMP metadata, and embedded files. It always runs — not optional.
 
-### 11. OCR pages cannot be automatically redacted
+### 11. OCR pages ARE automatically redacted via `_redact_ocr_page()`
 
-`page.search_for()` returns nothing on image-only pages. When OCR pages are detected, a warning is added to `st.session_state.ocr_warnings` and the user is shown a banner. These pages require manual redaction.
+**This rule was rewritten in March 2026. The previous version said OCR pages "cannot be automatically redacted" — that is no longer true.**
+
+Image-only pages (detected by `_is_image_only_page()`: no text words, but images present) are redacted using a completely different code path from text-layer pages:
+
+```python
+# Text-layer pages:
+page.add_redact_annot(rect)
+page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+
+# Image-only pages:
+_redact_ocr_page(page, items)  # renders → OCR → PIL ImageDraw → replace page
+```
+
+The OCR redaction pipeline:
+1. `page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))` — render at 300 DPI
+2. `pytesseract.image_to_data()` — OCR with bounding boxes
+3. Compare each OCR word against PII using cleaned matching
+4. `ImageDraw.rectangle()` — draw filled black rectangles on PIL image
+5. Replace page content: `page.clean_contents()` → clear content streams → `page.insert_image()`
+
+OCR warnings are now **informational** (not error/skip signals). The audit log notes which pages used OCR redaction.
+
+### 12. NEVER use `fitz.PDF_REDACT_IMAGE_REMOVE` on scanned PDFs
+
+`page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_REMOVE)` will **delete the entire full-page scan image**, leaving a blank white page. This is catastrophic for scanned documents where each page IS a single image.
+
+Always use `images=fitz.PDF_REDACT_IMAGE_NONE` for text-layer redactions, and use the `_redact_ocr_page()` PIL ImageDraw path for image-only pages.
+
+### 13. OCR word matching has two modes — cleaned and exact
+
+In `_redact_ocr_page()`, OCR words are matched against PII using:
+
+```python
+# Cleaned match (for names — strips punctuation, handles possessives):
+ocr_clean = re.sub(r"[^\w'\u2019]", '', ocr_lower)
+if ocr_clean == pii_lower or ocr_clean == pii_lower + "'s" or ocr_clean == pii_lower + "\u2019s":
+
+# Exact substring match (for emails/URLs — preserves special chars):
+if not pii_lower.isalpha() and pii_lower in ocr_lower:
+```
+
+The `not pii_lower.isalpha()` guard prevents the substring match from firing for plain-name PII like "Joe" — otherwise "Joe" would match inside "joe@email.com" as a separate hit, causing double-counting.
+
+### 14. Page content replacement in PyMuPDF requires clearing content streams
+
+When replacing a page's visual content (for OCR redaction), you can't just insert an image — the old content streams must be cleared first:
+
+```python
+page.clean_contents()  # Consolidates content streams
+doc = page.parent
+for xref in page.get_contents():
+    doc.update_stream(xref, b"")  # Clear each content stream
+page.insert_image(page.rect, stream=img_bytes, overlay=True)
+```
+
+**Do NOT use `page._cleanContents()`** — this private API does not exist in current PyMuPDF versions. The public `page.clean_contents()` plus content stream clearing handles the same job.
+
+### 15. Form widget (AcroForm) deletion runs after text/OCR redaction
+
+`_delete_pii_widgets()` iterates over `page.widgets()` and deletes any widget whose field value matches redacted PII text. This runs AFTER text-layer or OCR redaction, as a separate pass. It catches PII stored in interactive form fields that are invisible to `page.search_for()`.
+
+### 16. Filename PII redaction is handled by the service layer
+
+`redaction_service.py` checks if the student name appears in document filenames. If found, the output filename has PII replaced with `[REDACTED]`. This logic is in the service layer, not in `redactor.py`.
 
 ---
 
@@ -180,17 +270,24 @@ All keys initialised in `session_state.init_session_state()`:
 ## Test Structure
 
 ```
-tests/
-├── test_pii_detector.py         # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB, integration
-├── test_pii_detector_names.py   # 44 tests: name variations, name detection, contextual detection
-├── test_pii_orchestrator.py     # Orchestrator merge and dedup logic
-├── test_presidio_recognizers.py # 6 AU recognizers unit tests
-├── test_gliner_provider.py      # GLiNER wrapper tests
-├── test_metadata_stripping.py   # PDF metadata removal tests
-└── test_ocr_verification.py     # OCR post-redaction verification tests
+tests/                                # 212 tests total
+├── test_pii_detector.py              # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
+├── test_pii_detector_names.py        # 54 tests: name variations, contextual detection, possessives, family
+├── test_pii_orchestrator.py          # 22 tests: orchestrator merge, dedup, multi-engine coordination
+├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
+├── test_gliner_provider.py           # 12 tests: GLiNER zero-shot NER wrapper
+├── test_redactor.py                  # 9 tests: text-layer redaction routing, metadata, core redact_pdf
+├── test_ocr_redaction.py             # 19 tests: image-only page detection, OCR redaction, word matching
+├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
+├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
+├── test_widget_redaction.py          # 6 tests: AcroForm widget deletion
+├── test_filename_redaction.py        # 12 tests: PII in filenames → [REDACTED] replacement
+└── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ```
 
 Tests use `sys.path.insert` to locate `src/core/` modules — this is required because the test runner runs from the repo root, not from within `src/`.
+
+**OCR redaction tests** (`test_ocr_redaction.py`) mock `pytesseract.image_to_data` to return controlled word bounding boxes, avoiding a hard dependency on Tesseract being installed in the test environment. They test the matching logic (cleaned vs exact, possessives, email/URL handling) and the page-type routing (text-layer vs OCR path).
 
 Run a single test file: `pytest tests/test_pii_detector.py -v`
 Run with output: `pytest tests/ -v -s`
@@ -232,10 +329,12 @@ Run with output: `pytest tests/ -v -s`
 ## What's Next / Known Gaps
 
 - **Mac `.app` bundle**: App is not yet packaged. Planned via PyInstaller or py2app. See `FINAL_SUMMARY.md`.
-- **Windows/Linux**: Not supported. macOS only.
+- **Windows/Linux (Phase 3)**: Not supported yet. Phase 3 roadmap includes Windows COM automation for Word conversion and bundled Tesseract.
+- **Packaging (Phase 4)**: electron-builder for .dmg + .exe not started.
 - **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
 - **Signature detection**: Listed in roadmap, not implemented.
 - **Batch processing** (multiple students at once): Not implemented.
+- **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
 - **`venv_old/`**: Legacy venv from Python 3.14 era. Not used. Can be deleted once confirmed stable on 3.13 venv.
 - **`GITHUB_SETUP.md`, `GIT_WORKFLOW.md`, `FINAL_SUMMARY.md`**: Legacy docs from early development. Outdated — may reference implementation details that have changed. README.md is now the authoritative user documentation.
 

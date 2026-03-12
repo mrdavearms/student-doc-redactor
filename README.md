@@ -44,7 +44,9 @@ This matters most for a tool handling children's data.
 | ✅ **Metadata is stripped** | Author names, dates, and hidden document properties (XMP data) are removed from output PDFs. |
 | ✅ **100% local processing** | No internet connection required. Your documents never leave your Mac. |
 | ✅ **No accounts or cloud services** | Nothing is uploaded anywhere. Ever. |
+| ✅ **Scanned pages handled** | Image-only pages (scans) are redacted via OCR + image rewriting. No page is left behind. |
 | ✅ **Redaction verified** | After redaction, the tool re-scans the output at 300 DPI to confirm the text is visually gone. |
+| ✅ **Form fields cleaned** | Interactive PDF form fields (AcroForm widgets) containing PII are deleted — not just hidden. |
 | ✅ **Full audit trail** | A `redaction_log.txt` records every item redacted, with page numbers and confidence levels. |
 
 ---
@@ -127,6 +129,88 @@ All detection is tuned for **Australian** documents and naming conventions.
 | Student ID | 3-letter prefix + 3 or more digits | Regex |
 | Person names (unlabelled) | AI-detected names in free text | Presidio + GLiNER |
 | Location mentions | Suburb and location references | Presidio |
+
+### Name Detection — In Depth
+
+The tool doesn't just search for the exact name you typed. It automatically generates **variations** of the student name and checks for all of them:
+
+| Input | Variations Generated |
+|-------|---------------------|
+| `Joe Bloggs` | "Joe Bloggs", "Joe", "Bloggs", "J Bloggs", "J. Bloggs", "JF", "J.F." |
+
+It also handles:
+
+- **Possessive forms**: "Joe's" and "Joe's" (curly apostrophes) are matched as "Joe"
+- **Contextual family detection**: If a line contains "(mother)" or "(father)", nearby names are flagged even without explicit labels
+- **Parenthetical name patterns**: "Joe (parent: Sarah Bloggs)" catches both the student and parent name
+- **Short names preserved**: Even 2-character names like "Jo" are matched if they exactly match the student name you entered
+
+### Filename Redaction
+
+If the student's name appears in the **filename** of a document (e.g. `Joe_Bloggs_Assessment.pdf`), the output file's name will have the PII replaced with `[REDACTED]`:
+
+```
+Input:  Joe_Bloggs_Assessment.pdf
+Output: [REDACTED]_[REDACTED]_Assessment_redacted.pdf
+```
+
+This prevents accidental disclosure through file names in shared folders or email attachments.
+
+---
+
+## ⬛ How Redaction Works
+
+The tool uses **three different redaction strategies** depending on the type of content in each PDF page. This happens automatically — you don't need to choose.
+
+### Strategy 1 — Text Layer Redaction (standard PDFs)
+
+Most PDFs have a searchable text layer. For these pages:
+
+1. The tool searches the text layer for each approved PII item
+2. It draws a redaction annotation over the matching text
+3. It applies the redaction — **permanently destroying the underlying text**
+4. The redacted area becomes a solid black rectangle
+
+This uses PyMuPDF's `apply_redactions()` with `images=PDF_REDACT_IMAGE_NONE` — meaning images on text-layer pages are never touched, only the text.
+
+### Strategy 2 — OCR Image Redaction (scanned pages)
+
+Scanned documents (where each page is a photograph or scan) have **no text layer** — the words exist only as pixels in an image. For these pages:
+
+1. The page is rendered at **300 DPI** to a high-resolution image
+2. **Tesseract OCR** reads every word and its position on the page
+3. Each OCR word is compared against the approved PII list using intelligent matching:
+   - Punctuation-stripped comparison (handles "Joe," matching "Joe")
+   - Possessive handling ("Joe's" matches "Joe")
+   - Special character preservation for emails/URLs ("joe@email.com" matched as-is)
+4. Matching words are blacked out by drawing filled rectangles on the image
+5. The original page content is replaced with the redacted image
+
+> **Plain English:** The tool photographs the scanned page, reads the text in the photo using OCR, blacks out the PII words on the photo, then replaces the original page with the blacked-out version.
+
+### Strategy 3 — Form Widget Deletion (interactive PDFs)
+
+Some PDFs contain interactive form fields (text boxes, dropdowns) — called AcroForm widgets. These can contain PII that is invisible to text-layer search. For example, a student's name might be typed into a fillable "Name:" field.
+
+After text-layer and OCR redaction, the tool:
+
+1. Scans every form widget (annotation) on each page
+2. Reads the widget's field value
+3. If the value matches any redacted PII text, the **entire widget is deleted**
+
+This is important because form fields store data separately from the text layer — you can't redact them with black boxes alone.
+
+### Which Strategy Is Used When?
+
+The tool checks **each page independently**:
+
+| Page Type | Detection Method | Redaction Method |
+|-----------|-----------------|------------------|
+| Has text layer | `page.get_text("words")` returns words | Text-layer redaction (Strategy 1) |
+| Image-only (scan) | No text, but images present | OCR image redaction (Strategy 2) |
+| Has form widgets | `page.widgets()` returns annotations | Widget deletion (Strategy 3, runs after 1 or 2) |
+
+A single PDF can have mixed pages — some with text, some scanned. Each page gets the right strategy automatically.
 
 ### What Is NOT Redacted
 
@@ -349,7 +433,7 @@ A summary of how many items across how many documents will be redacted. Review i
 ### Screen 5 — Complete
 
 - **Green banner**: Redaction succeeded and was verified
-- **Orange banner**: Some items were on image-only (scanned) pages — manual review recommended for those pages
+- **Orange banner**: Some pages were image-only (scanned) and were redacted via OCR — review recommended, as OCR quality depends on scan quality
 - **Red banner**: A verification check failed — review that document carefully
 
 Links to open the output folder and view the audit log are on this screen.
@@ -380,8 +464,8 @@ Document: Assessment_Report.pdf
   Page 2, Line 7  │ "04 1234 5678"  │ Phone number  │ confidence: 0.98
   Page 3, Line 1  │ "joe@mail.com" │ Email address │ confidence: 0.97
 
-⚠️  FLAGGED: Scanned_Report.pdf
-  Contains 3 item(s) on image-only pages — manual review required
+ℹ️  NOTE: Scanned_Report.pdf
+  Pages 1-3 used OCR redaction (image-only pages) — review recommended
 ```
 
 Keep this log. It is your record of what was removed and when.
@@ -429,7 +513,15 @@ Make sure Tesseract is installed (Step 4 above). Documents that are scans of pri
 
 ### A redaction didn't work on a scanned page
 
-Scanned pages (image-only PDFs) cannot be automatically redacted — the text has no underlying data layer to edit. The tool will flag these pages with a warning. For those pages, you will need to redact manually.
+Scanned pages are redacted using OCR (optical character recognition). The quality of redaction depends on the scan quality — blurry or low-resolution scans may cause Tesseract to misread words. If you see PII surviving redaction on a scanned page:
+
+1. Check the scan quality — re-scan at 300 DPI or higher if possible
+2. The audit log will note which pages used OCR redaction
+3. For very poor scans, manual redaction may still be needed
+
+### "OCR redaction used" warning in the audit log
+
+This is informational, not an error. It means the tool detected image-only pages and used the OCR redaction path (Strategy 2 above). The redaction still happened — the warning is there so you know to double-check those pages, since OCR is less precise than text-layer redaction.
 
 ---
 
@@ -444,7 +536,10 @@ gantt
     3-engine AI detection         :done, 2025-03, 2026-02
     Metadata stripping            :done, 2026-02, 2026-02
     OCR verification              :done, 2026-02, 2026-02
-    142-test suite                :done, 2026-02, 2026-02
+    Form widget redaction         :done, 2026-03, 2026-03
+    Filename PII redaction        :done, 2026-03, 2026-03
+    OCR redaction (scanned pages) :done, 2026-03, 2026-03
+    212-test suite                :done, 2026-03, 2026-03
     section Coming Soon
     Mac .app bundle (no Terminal) :active, 2026-03, 2026-05
     DMG installer                 :2026-05, 2026-06
@@ -477,26 +572,48 @@ bulk-redaction-tool/
 │
 ├── src/
 │   ├── core/
-│   │   ├── pii_orchestrator.py     # 3-engine orchestrator (main entry point)
-│   │   ├── pii_detector.py         # Regex detection engine
-│   │   ├── presidio_recognizers.py # 6 custom AU Presidio recognizers
+│   │   ├── pii_orchestrator.py     # 3-engine orchestrator (main detection entry point)
+│   │   ├── pii_detector.py         # Regex detection engine + PIIMatch dataclass
+│   │   ├── presidio_recognizers.py # 6 custom Australian Presidio recognizers
 │   │   ├── gliner_provider.py      # GLiNER zero-shot NER wrapper
-│   │   ├── redactor.py             # PyMuPDF redaction + metadata strip
-│   │   ├── text_extractor.py       # Text + OCR extraction
-│   │   ├── document_converter.py   # LibreOffice Word → PDF
-│   │   ├── logger.py               # Audit log generation
-│   │   └── session_state.py        # Streamlit session management
+│   │   ├── redactor.py             # Dual-path redaction (text-layer + OCR) + metadata strip
+│   │   ├── text_extractor.py       # Text + OCR extraction from PDFs
+│   │   ├── document_converter.py   # LibreOffice Word → PDF conversion
+│   │   ├── binary_resolver.py      # Cross-platform binary path resolution (Tesseract, LibreOffice)
+│   │   ├── logger.py               # Audit log generation and save
+│   │   └── session_state.py        # Streamlit session management + navigate_to()
+│   ├── services/
+│   │   ├── conversion_service.py   # Document conversion business logic
+│   │   ├── detection_service.py    # PII detection business logic
+│   │   └── redaction_service.py    # Redaction orchestration (routes text-layer vs OCR pages)
 │   └── ui/
 │       └── screens.py              # All 5 Streamlit screens
 │
+├── backend/
+│   ├── main.py                     # FastAPI API layer (Phase 2 desktop app)
+│   └── schemas.py                  # Pydantic request/response models
+│
+├── desktop/                        # Vite + React + Electron frontend (Phase 2)
+│   ├── electron/
+│   │   ├── main.cjs                # Electron main process
+│   │   └── preload.cjs             # Electron preload script
+│   └── src/
+│       ├── pages/                  # 5 wizard pages
+│       └── components/             # Layout, Sidebar
+│
 └── tests/
-    ├── test_pii_detector.py         # 39 tests: patterns, integration
-    ├── test_pii_detector_names.py   # 44 tests: name variations, contextual
-    ├── test_pii_orchestrator.py     # Orchestrator merge/dedup tests
-    ├── test_presidio_recognizers.py # AU recognizer unit tests
-    ├── test_gliner_provider.py      # GLiNER wrapper tests
-    ├── test_metadata_stripping.py   # PDF metadata removal tests
-    └── test_ocr_verification.py    # Post-redaction OCR verification tests
+    ├── test_pii_detector.py         # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
+    ├── test_pii_detector_names.py   # 54 tests: name variations, contextual, possessives, family
+    ├── test_pii_orchestrator.py     # 22 tests: orchestrator merge, dedup, multi-engine
+    ├── test_presidio_recognizers.py # 18 tests: 6 AU recognizer unit tests
+    ├── test_gliner_provider.py      # 12 tests: GLiNER wrapper tests
+    ├── test_redactor.py             # 9 tests: text-layer redaction, metadata, routing
+    ├── test_ocr_redaction.py        # 19 tests: OCR page detection, image redaction, word matching
+    ├── test_ocr_verification.py     # 7 tests: post-redaction OCR verification
+    ├── test_metadata_stripping.py   # 8 tests: PDF metadata removal
+    ├── test_widget_redaction.py     # 6 tests: AcroForm widget deletion
+    ├── test_filename_redaction.py   # 12 tests: PII in filenames
+    └── test_binary_resolver.py      # 6 tests: cross-platform binary path resolution
 ```
 
 ### Running Tests
@@ -506,19 +623,23 @@ source venv/bin/activate
 pytest tests/ -v
 ```
 
-All 142 tests should pass in under 30 seconds.
+All 212 tests should pass in under 30 seconds.
 
 ### Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| UI | Streamlit |
+| UI (Streamlit version) | Streamlit |
+| UI (Desktop version) | Electron + React + Vite + Tailwind v4 |
+| API layer (Desktop) | FastAPI |
 | PDF processing | PyMuPDF (fitz) |
+| Image redaction | Pillow (PIL) ImageDraw |
 | AI / NER | Microsoft Presidio + spaCy `en_core_web_lg` |
 | Zero-shot NER | GLiNER |
 | OCR | Tesseract + pytesseract |
 | Word conversion | LibreOffice headless |
-| Tests | pytest |
+| State management (Desktop) | Zustand |
+| Tests | pytest (212 tests) |
 | Language | Python 3.13+ |
 
 ---
