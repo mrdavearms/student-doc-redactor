@@ -12,8 +12,8 @@ class DocumentConverter:
     """Handles conversion of Word documents to PDF"""
 
     def __init__(self):
-        # Path to LibreOffice binary (installed via Homebrew)
-        self.soffice_path = "/opt/homebrew/bin/soffice"
+        from binary_resolver import resolve_libreoffice
+        self.soffice_path = resolve_libreoffice()
 
     def check_libreoffice_installed(self) -> Tuple[bool, str]:
         """
@@ -22,21 +22,9 @@ class DocumentConverter:
         Returns:
             Tuple of (is_installed, message)
         """
-        # First, just check if the file exists (fast)
-        if not Path(self.soffice_path).exists():
-            # Check alternative locations (Intel Mac Homebrew, app bundle)
-            for alt_path in [
-                "/usr/local/bin/soffice",  # Intel Mac Homebrew
-                "/Applications/LibreOffice.app/Contents/MacOS/soffice",  # App bundle
-            ]:
-                if Path(alt_path).exists():
-                    self.soffice_path = alt_path
-                    return True, "LibreOffice found"
-            return False, "LibreOffice not found. Install via: brew install --cask libreoffice"
-
-        # File exists, assume it's working
-        # (Running --version can be slow on first launch)
-        return True, "LibreOffice installed"
+        if self.soffice_path and Path(self.soffice_path).exists():
+            return True, "LibreOffice installed"
+        return False, "LibreOffice not found. Install via: brew install --cask libreoffice"
 
     def convert_to_pdf(self, input_file: Path, output_dir: Path) -> Tuple[bool, str, Path]:
         """
@@ -51,6 +39,9 @@ class DocumentConverter:
         """
         if input_file.suffix.lower() not in ['.doc', '.docx']:
             return False, f"Not a Word document: {input_file.suffix}", None
+
+        if not self.soffice_path:
+            return False, "LibreOffice not found. Install via: brew install --cask libreoffice", None
 
         try:
             # Use LibreOffice in headless mode to convert
