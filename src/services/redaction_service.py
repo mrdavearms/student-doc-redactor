@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from src.core.pii_detector import PIIMatch
-from src.core.redactor import PDFRedactor, RedactionItem
+from src.core.pii_detector import PIIDetector, PIIMatch
+from src.core.redactor import PDFRedactor, RedactionItem, strip_pii_from_filename
 from src.core.logger import RedactionLogger, LogEntry
 
 
@@ -26,6 +26,8 @@ class RedactionRequest:
     user_selections: Dict[str, bool]
     # How to handle existing 'redacted' folder: 'overwrite' | 'new' | None (no existing)
     folder_action: Optional[str] = None
+    parent_names: List[str] = field(default_factory=list)   # NEW
+    family_names: List[str] = field(default_factory=list)   # NEW
 
 
 @dataclass
@@ -99,6 +101,18 @@ class RedactionService:
         # 2. Initialise logger
         logger = RedactionLogger(request.folder_path, request.student_name)
 
+        # 2b. Build name variations for filename stripping
+        # Use PIIDetector to get student name variations, then append parent/family names
+        _detector = PIIDetector(
+            request.student_name,
+            request.parent_names,
+            request.family_names,
+        )
+        name_variations = list(_detector.name_variations)
+        for name in request.parent_names + request.family_names:
+            if len(name) >= 3 and name not in name_variations:
+                name_variations.append(name)
+
         # 3. Process each document
         results = RedactionResults(redacted_folder=redacted_folder)
 
@@ -109,6 +123,7 @@ class RedactionService:
                 user_selections=request.user_selections,
                 redacted_folder=redacted_folder,
                 logger=logger,
+                name_variations=name_variations,
             )
             results.document_results.append(doc_result)
 
@@ -156,6 +171,7 @@ class RedactionService:
         user_selections: Dict[str, bool],
         redacted_folder: Path,
         logger: RedactionLogger,
+        name_variations: List[str] = None,
     ) -> DocumentResult:
         """Process a single document: filter selections, redact, verify."""
         doc_data = detected_pii.get(doc, {})
@@ -188,6 +204,18 @@ class RedactionService:
             logger.add_flagged_file(doc.name, warning_msg)
             result.ocr_warnings.append(warning_msg)
 
+        # Compute safe output filename (strips PII from stem)
+        safe_stem = strip_pii_from_filename(doc.stem, name_variations or [])
+        output_filename = f"{safe_stem}_redacted.pdf"
+
+        # Collision guard: if another file already produced the same stripped name
+        counter = 2
+        while (redacted_folder / output_filename).exists():
+            output_filename = f"{safe_stem}_{counter}_redacted.pdf"
+            counter += 1
+
+        output_path = redacted_folder / output_filename
+
         # Build redaction items and log entries
         redaction_items = []
         for match in selected_matches:
@@ -198,7 +226,7 @@ class RedactionService:
             ))
             logger.add_entry(LogEntry(
                 document_name=doc.name,
-                output_name=f"{doc.stem}_redacted.pdf",
+                output_name=output_filename,
                 page_num=match.page_num,
                 line_num=match.line_num,
                 text=match.text,
@@ -207,7 +235,6 @@ class RedactionService:
             ))
 
         # Perform redaction
-        output_path = redacted_folder / f"{doc.stem}_redacted.pdf"
         success, message = self._redactor.redact_pdf(doc, output_path, redaction_items)
 
         if success:
