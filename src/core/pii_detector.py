@@ -38,7 +38,7 @@ _CONTEXTUAL_NAME_EXCLUDE = {
     # Family relationship words — these are roles, not names
     'dad', 'mum', 'mom', 'mother', 'father',
     'brother', 'sister', 'sibling',
-    'guardian', 'parent', 'carer', 'caregiver',
+    'guardian', 'parent', 'partner', 'carer', 'caregiver',
     'nan', 'nana', 'grandmother', 'grandfather', 'grandma', 'grandpa',
     # Articles, prepositions
     'the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for',
@@ -113,6 +113,7 @@ class PIIDetector:
         r'Brother',
         r'Sister',
         r'Sibling',
+        r'Partner',
         r'Family member',
         r'Lives with',
         r'Referred by parent',
@@ -358,23 +359,35 @@ class PIIDetector:
 
         # Check for family keywords
         for keyword in self.FAMILY_KEYWORDS:
-            # Match keyword followed by colon/space, then a capitalized name
-            # Use word boundary before keyword to avoid matching within words
-            pattern = re.compile(r'\b' + keyword + r'[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', re.IGNORECASE)
-            for match in pattern.finditer(line):
-                name = match.group(1)
-                # Skip common words, articles, prepositions, and professional titles
-                if name.lower() not in _CONTEXTUAL_NAME_EXCLUDE:
-                    context = self._get_context(line, match.start(1), match.end(1))
-                    category = 'Parent/Guardian' if any(k in keyword.lower() for k in ['mother', 'father', 'parent', 'mum', 'dad', 'guardian', 'carer']) else 'Family member'
-                    matches.append(PIIMatch(
-                        text=name,
-                        category=category,
-                        confidence=0.65,
-                        page_num=page_num,
-                        line_num=line_num,
-                        context=context
-                    ))
+            category = 'Parent/Guardian' if any(k in keyword.lower() for k in ['mother', 'father', 'parent', 'mum', 'dad', 'guardian', 'carer', 'partner']) else 'Family member'
+
+            # Name capture pattern: 1-2 capitalised words
+            _name_pat = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'
+
+            # Three syntactic patterns for how documents reference family members:
+            #   1. "Father: Nick" or "Father Nick"  (colon/space)
+            #   2. "his father (Nick)"               (parenthetical)
+            #   3. "his sister, Summer,"              (comma-separated)
+            patterns = [
+                re.compile(r'\b' + keyword + r'[:\s]+' + _name_pat, re.IGNORECASE),
+                re.compile(r'\b' + keyword + r'\s*\(\s*' + _name_pat + r'\s*\)', re.IGNORECASE),
+                re.compile(r'\b' + keyword + r',\s+' + _name_pat, re.IGNORECASE),
+            ]
+
+            for pattern in patterns:
+                for match in pattern.finditer(line):
+                    name = match.group(1)
+                    # Skip common words, articles, prepositions, and professional titles
+                    if name.lower() not in _CONTEXTUAL_NAME_EXCLUDE:
+                        context = self._get_context(line, match.start(1), match.end(1))
+                        matches.append(PIIMatch(
+                            text=name,
+                            category=category,
+                            confidence=0.65,
+                            page_num=page_num,
+                            line_num=line_num,
+                            context=context
+                        ))
 
         # Also check user-provided parent/family names
         for parent_name in self.parent_names:
