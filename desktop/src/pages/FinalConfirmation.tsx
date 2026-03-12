@@ -7,7 +7,7 @@ import { api } from '../api';
 export default function FinalConfirmation() {
   const {
     detectionResults, userSelections, folderPath, studentName,
-    conversionResults, navigateTo, setRedactionResults, setLoading, setError,
+    navigateTo, setRedactionResults, setLoading, setError,
   } = useStore();
 
   const [folderAction, setFolderAction] = useState<string | null>(null);

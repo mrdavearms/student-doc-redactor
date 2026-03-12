@@ -8,7 +8,6 @@ import type {
   Screen,
   ConversionResults,
   DetectionResults,
-  DocumentPII,
   RedactionResults,
 } from './types';
 
@@ -77,7 +76,7 @@ const initialState = {
   error: null,
 };
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>((set) => ({
   ...initialState,
 
   navigateTo: (screen) => set({ currentScreen: screen, error: null }),

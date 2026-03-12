@@ -17,8 +17,8 @@ PYTHON_DEST="$REPO_ROOT/bundled-python"
 TESSERACT_DEST="$REPO_ROOT/bundled-tesseract"
 
 # ── Python version and release ────────────────────────────────────────
-PYTHON_VERSION="3.13.4"
-PBS_TAG="20250707"
+PYTHON_VERSION="3.13.12"
+PBS_TAG="20260310"
 PBS_FILENAME="cpython-${PYTHON_VERSION}+${PBS_TAG}-aarch64-apple-darwin-install_only.tar.gz"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/${PBS_FILENAME}"
 

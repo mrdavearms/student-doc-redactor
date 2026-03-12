@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
-import type { DependencyStatus, ConversionResults } from '../types';
+import type { DependencyStatus } from '../types';
 
 export default function ConversionStatus() {
   const {

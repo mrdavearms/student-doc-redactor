@@ -17,8 +17,8 @@ $PythonDest = Join-Path $RepoRoot "bundled-python"
 $TesseractDest = Join-Path $RepoRoot "bundled-tesseract"
 
 # ── Python version and release ────────────────────────────────────────
-$PythonVersion = "3.13.4"
-$PbsTag = "20250707"
+$PythonVersion = "3.13.12"
+$PbsTag = "20260310"
 $PbsFilename = "cpython-${PythonVersion}+${PbsTag}-x86_64-pc-windows-msvc-install_only.tar.gz"
 $PbsUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/${PbsTag}/${PbsFilename}"
 
