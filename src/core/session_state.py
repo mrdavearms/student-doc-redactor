@@ -21,6 +21,10 @@ def init_session_state():
         st.session_state.parent_names = ''
     if 'family_names' not in st.session_state:
         st.session_state.family_names = ''
+    if 'organisation_names' not in st.session_state:
+        st.session_state.organisation_names = ''
+    if 'redact_header_footer' not in st.session_state:
+        st.session_state.redact_header_footer = True
 
     # Processing state
     if 'documents' not in st.session_state:
