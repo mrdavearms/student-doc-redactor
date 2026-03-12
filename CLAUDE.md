@@ -178,13 +178,21 @@ The OCR redaction pipeline:
 
 OCR warnings are now **informational** (not error/skip signals). The audit log notes which pages used OCR redaction.
 
-### 12. NEVER use `fitz.PDF_REDACT_IMAGE_REMOVE` on scanned PDFs
+### 12. Every embedded image is OCR-scanned for PII (Stage 2)
+
+After text-layer redaction, `_redact_embedded_images()` runs on every page. It extracts each embedded image via `doc.extract_image(xref)`, OCRs it with pytesseract, blacks out PII matches in the image pixels using PIL, and replaces the original via `page.replace_image(xref, stream=png_bytes)`. This catches PII in email screenshots, scanned documents, and even small logos. No image is too small to scan — there is no size threshold.
+
+### 13. OCR word-matching logic is shared via `_match_and_redact_ocr_words()`
+
+Both `_redact_ocr_page()` (full-page image-only OCR) and `_redact_embedded_images()` (per-image OCR) use the same matching helper. Any change to matching rules (possessives, punctuation, email substring, etc.) must be made in `_match_and_redact_ocr_words()` to affect both paths.
+
+### 14. NEVER use `fitz.PDF_REDACT_IMAGE_REMOVE` on scanned PDFs
 
 `page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_REMOVE)` will **delete the entire full-page scan image**, leaving a blank white page. This is catastrophic for scanned documents where each page IS a single image.
 
 Always use `images=fitz.PDF_REDACT_IMAGE_NONE` for text-layer redactions, and use the `_redact_ocr_page()` PIL ImageDraw path for image-only pages.
 
-### 13. OCR word matching has two modes — cleaned and exact
+### 15. OCR word matching has two modes — cleaned and exact
 
 In `_redact_ocr_page()`, OCR words are matched against PII using:
 
@@ -199,7 +207,7 @@ if not pii_lower.isalpha() and pii_lower in ocr_lower:
 
 The `not pii_lower.isalpha()` guard prevents the substring match from firing for plain-name PII like "Joe" — otherwise "Joe" would match inside "joe@email.com" as a separate hit, causing double-counting.
 
-### 14. Page content replacement in PyMuPDF requires clearing content streams
+### 16. Page content replacement in PyMuPDF requires clearing content streams
 
 When replacing a page's visual content (for OCR redaction), you can't just insert an image — the old content streams must be cleared first:
 
@@ -213,11 +221,11 @@ page.insert_image(page.rect, stream=img_bytes, overlay=True)
 
 **Do NOT use `page._cleanContents()`** — this private API does not exist in current PyMuPDF versions. The public `page.clean_contents()` plus content stream clearing handles the same job.
 
-### 15. Form widget (AcroForm) deletion runs after text/OCR redaction
+### 17. Form widget (AcroForm) deletion runs after text/OCR redaction
 
 `_delete_pii_widgets()` iterates over `page.widgets()` and deletes any widget whose field value matches redacted PII text. This runs AFTER text-layer or OCR redaction, as a separate pass. It catches PII stored in interactive form fields that are invisible to `page.search_for()`.
 
-### 16. Filename PII redaction is handled by the service layer
+### 18. Filename PII redaction is handled by the service layer
 
 `redaction_service.py` checks if the student name appears in document filenames. If found, the output filename has PII replaced with `[REDACTED]`. This logic is in the service layer, not in `redactor.py`.
 
