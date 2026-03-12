@@ -96,6 +96,30 @@ def _make_image_pdf_with_text(text: str, tmp_path: Path) -> Path:
     return pdf_path
 
 
+def _make_hybrid_page(text_content="Some text", image_width=400, image_height=300):
+    """
+    Create a single-page PDF with BOTH native text AND an embedded image.
+
+    This simulates the real-world case where a page has text-layer content
+    (so _is_image_only_page returns False) but also has an embedded image
+    that may contain PII (e.g. an email screenshot).
+
+    Returns:
+        (page, doc) tuple.
+    """
+    doc = fitz.open()
+    page = doc.new_page()
+    # Add native text layer
+    page.insert_text((72, 100), text_content, fontsize=12)
+    # Add an embedded image
+    img = Image.new("RGB", (image_width, image_height), "white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    page.insert_image(fitz.Rect(50, 200, 50 + image_width // 2, 200 + image_height // 2), stream=buf.read())
+    return page, doc
+
+
 # ---------------------------------------------------------------------------
 # _is_image_only_page tests
 # ---------------------------------------------------------------------------
@@ -467,3 +491,157 @@ class TestServiceLayerOcrItems:
 
         assert "manual review recommended" in ocr_section, \
             "OCR warning should recommend manual review"
+
+
+# ---------------------------------------------------------------------------
+# _redact_embedded_images tests (per-image OCR scanning)
+# ---------------------------------------------------------------------------
+
+class TestRedactEmbeddedImages:
+    """
+    Test the per-image OCR scanning that extracts each embedded image,
+    OCRs it independently, and blacks out PII matches in the image pixels.
+    """
+
+    def setup_method(self):
+        self.redactor = PDFRedactor()
+
+    def _mock_ocr_data(self, words_with_boxes):
+        """Build pytesseract.image_to_data DICT output."""
+        data = {'text': [], 'left': [], 'top': [], 'width': [], 'height': [], 'conf': []}
+        for word, x, y, w, h in words_with_boxes:
+            data['text'].append(word)
+            data['left'].append(x)
+            data['top'].append(y)
+            data['width'].append(w)
+            data['height'].append(h)
+            data['conf'].append(95)
+        return data
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_finds_pii_in_embedded_image(self, mock_ocr, mock_tess_ver):
+        """PII found inside an embedded image should be redacted."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Joe", 100, 50, 80, 30),
+            ("Bloggs", 200, 50, 80, 30),
+        ])
+
+        page, doc = _make_hybrid_page()
+        items = [RedactionItem(page_num=1, text="Joe Bloggs")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count >= 1
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_no_pii_returns_zero(self, mock_ocr, mock_tess_ver):
+        """When no PII is found in any image, return 0."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("The", 50, 50, 50, 30),
+            ("report", 120, 50, 100, 30),
+        ])
+
+        page, doc = _make_hybrid_page()
+        items = [RedactionItem(page_num=1, text="Joe")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count == 0
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_page_with_no_images_returns_zero(self, mock_ocr, mock_tess_ver):
+        """A text-only page (no images) should return 0 immediately."""
+        mock_tess_ver.return_value = '5.0'
+
+        page, doc = _make_text_page("Hello world")
+        items = [RedactionItem(page_num=1, text="Hello")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count == 0
+        # OCR should never be called — no images to scan
+        mock_ocr.assert_not_called()
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_multiple_images_all_scanned(self, mock_ocr, mock_tess_ver):
+        """Each embedded image should be OCR-scanned independently."""
+        mock_tess_ver.return_value = '5.0'
+        # First image has PII, second doesn't
+        mock_ocr.side_effect = [
+            self._mock_ocr_data([("Joe", 10, 10, 50, 20)]),
+            self._mock_ocr_data([("nothing", 10, 10, 80, 20)]),
+        ]
+
+        # Create page with TWO images
+        doc = fitz.open()
+        page = doc.new_page()
+        for i in range(2):
+            img = Image.new("RGB", (200, 200), "white")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            y_off = i * 250
+            page.insert_image(fitz.Rect(50, 50 + y_off, 250, 250 + y_off), stream=buf.read())
+
+        items = [RedactionItem(page_num=1, text="Joe")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count == 1
+        assert mock_ocr.call_count == 2  # Both images scanned
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_email_address_in_image(self, mock_ocr, mock_tess_ver):
+        """Email addresses in images should be matched (substring match for special chars)."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("fred.bloggs@emaildomain.com", 10, 10, 400, 20),
+        ])
+
+        page, doc = _make_hybrid_page()
+        items = [RedactionItem(page_num=1, text="fred.bloggs@emaildomain.com")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count >= 1
+        doc.close()
+
+    @patch('redactor.pytesseract')
+    def test_no_tesseract_returns_zero(self, mock_tess):
+        """Graceful degradation when Tesseract is not available."""
+        mock_tess.get_tesseract_version.side_effect = Exception("not installed")
+
+        page, doc = _make_hybrid_page()
+        items = [RedactionItem(page_num=1, text="Joe")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count == 0
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_image_replaced_in_pdf(self, mock_ocr, mock_tess_ver):
+        """After redaction, the image in the PDF should be replaced (different bytes)."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Joe", 100, 50, 80, 30),
+        ])
+
+        page, doc = _make_hybrid_page()
+
+        # Get original image bytes
+        images = page.get_images(full=True)
+        assert len(images) >= 1
+        orig_xref = images[0][0]
+        orig_img_data = doc.extract_image(orig_xref)
+        orig_bytes = orig_img_data['image']
+
+        items = [RedactionItem(page_num=1, text="Joe")]
+        count = self.redactor._redact_embedded_images(page, items)
+        assert count >= 1
+
+        # Image bytes should have changed (black rectangle drawn)
+        new_img_data = doc.extract_image(orig_xref)
+        new_bytes = new_img_data['image']
+        assert new_bytes != orig_bytes
+        doc.close()
