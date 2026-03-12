@@ -3,10 +3,11 @@
  * Spawns the Python FastAPI backend and creates the app window.
  */
 
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const { autoUpdater } = require('electron-updater');
 
 const BACKEND_PORT = 8765;
 const DEV_SERVER = `http://localhost:5173`;
@@ -119,6 +120,34 @@ function createWindow() {
   });
 }
 
+// ── Auto-updater ──────────────────────────────────────────────────────
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`Update available: ${info.version}`);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-available', info.version);
+    }
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    console.log('Update downloaded — will install on quit');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-downloaded');
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err.message);
+  });
+
+  // Check for updates after a short delay to avoid blocking startup
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10000);
+}
+
 // ── App lifecycle ─────────────────────────────────────────────────────
 
 app.on('ready', async () => {
@@ -128,6 +157,9 @@ app.on('ready', async () => {
     await waitForBackend(BACKEND_PORT);
     console.log('Backend is ready');
     createWindow();
+    if (!isDev) {
+      setupAutoUpdater();
+    }
   } catch (e) {
     console.error('Failed to start backend:', e);
     showErrorWindow(
