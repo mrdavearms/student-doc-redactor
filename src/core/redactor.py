@@ -1,15 +1,17 @@
 """
 Redaction Engine
 Permanently redacts PII from PDFs by removing underlying text and adding black boxes.
+Supports both text-layer redaction and OCR-based image redaction for scanned pages.
 """
 
 import io
+import os
 import re
 import fitz  # PyMuPDF
 from pathlib import Path
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
-from PIL import Image
+from PIL import Image, ImageDraw
 import pytesseract
 
 
@@ -105,19 +107,27 @@ class PDFRedactor:
                 redactions_by_page[item.page_num].append(item)
 
             # Apply redactions page by page
+            ocr_redacted_count = 0
             for page_num, items in redactions_by_page.items():
                 page = doc[page_num - 1]  # Convert to 0-indexed
 
-                for item in items:
-                    if item.bbox:
-                        # We have precise coordinates - use them
-                        self._redact_bbox(page, item.bbox)
-                    else:
-                        # Search for text and redact all instances
-                        self._redact_text_search(page, item.text)
+                if self._is_image_only_page(page):
+                    # Image-only page: render → OCR → draw black rects on image → replace page
+                    ocr_hits = self._redact_ocr_page(page, items)
+                    ocr_redacted_count += ocr_hits
+                    # No apply_redactions needed — _redact_ocr_page replaces the page image directly
+                else:
+                    # Text-layer page: standard redaction
+                    for item in items:
+                        if item.bbox:
+                            # We have precise coordinates - use them
+                            self._redact_bbox(page, item.bbox)
+                        else:
+                            # Search for text and redact all instances
+                            self._redact_text_search(page, item.text)
 
-                # Apply all redactions on this page
-                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                    # Apply all redactions on this page
+                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
                 # Delete form widgets whose values contain redacted PII.
                 # apply_redactions() only removes content-stream text; AcroForm
@@ -205,6 +215,158 @@ class PDFRedactor:
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
                     return True
         return False
+
+    def _is_image_only_page(self, page: fitz.Page) -> bool:
+        """
+        Detect whether a page is image-only (scanned/screenshot with no usable text layer).
+
+        Returns True if the page has no meaningful text but contains at least one image.
+        """
+        words = page.get_text("words")
+        images = page.get_images(full=True)
+        return len(words) == 0 and len(images) > 0
+
+    def _check_tesseract(self) -> bool:
+        """Check if Tesseract is installed and accessible."""
+        try:
+            pytesseract.get_tesseract_version()
+            return True
+        except Exception:
+            return False
+
+    def _redact_ocr_page(self, page: fitz.Page, items: List['RedactionItem']) -> int:
+        """
+        Redact PII on an image-only page using OCR to locate words.
+
+        Renders the page at 300 DPI, OCRs to get word bounding boxes,
+        draws opaque black rectangles over matching regions on the PIL
+        image, then replaces the page content with the modified image.
+
+        Cannot use add_redact_annot + apply_redactions here because
+        PDF_REDACT_IMAGE_REMOVE would destroy the entire full-page scan
+        image (the whole page IS one image on scanned PDFs).
+
+        Args:
+            page: PyMuPDF page object (image-only — no text layer).
+            items: RedactionItems to locate and cover.
+
+        Returns:
+            Number of PII word-groups successfully redacted via OCR.
+        """
+        if not self._check_tesseract():
+            return 0
+
+        # Resolve Tesseract paths using the same binary_resolver as TextExtractor
+        try:
+            from binary_resolver import resolve_tesseract, resolve_tessdata
+            tesseract_path = resolve_tesseract()
+            if tesseract_path:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            tessdata_path = resolve_tessdata()
+            if tessdata_path:
+                os.environ.setdefault("TESSDATA_PREFIX", tessdata_path)
+        except ImportError:
+            pass  # binary_resolver not available — use system defaults
+
+        # Render page at 300 DPI for high-quality OCR
+        dpi = 300
+        pix = page.get_pixmap(dpi=dpi)
+        img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+
+        # OCR with word-level bounding boxes
+        ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+
+        # Build list of (word_text, pixel_bbox) from OCR output
+        ocr_words = []
+        for i in range(len(ocr_data['text'])):
+            word = ocr_data['text'][i].strip()
+            if not word:
+                continue
+            x = ocr_data['left'][i]
+            y = ocr_data['top'][i]
+            w = ocr_data['width'][i]
+            h = ocr_data['height'][i]
+            ocr_words.append((word, (x, y, x + w, y + h)))
+
+        if not ocr_words:
+            return 0
+
+        # Draw black rectangles directly on the PIL image (pixel space)
+        draw = ImageDraw.Draw(img)
+        redacted_count = 0
+        padding = 4  # pixels of extra coverage around each match
+
+        for item in items:
+            pii_text = item.text.strip()
+            if len(pii_text) < 3:
+                continue
+
+            pii_lower = pii_text.lower()
+            pii_words = pii_lower.split()
+
+            if len(pii_words) == 1:
+                # Single-word PII: match individual OCR words
+                for ocr_word, pixel_bbox in ocr_words:
+                    ocr_lower = ocr_word.lower()
+                    # Preserve curly apostrophes in cleaned form
+                    ocr_clean = re.sub(r"[^\w'\u2019]", '', ocr_lower)
+                    if (
+                        ocr_clean == pii_lower
+                        or ocr_clean == pii_lower + "'s"
+                        or ocr_clean == pii_lower + "\u2019s"
+                        or ocr_clean.rstrip(".,;:!?") == pii_lower
+                        # Exact match for PII with special chars (emails, URLs)
+                        or (not pii_lower.isalpha() and pii_lower in ocr_lower)
+                    ):
+                        x0, y0, x1, y1 = pixel_bbox
+                        draw.rectangle(
+                            [x0 - padding, y0 - padding, x1 + padding, y1 + padding],
+                            fill="black",
+                        )
+                        redacted_count += 1
+            else:
+                # Multi-word PII (e.g. "Joe Bloggs"): find consecutive OCR words
+                for start_idx in range(len(ocr_words) - len(pii_words) + 1):
+                    match = True
+                    for wi, pii_w in enumerate(pii_words):
+                        ocr_w = ocr_words[start_idx + wi][0]
+                        ocr_clean = re.sub(r"[^\w']", '', ocr_w.lower())
+                        if ocr_clean != pii_w and ocr_clean.rstrip(".,;:!?") != pii_w:
+                            match = False
+                            break
+                    if match:
+                        first_bbox = ocr_words[start_idx][1]
+                        last_bbox = ocr_words[start_idx + len(pii_words) - 1][1]
+                        x0 = min(first_bbox[0], last_bbox[0])
+                        y0 = min(first_bbox[1], last_bbox[1])
+                        x1 = max(first_bbox[2], last_bbox[2])
+                        y1 = max(first_bbox[3], last_bbox[3])
+                        draw.rectangle(
+                            [x0 - padding, y0 - padding, x1 + padding, y1 + padding],
+                            fill="black",
+                        )
+                        redacted_count += 1
+
+        if redacted_count == 0:
+            return 0
+
+        # Replace the page content with the redacted image.
+        # Convert PIL image back to PNG bytes.
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+
+        # Clear the page and insert the modified image at the same dimensions.
+        page_rect = page.rect
+        page.clean_contents()
+        doc = page.parent
+        # Clear the page's content stream(s)
+        for content_xref in page.get_contents():
+            doc.update_stream(content_xref, b"")
+        # Insert the redacted image to fill the page
+        page.insert_image(page_rect, stream=img_bytes.read(), overlay=True)
+
+        return redacted_count
 
     def _delete_pii_widgets(self, page: fitz.Page, redacted_texts: list):
         """

@@ -192,16 +192,17 @@ class RedactionService:
             items_redacted=len(selected_matches),
         )
 
-        # Check for OCR pages (image-only — can't be auto-redacted)
+        # Note OCR pages — these are redacted via image-level redaction
+        # (PIL ImageDraw) rather than text-layer redaction, so flag for
+        # awareness but do NOT skip them from redaction.
         ocr_item_count = sum(
             1 for m in selected_matches if m.page_num in ocr_pages
         )
         if ocr_item_count > 0:
             warning_msg = (
-                f"Contains {ocr_item_count} item(s) on image-only pages "
-                f"that could not be automatically redacted - manual review required"
+                f"Contains {ocr_item_count} item(s) on image-only (scanned) pages "
+                f"redacted via OCR — manual review recommended"
             )
-            logger.add_flagged_file(doc.name, warning_msg)
             result.ocr_warnings.append(warning_msg)
 
         # Compute safe output filename (strips PII from stem)
@@ -241,10 +242,9 @@ class RedactionService:
             result.output_path = output_path
             result.success = True
 
-            # OCR verification — skip image-only pages
-            redacted_texts = [
-                m.text for m in selected_matches if m.page_num not in ocr_pages
-            ]
+            # OCR verification — now includes image-only pages since they
+            # are redacted via PIL ImageDraw in _redact_ocr_page()
+            redacted_texts = [m.text for m in selected_matches]
             if redacted_texts:
                 all_clean, ocr_failures = self._redactor.verify_redaction_ocr(
                     output_path, redacted_texts
