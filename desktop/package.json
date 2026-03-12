@@ -3,6 +3,7 @@
   "private": true,
   "version": "2.0.0",
   "description": "PII Detection & Redaction Tool for Student Documents",
+  "author": "Antigravity",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -74,7 +75,7 @@
       "icon": "assets/icon.icns",
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["universal"] }
+        { "target": "dmg", "arch": ["arm64"] }
       ],
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
@@ -82,7 +83,7 @@
     },
     "dmg": {
       "title": "Redaction Tool ${version}",
-      "background": "assets/dmg-background.png",
+
       "contents": [
         { "x": 130, "y": 220 },
         { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
