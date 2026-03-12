@@ -392,12 +392,11 @@ def final_confirmation_screen():
     folder_action = None
 
     if redacted_folder.exists():
-        st.info("A 'redacted' folder already exists")
-        folder_action = st.radio(
-            "Choose an action:",
-            ["Overwrite existing folder", "Create new folder (redacted_2)", "Cancel"],
-            index=0
-        )
+        st.info("A 'redacted' folder already exists — it will be overwritten.")
+        create_new = st.checkbox("Create a new folder instead (redacted_2)")
+        folder_action = "Create new folder (redacted_2)" if create_new else "Overwrite existing folder"
+    else:
+        folder_action = "Overwrite existing folder"
 
     # Buttons
     st.divider()
@@ -412,8 +411,7 @@ def final_confirmation_screen():
             session_state.navigate_to('folder_selection')
 
     with col3:
-        disabled = (folder_action == "Cancel") if folder_action else False
-        if st.button("Create Redacted Documents", use_container_width=True, type="primary", disabled=disabled):
+        if st.button("Create Redacted Documents", use_container_width=True, type="primary"):
             with st.spinner("Redacting documents..."):
                 _run_redaction(folder_action)
             session_state.navigate_to('completion')
