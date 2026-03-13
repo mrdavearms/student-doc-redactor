@@ -1,6 +1,7 @@
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, CheckSquare, Square, FileText,
+  ArrowLeft, ArrowRight, CheckSquare, Square, FileText, CheckCircle2,
 } from 'lucide-react';
 import { useStore } from '../store';
 
@@ -10,6 +11,26 @@ export default function DocumentReview() {
     setCurrentDocIndex, toggleSelection, selectAll, deselectAll,
     navigateTo,
   } = useStore();
+
+  /** Find the next doc index that has PII matches, starting from `from`. Returns totalDocs if none found. */
+  const nextDocWithPII = (from: number): number => {
+    for (let i = from; i < (detectionResults?.documents.length ?? 0); i++) {
+      if (detectionResults!.documents[i].matches.length > 0) return i;
+    }
+    return detectionResults?.documents.length ?? 0;
+  };
+
+  // Auto-skip to first doc with PII on mount / when index changes
+  useEffect(() => {
+    if (!detectionResults) return;
+    const doc = detectionResults.documents[currentDocIndex];
+    if (doc && doc.matches.length === 0) {
+      const next = nextDocWithPII(currentDocIndex + 1);
+      if (next < detectionResults.documents.length) {
+        setCurrentDocIndex(next);
+      }
+    }
+  }, [currentDocIndex, detectionResults, setCurrentDocIndex]);
 
   if (!detectionResults || detectionResults.documents.length === 0) {
     return (
@@ -49,6 +70,21 @@ export default function DocumentReview() {
           />
         </div>
       </div>
+
+      {/* Accept All shortcut */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex justify-end"
+      >
+        <button
+          onClick={() => navigateTo('final_confirmation')}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+                     bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm hover:shadow transition-all"
+        >
+          <CheckCircle2 size={16} /> Accept All & Continue to Summary
+        </button>
+      </motion.div>
 
       {/* Document header */}
       <div className="bg-white rounded-xl border border-slate-200 p-5">
@@ -148,7 +184,15 @@ export default function DocumentReview() {
         <div className="flex gap-2">
           {currentDocIndex > 0 && (
             <button
-              onClick={() => setCurrentDocIndex(currentDocIndex - 1)}
+              onClick={() => {
+                for (let i = currentDocIndex - 1; i >= 0; i--) {
+                  if (detectionResults!.documents[i].matches.length > 0) {
+                    setCurrentDocIndex(i);
+                    return;
+                  }
+                }
+                setCurrentDocIndex(Math.max(0, currentDocIndex - 1));
+              }}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
             >
               <ArrowLeft size={16} /> Previous
@@ -165,7 +209,14 @@ export default function DocumentReview() {
         <div>
           {currentDocIndex < totalDocs - 1 ? (
             <button
-              onClick={() => setCurrentDocIndex(currentDocIndex + 1)}
+              onClick={() => {
+                const next = nextDocWithPII(currentDocIndex + 1);
+                if (next < totalDocs) {
+                  setCurrentDocIndex(next);
+                } else {
+                  navigateTo('final_confirmation');
+                }
+              }}
               className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
                          bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all"
             >
