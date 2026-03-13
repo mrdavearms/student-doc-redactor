@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle, XCircle, AlertTriangle, FileText, ArrowRight, ArrowLeft,
@@ -12,12 +12,14 @@ export default function ConversionStatus() {
   const {
     folderPath, conversionResults, setConversionResults,
     setDetectionResults, studentName, parentNames, familyNames,
+    organisationNames,
     navigateTo, setLoading, setError,
   } = useStore();
 
   const [deps, setDeps] = useState<DependencyStatus | null>(null);
   const [processing, setProcessing] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const abortRef = useRef<AbortController | null>(null);
 
   // Check dependencies on mount
   useEffect(() => {
@@ -28,10 +30,15 @@ export default function ConversionStatus() {
   useEffect(() => {
     if (conversionResults || !deps?.can_convert_word) return;
     setProcessing(true);
-    api.processFolder(folderPath)
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    api.processFolder(folderPath, { signal: ctrl.signal })
       .then((r) => setConversionResults(r))
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        if (e.name !== 'AbortError') setError(e.message);
+      })
       .finally(() => setProcessing(false));
+    return () => ctrl.abort();
   }, [deps, folderPath, conversionResults, setConversionResults, setError]);
 
   const results = conversionResults;
@@ -44,12 +51,14 @@ export default function ConversionStatus() {
       const allPdfs = [...results.pdf_files, ...results.converted_files];
       const parentList = parentNames.split(',').map((n) => n.trim()).filter(Boolean);
       const familyList = familyNames.split(',').map((n) => n.trim()).filter(Boolean);
+      const orgList = organisationNames.split(',').map((n) => n.trim()).filter(Boolean);
 
       const detection = await api.detectPII({
         pdf_paths: allPdfs,
         student_name: studentName,
         parent_names: parentList,
         family_names: familyList,
+        organisation_names: orgList,
       });
 
       setDetectionResults(detection);
@@ -95,9 +104,23 @@ export default function ConversionStatus() {
 
       {/* Processing */}
       {processing && (
-        <div className="flex items-center gap-3 text-sm text-slate-500 py-4">
-          <RefreshCw size={16} className="animate-spin text-primary-500" />
-          Converting documents...
+        <div className="flex items-center justify-between py-4">
+          <div className="flex items-center gap-3 text-sm text-slate-500">
+            <RefreshCw size={16} className="animate-spin text-primary-500" />
+            Converting documents...
+          </div>
+          <button
+            onClick={() => {
+              if (confirm('Cancel document processing? You can restart from the previous step.')) {
+                abortRef.current?.abort();
+                setProcessing(false);
+                navigateTo('folder_selection');
+              }
+            }}
+            className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
+          >
+            Cancel
+          </button>
         </div>
       )}
 

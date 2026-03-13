@@ -28,10 +28,11 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ folder_path }) },
     ),
 
-  processFolder: (folder_path: string) =>
+  processFolder: (folder_path: string, options?: RequestInit) =>
     request<import('./types').ConversionResults>('/api/folder/process', {
       method: 'POST',
       body: JSON.stringify({ folder_path }),
+      ...options,
     }),
 
   detectPII: (params: {
