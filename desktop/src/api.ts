@@ -39,23 +39,30 @@ export const api = {
     student_name: string;
     parent_names: string[];
     family_names: string[];
-  }) =>
+    organisation_names: string[];
+  }, options?: RequestInit) =>
     request<import('./types').DetectionResults>('/api/pii/detect', {
       method: 'POST',
       body: JSON.stringify(params),
+      ...options,
     }),
 
   redact: (params: {
     folder_path: string;
     student_name: string;
+    parent_names: string[];
+    family_names: string[];
+    organisation_names: string[];
+    redact_header_footer: boolean;
     documents: string[];
     detected_pii: Record<string, unknown[]>;
     selected_keys: string[];
     folder_action: string | null;
-  }) =>
+  }, options?: RequestInit) =>
     request<import('./types').RedactionResults>('/api/redact', {
       method: 'POST',
       body: JSON.stringify(params),
+      ...options,
     }),
 
   openFolder: (folder_path: string) =>
