@@ -69,6 +69,14 @@
         "from": "../src",
         "to": "app/src",
         "filter": ["**/*.py"]
+      },
+      {
+        "from": "../bundled-python",
+        "to": "bundled-python"
+      },
+      {
+        "from": "../bundled-tesseract",
+        "to": "bundled-tesseract"
       }
     ],
     "mac": {
