@@ -29,6 +29,7 @@ class RedactionRequest:
     parent_names: List[str] = field(default_factory=list)
     family_names: List[str] = field(default_factory=list)
     organisation_names: List[str] = field(default_factory=list)
+    redact_header_footer: bool = False
 
 
 @dataclass
@@ -133,6 +134,7 @@ class RedactionService:
                 redacted_folder=redacted_folder,
                 logger=logger,
                 name_variations=name_variations,
+                redact_header_footer=request.redact_header_footer,
             )
             results.document_results.append(doc_result)
 
@@ -181,6 +183,7 @@ class RedactionService:
         redacted_folder: Path,
         logger: RedactionLogger,
         name_variations: List[str] = None,
+        redact_header_footer: bool = False,
     ) -> DocumentResult:
         """Process a single document: filter selections, redact, verify."""
         doc_data = detected_pii.get(doc, {})
@@ -245,7 +248,10 @@ class RedactionService:
             ))
 
         # Perform redaction
-        success, message = self._redactor.redact_pdf(doc, output_path, redaction_items)
+        success, message = self._redactor.redact_pdf(
+            doc, output_path, redaction_items,
+            redact_header_footer=redact_header_footer,
+        )
 
         if success:
             result.output_path = output_path
