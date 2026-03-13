@@ -115,6 +115,7 @@ def detect_pii(req: DetectPIIRequest):
         student_name=req.student_name,
         parent_names=req.parent_names,
         family_names=req.family_names,
+        organisation_names=req.organisation_names,
     )
 
     results = service.detect_all(pdf_paths)
@@ -222,6 +223,10 @@ def redact_documents(req: RedactRequest):
         detected_pii=detected_pii,
         user_selections=user_selections,
         folder_action=req.folder_action,
+        parent_names=req.parent_names,
+        family_names=req.family_names,
+        organisation_names=req.organisation_names,
+        redact_header_footer=req.redact_header_footer,
     )
 
     results = service.execute(request)

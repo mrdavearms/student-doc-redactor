@@ -39,6 +39,7 @@ class DetectPIIRequest(BaseModel):
     student_name: str
     parent_names: List[str] = []
     family_names: List[str] = []
+    organisation_names: List[str] = []
 
 
 class PIIMatchResponse(BaseModel):
@@ -80,6 +81,10 @@ class RedactRequest(BaseModel):
     detected_pii: Dict[str, List[Dict]]  # {doc_path: [match_dicts]}
     selected_keys: List[str]  # ["<doc_path>_<idx>", ...]
     folder_action: Optional[str] = None  # 'overwrite' | 'new' | None
+    parent_names: List[str] = []
+    family_names: List[str] = []
+    organisation_names: List[str] = []
+    redact_header_footer: bool = False
 
 
 class DocumentResultResponse(BaseModel):
