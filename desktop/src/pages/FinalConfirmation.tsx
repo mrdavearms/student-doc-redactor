@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store';
@@ -7,10 +7,13 @@ import { api } from '../api';
 export default function FinalConfirmation() {
   const {
     detectionResults, userSelections, folderPath, studentName,
+    parentNames, familyNames, organisationNames, redactHeaderFooter,
     navigateTo, setRedactionResults, setLoading, setError,
   } = useStore();
 
-  const [folderAction, setFolderAction] = useState<string | null>(null);
+  const [folderAction, setFolderAction] = useState<string>('new');
+  const [redacting, setRedacting] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   if (!detectionResults) return null;
 
@@ -30,8 +33,10 @@ export default function FinalConfirmation() {
 
   const handleRedact = async () => {
     setLoading(true, 'Redacting documents...');
+    setRedacting(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      // Build selected_keys list
       const selectedKeys: string[] = [];
       for (const doc of detectionResults.documents) {
         doc.matches.forEach((_, idx) => {
@@ -40,23 +45,32 @@ export default function FinalConfirmation() {
         });
       }
 
+      const parentList = parentNames.split(',').map((n) => n.trim()).filter(Boolean);
+      const familyList = familyNames.split(',').map((n) => n.trim()).filter(Boolean);
+      const orgList = organisationNames.split(',').map((n) => n.trim()).filter(Boolean);
+
       const results = await api.redact({
         folder_path: folderPath,
         student_name: studentName,
+        parent_names: parentList,
+        family_names: familyList,
+        organisation_names: orgList,
+        redact_header_footer: redactHeaderFooter,
         documents: detectionResults.documents.map((d) => d.path),
         detected_pii: Object.fromEntries(
           detectionResults.documents.map((d) => [d.path, d.matches])
         ),
         selected_keys: selectedKeys,
         folder_action: folderAction,
-      });
+      }, { signal: ctrl.signal });
 
       setRedactionResults(results);
       navigateTo('completion');
     } catch (e: any) {
-      setError(e.message);
+      if (e.name !== 'AbortError') setError(e.message);
     } finally {
       setLoading(false);
+      setRedacting(false);
     }
   };
 
@@ -154,24 +168,39 @@ export default function FinalConfirmation() {
       <div className="flex justify-between pt-2">
         <button
           onClick={() => navigateTo('document_review')}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
+          disabled={redacting}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
         >
           <ArrowLeft size={16} /> Back to Review
         </button>
 
-        <button
-          onClick={handleRedact}
-          disabled={totalSelected === 0}
-          className={`
-            flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
-            ${totalSelected > 0
-              ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow'
-              : 'bg-slate-100 text-slate-300 cursor-not-allowed'
-            }
-          `}
-        >
-          <ShieldCheck size={16} /> Create Redacted Documents
-        </button>
+        <div className="flex gap-2">
+          {redacting && (
+            <button
+              onClick={() => {
+                if (confirm('Cancel redaction? Progress will be lost.')) {
+                  abortRef.current?.abort();
+                }
+              }}
+              className="px-4 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            onClick={handleRedact}
+            disabled={totalSelected === 0 || redacting}
+            className={`
+              flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
+              ${totalSelected > 0 && !redacting
+                ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow'
+                : 'bg-slate-100 text-slate-300 cursor-not-allowed'
+              }
+            `}
+          >
+            <ShieldCheck size={16} /> Create Redacted Documents
+          </button>
+        </div>
       </div>
     </div>
   );
