@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper } from 'lucide-react';
+import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink } from 'lucide-react';
 import { useStore } from '../store';
 import { SCREENS, type Screen } from '../types';
 
@@ -90,8 +90,15 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-slate-100">
-        <p className="text-[10px] text-slate-300 uppercase tracking-widest">v2.0</p>
+      <div className="px-6 py-4 border-t border-slate-100 space-y-2">
+        <p className="text-[10px] text-slate-300 uppercase tracking-widest">v0.1.0</p>
+        <button
+          onClick={() => window.electronAPI?.openExternal('https://github.com/mrdavearms/student-doc-redactor')}
+          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors"
+        >
+          <ExternalLink size={10} />
+          Report issues on GitHub
+        </button>
       </div>
     </aside>
   );
