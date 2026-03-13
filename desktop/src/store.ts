@@ -21,11 +21,15 @@ interface AppState {
   studentName: string;
   parentNames: string;
   familyNames: string;
+  organisationNames: string;
+  redactHeaderFooter: boolean;
   folderValid: boolean;
   setFolderPath: (path: string) => void;
   setStudentName: (name: string) => void;
   setParentNames: (names: string) => void;
   setFamilyNames: (names: string) => void;
+  setOrganisationNames: (names: string) => void;
+  setRedactHeaderFooter: (val: boolean) => void;
   setFolderValid: (valid: boolean) => void;
 
   // Step 2: Conversion
@@ -65,6 +69,8 @@ const initialState = {
   studentName: '',
   parentNames: '',
   familyNames: '',
+  organisationNames: '',
+  redactHeaderFooter: false,
   folderValid: false,
   conversionResults: null,
   detectionResults: null,
@@ -85,6 +91,8 @@ export const useStore = create<AppState>((set) => ({
   setStudentName: (name) => set({ studentName: name }),
   setParentNames: (names) => set({ parentNames: names }),
   setFamilyNames: (names) => set({ familyNames: names }),
+  setOrganisationNames: (names) => set({ organisationNames: names }),
+  setRedactHeaderFooter: (val) => set({ redactHeaderFooter: val }),
   setFolderValid: (valid) => set({ folderValid: valid }),
 
   setConversionResults: (results) => set({ conversionResults: results }),
