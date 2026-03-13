@@ -8,6 +8,7 @@ import io
 import os
 import re
 import fitz  # PyMuPDF
+import numpy as np
 from pathlib import Path
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
@@ -155,6 +156,15 @@ class PDFRedactor:
                 redacted_texts = [item.text.lower() for item in items]
                 self._delete_pii_widgets(page, redacted_texts)
 
+            # ── Stage 4: Signature image detection ──
+            # Runs on EVERY page, not just pages with detected PII.
+            # Handwritten signatures are PII that can't be detected by text/NER —
+            # they're embedded images with distinctive visual characteristics
+            # (wide aspect ratio, sparse ink, small physical size).
+            signature_count = 0
+            for page in doc:
+                signature_count += self._redact_signature_images(page)
+
             # Strip metadata before saving
             self._strip_metadata(doc)
 
@@ -223,12 +233,9 @@ class PDFRedactor:
             if not word_clean.startswith(needle):
                 continue
             remainder = word_clean[len(needle):]
-            # Exact match, possessive suffix, or purely non-alphanumeric tail
-            if (
-                not remainder
-                or remainder in ("'s", "\u2019s")
-                or not any(c.isalnum() for c in remainder)
-            ):
+            # Exact match, possessive suffix (optionally followed by punctuation),
+            # or purely non-alphanumeric tail (e.g. trailing comma/period).
+            if re.fullmatch(r"(?:['\u2019]s)?[^a-zA-Z0-9]*", remainder):
                 intersection = match_rect & word_rect
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
                     return True
@@ -454,6 +461,109 @@ class PDFRedactor:
             total_redacted += redacted_count
 
         return total_redacted
+
+    # ── Signature detection ────────────────────────────────────────────
+
+    # Thresholds for the heuristic — tuned against real AU psych reports.
+    SIGNATURE_MIN_ASPECT = 2.0       # Signatures are wide, not square/tall
+    SIGNATURE_MAX_RECT_WIDTH = 250   # Points on page — excludes full-width banners
+    SIGNATURE_MIN_PX_WIDTH = 50      # Pixel width — excludes tiny icons
+    SIGNATURE_MAX_PX_HEIGHT = 200    # Pixel height — excludes photos/scans
+    SIGNATURE_MAX_INK_RATIO = 0.30   # Ink coverage — signatures are sparse strokes
+
+    def _redact_signature_images(self, page: fitz.Page) -> int:
+        """
+        Detect and black out likely handwritten signature images on a page.
+
+        Iterates all embedded images and applies a heuristic to identify
+        signatures: wide aspect ratio, small physical size, sparse ink.
+        Matching images are replaced with a solid black rectangle.
+
+        Returns the number of signature images redacted.
+        """
+        images = page.get_images(full=True)
+        if not images:
+            return 0
+
+        doc = page.parent
+        count = 0
+
+        for img_info in images:
+            xref = img_info[0]
+            try:
+                img_dict = doc.extract_image(xref)
+            except Exception:
+                continue
+            if not img_dict or not img_dict.get('image'):
+                continue
+
+            # Get image rect on the page for physical-size check
+            rects = page.get_image_rects(xref)
+            if not rects:
+                continue
+            rect = rects[0]  # Use the first placement
+
+            img_bytes = img_dict['image']
+            try:
+                pil_img = Image.open(io.BytesIO(img_bytes))
+            except Exception:
+                continue
+
+            if self._is_likely_signature(pil_img, rect):
+                # Replace the image with a solid black rectangle
+                black_img = Image.new("RGB", pil_img.size, (0, 0, 0))
+                out_buf = io.BytesIO()
+                black_img.save(out_buf, format="PNG")
+                out_buf.seek(0)
+                try:
+                    page.replace_image(xref, stream=out_buf.read())
+                    count += 1
+                except Exception:
+                    continue
+
+        return count
+
+    def _is_likely_signature(self, img: Image.Image, rect: fitz.Rect) -> bool:
+        """
+        Heuristic check for whether an embedded image is a handwritten signature.
+
+        Criteria (all must pass):
+        1. Wide aspect ratio (> 2:1) — signatures are horizontal strokes
+        2. Small physical size on page (< 250pt wide) — not a letterhead/banner
+        3. Reasonable pixel dimensions (width > 50, height < 200) — not icons/photos
+        4. Low ink ratio (< 30%) — sparse strokes on a mostly-blank background
+
+        Args:
+            img: PIL Image of the embedded image.
+            rect: The image's placement rectangle on the PDF page (points).
+
+        Returns:
+            True if the image likely contains a handwritten signature.
+        """
+        w, h = img.size
+        if h == 0:
+            return False
+
+        # 1. Aspect ratio
+        aspect = w / h
+        if aspect < self.SIGNATURE_MIN_ASPECT:
+            return False
+
+        # 2. Physical size on page
+        if rect.width > self.SIGNATURE_MAX_RECT_WIDTH:
+            return False
+
+        # 3. Pixel dimensions
+        if w < self.SIGNATURE_MIN_PX_WIDTH or h > self.SIGNATURE_MAX_PX_HEIGHT:
+            return False
+
+        # 4. Ink ratio — proportion of dark pixels
+        gray = np.array(img.convert("L"))
+        ink_ratio = (gray < 128).sum() / gray.size
+        if ink_ratio > self.SIGNATURE_MAX_INK_RATIO:
+            return False
+
+        return True
 
     def _redact_ocr_page(self, page: fitz.Page, items: List['RedactionItem']) -> int:
         """

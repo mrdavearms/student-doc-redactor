@@ -47,6 +47,7 @@ This matters most for a tool handling children's data.
 | ✅ **Scanned pages handled** | Image-only pages (scans) are redacted via OCR + image rewriting. No page is left behind. |
 | ✅ **Redaction verified** | After redaction, the tool re-scans the output at 300 DPI to confirm the text is visually gone. |
 | ✅ **Form fields cleaned** | Interactive PDF form fields (AcroForm widgets) containing PII are deleted — not just hidden. |
+| ✅ **Signatures detected** | Handwritten signature images are automatically identified and blacked out using heuristic analysis. |
 | ✅ **Full audit trail** | A `redaction_log.txt` records every item redacted, with page numbers and confidence levels. |
 
 ---
@@ -200,6 +201,19 @@ After text-layer and OCR redaction, the tool:
 
 This is important because form fields store data separately from the text layer — you can't redact them with black boxes alone.
 
+### Strategy 4 — Signature Detection (heuristic image analysis)
+
+Handwritten signatures embedded as images in PDFs are automatically detected and blacked out. The tool examines every embedded image on every page using four heuristic gates:
+
+1. **Aspect ratio** — signatures are wide and short (width ÷ height > 2.0)
+2. **Position** — signatures don't span the full page width (bounding box < 250 points wide on the page)
+3. **Pixel size** — the image must be large enough to be a real signature (> 50 px wide, < 200 px tall)
+4. **Ink ratio** — signatures have thin pen strokes on a white background (< 30% dark pixels)
+
+Images that pass all four gates are replaced with solid black rectangles of the same size. This runs on **every page**, not just pages with other detected PII — because signatures often appear on pages with no other personal information.
+
+> **Plain English:** The tool looks at every picture embedded in the PDF. If a picture is wide, flat, small, and mostly white with thin dark lines — it's probably a signature, and it gets blacked out.
+
 ### Which Strategy Is Used When?
 
 The tool checks **each page independently**:
@@ -209,8 +223,9 @@ The tool checks **each page independently**:
 | Has text layer | `page.get_text("words")` returns words | Text-layer redaction (Strategy 1) |
 | Image-only (scan) | No text, but images present | OCR image redaction (Strategy 2) |
 | Has form widgets | `page.widgets()` returns annotations | Widget deletion (Strategy 3, runs after 1 or 2) |
+| Has embedded images | `page.get_images()` returns image refs | Signature detection (Strategy 4, runs on all pages) |
 
-A single PDF can have mixed pages — some with text, some scanned. Each page gets the right strategy automatically.
+A single PDF can have mixed pages — some with text, some scanned. Each page gets the right strategy automatically. Strategy 4 runs on every page regardless of type.
 
 ### What Is NOT Redacted
 
@@ -218,6 +233,7 @@ A single PDF can have mixed pages — some with text, some scanned. Each page ge
 - School names and organisations
 - Assessment dates (unless explicitly labelled as a date of birth)
 - Technical language, scores, and diagnostic terms
+- Non-signature images (logos, charts, photos that don't match the signature heuristic)
 
 ### Confidence Scores
 
@@ -539,14 +555,14 @@ gantt
     Form widget redaction         :done, 2026-03, 2026-03
     Filename PII redaction        :done, 2026-03, 2026-03
     OCR redaction (scanned pages) :done, 2026-03, 2026-03
-    212-test suite                :done, 2026-03, 2026-03
+    Signature detection           :done, 2026-03, 2026-03
+    257-test suite                :done, 2026-03, 2026-03
     section Coming Soon
     Mac .app bundle (no Terminal) :active, 2026-03, 2026-05
     DMG installer                 :2026-05, 2026-06
     section Future
     Windows support               :2026-06, 2026-09
     Batch processing (multiple students) :2026-07, 2026-10
-    Signature detection           :2026-08, 2026-11
 ```
 
 ---
@@ -576,7 +592,7 @@ bulk-redaction-tool/
 │   │   ├── pii_detector.py         # Regex detection engine + PIIMatch dataclass
 │   │   ├── presidio_recognizers.py # 6 custom Australian Presidio recognizers
 │   │   ├── gliner_provider.py      # GLiNER zero-shot NER wrapper
-│   │   ├── redactor.py             # Dual-path redaction (text-layer + OCR) + metadata strip
+│   │   ├── redactor.py             # Multi-path redaction (text-layer + OCR + signature) + metadata strip
 │   │   ├── text_extractor.py       # Text + OCR extraction from PDFs
 │   │   ├── document_converter.py   # LibreOffice Word → PDF conversion
 │   │   ├── binary_resolver.py      # Cross-platform binary path resolution (Tesseract, LibreOffice)
@@ -607,12 +623,13 @@ bulk-redaction-tool/
     ├── test_pii_orchestrator.py     # 22 tests: orchestrator merge, dedup, multi-engine
     ├── test_presidio_recognizers.py # 18 tests: 6 AU recognizer unit tests
     ├── test_gliner_provider.py      # 12 tests: GLiNER wrapper tests
-    ├── test_redactor.py             # 9 tests: text-layer redaction, metadata, routing
+    ├── test_redactor.py             # 11 tests: text-layer redaction, metadata, routing, possessive matching
+    ├── test_signature_detection.py  # 16 tests: signature heuristic gates, image replacement
     ├── test_ocr_redaction.py        # 19 tests: OCR page detection, image redaction, word matching
     ├── test_ocr_verification.py     # 7 tests: post-redaction OCR verification
     ├── test_metadata_stripping.py   # 8 tests: PDF metadata removal
     ├── test_widget_redaction.py     # 6 tests: AcroForm widget deletion
-    ├── test_filename_redaction.py   # 12 tests: PII in filenames
+    ├── test_filename_redaction.py   # 13 tests: PII in filenames
     └── test_binary_resolver.py      # 6 tests: cross-platform binary path resolution
 ```
 
@@ -623,7 +640,7 @@ source venv/bin/activate
 pytest tests/ -v
 ```
 
-All 212 tests should pass in under 30 seconds.
+All 257 tests should pass in under 5 minutes.
 
 ### Tech Stack
 
@@ -639,7 +656,7 @@ All 212 tests should pass in under 30 seconds.
 | OCR | Tesseract + pytesseract |
 | Word conversion | LibreOffice headless |
 | State management (Desktop) | Zustand |
-| Tests | pytest (212 tests) |
+| Tests | pytest (257 tests) |
 | Language | Python 3.13+ |
 
 ---

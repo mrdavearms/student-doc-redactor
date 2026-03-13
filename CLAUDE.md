@@ -9,7 +9,7 @@ A local Mac Streamlit app that redacts PII from student assessment PDFs and Word
 - **Repo**: https://github.com/mrdavearms/student-doc-redactor (primary) · https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
 - **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
 - **Run**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `source venv/bin/activate && pytest tests/ -v` (239 tests, ~4m30s)
+- **Test**: `source venv/bin/activate && pytest tests/ -v` (257 tests, ~4m30s)
 - **Python**: 3.13+ (required for spaCy compatibility — the `venv/` dir uses 3.13, `venv_old/` is a legacy 3.14 venv that can be ignored)
 
 ---
@@ -48,6 +48,7 @@ redact_pdf(input_pdf, output_pdf, redaction_items)
 │   │
 │   └── _delete_pii_widgets(page, redacted_texts)   # AcroForm cleanup (always)
 │
+├── Stage 4: _redact_signature_images(page)          # Heuristic sig detection (ALL pages)
 ├── _strip_metadata(doc)                             # Author, XMP, embedded files
 └── doc.save(output_pdf)
 ```
@@ -237,6 +238,30 @@ page.insert_image(page.rect, stream=img_bytes, overlay=True)
 
 When `redact_header_footer=True`, `_redact_zones()` runs before any PII redaction. It blanks the top 12% (`HEADER_ZONE_RATIO = 0.12`) and bottom 8% (`FOOTER_ZONE_RATIO = 0.08`) of every page. Text-layer pages use `add_redact_annot()` + `apply_redactions()`; image-only pages use PIL `ImageDraw.rectangle()`. This removes school letterheads, addresses, and logos without needing to detect them as named PII.
 
+### 21. Signature detection ("Stage 4") runs on ALL pages after PII redaction
+
+`_redact_signature_images(page)` iterates every embedded image on every page and applies a four-gate heuristic via `_is_likely_signature()`:
+
+1. **Aspect ratio** > 2.0 (signatures are wide and thin)
+2. **Page width** < 250pt (rejects banners/letterheads)
+3. **Pixel dimensions**: width > 50px AND height < 200px (rejects icons and full-page scans)
+4. **Ink ratio** < 30% (signatures are mostly white space; photos have high ink)
+
+Ink ratio is computed by converting to grayscale and counting pixels below a darkness threshold (< 128). Matching images are replaced with solid black PNGs via `page.replace_image(xref, stream=...)`.
+
+Stage 4 runs on ALL pages, not just pages with detected PII — signatures often appear on pages with no other flagged content. The class-level threshold constants (`SIGNATURE_MIN_ASPECT`, `SIGNATURE_MAX_RECT_WIDTH`, etc.) can be tuned without changing the method logic.
+
+### 22. `_is_whole_word_match()` handles possessive+punctuation combinations
+
+The short-word guard (for texts ≤6 chars) uses a regex to validate the suffix after a needle match:
+
+```python
+remainder = word_clean[len(needle):]
+if re.fullmatch(r"(?:['\u2019]s)?[^a-zA-Z0-9]*", remainder):
+```
+
+This single regex handles: exact matches (empty remainder), possessives (`'s`), trailing punctuation (`,` `.` `)`), and combined forms like `'s,` or `'s.`. Previously, three separate conditions missed the combined possessive+punctuation case (e.g. "Joe's," was not redacted).
+
 ---
 
 ## Session State Keys
@@ -289,13 +314,14 @@ All keys initialised in `session_state.init_session_state()`:
 ## Test Structure
 
 ```
-tests/                                # 239 tests total
+tests/                                # 257 tests total
 ├── test_pii_detector.py              # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
 ├── test_pii_detector_names.py        # 54 tests: name variations, contextual detection, possessives, family
 ├── test_pii_orchestrator.py          # 22 tests: orchestrator merge, dedup, multi-engine coordination
 ├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
 ├── test_gliner_provider.py           # 12 tests: GLiNER zero-shot NER wrapper
-├── test_redactor.py                  # 9 tests: text-layer redaction routing, metadata, core redact_pdf
+├── test_redactor.py                  # 11 tests: text-layer redaction routing, possessive+punctuation, core redact_pdf
+├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
 ├── test_ocr_redaction.py             # 19 tests: image-only page detection, OCR redaction, word matching
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
@@ -353,7 +379,7 @@ Run with output: `pytest tests/ -v -s`
 - **Windows/Linux (Phase 3)**: Not supported yet. Phase 3 roadmap includes Windows COM automation for Word conversion and bundled Tesseract.
 - **Packaging (Phase 4)**: electron-builder for .dmg + .exe not started.
 - **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
-- **Signature detection**: Listed in roadmap, not implemented.
+- **Signature detection**: IMPLEMENTED (March 2026). Heuristic-based Stage 4 in `redact_pdf()`. See rule 21 below.
 - **Batch processing** (multiple students at once): Not implemented.
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
 - **`venv_old/`**: Legacy venv from Python 3.14 era. Not used. Can be deleted once confirmed stable on 3.13 venv.

@@ -93,3 +93,21 @@ class TestRedactTextSearch:
         annots = list(page.annots())
         assert len(annots) >= 1, "'Joe' followed by comma should be redacted"
         doc.close()
+
+    def test_possessive_with_trailing_comma_is_redacted(self):
+        """Regression: 'Joe's,' (possessive + comma) must be redacted.
+        Previously rejected because remainder \"'s,\" matched neither the
+        possessive check nor the pure-punctuation check."""
+        page, doc = _make_page_with_text("collaboratively with Joe's, his parents.")
+        self.redactor._redact_text_search(page, "Joe")
+        annots = list(page.annots())
+        assert len(annots) >= 1, "'Joe' in 'Joe's,' (possessive + comma) should be redacted"
+        doc.close()
+
+    def test_possessive_with_trailing_period_is_redacted(self):
+        """'Joe's.' (possessive + period) must also be redacted."""
+        redactor = PDFRedactor()
+        import fitz
+        fake_rect = fitz.Rect(100, 100, 150, 120)
+        word_rects = [(fake_rect, "Joe's.")]
+        assert redactor._is_whole_word_match(fake_rect, "Joe", word_rects) is True
