@@ -9,7 +9,7 @@ A local Mac Streamlit app that redacts PII from student assessment PDFs and Word
 - **Repo**: https://github.com/mrdavearms/student-doc-redactor (primary) · https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
 - **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
 - **Run**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `source venv/bin/activate && pytest tests/ -v` (212 tests, ~30s)
+- **Test**: `source venv/bin/activate && pytest tests/ -v` (239 tests, ~4m30s)
 - **Python**: 3.13+ (required for spaCy compatibility — the `venv/` dir uses 3.13, `venv_old/` is a legacy 3.14 venv that can be ignored)
 
 ---
@@ -229,6 +229,14 @@ page.insert_image(page.rect, stream=img_bytes, overlay=True)
 
 `redaction_service.py` checks if the student name appears in document filenames. If found, the output filename has PII replaced with `[REDACTED]`. This logic is in the service layer, not in `redactor.py`.
 
+### 19. Organisation names generate word-level variations
+
+`PIIDetector._detect_organisation_names()` splits each org name into words and flags matches ≥3 chars. Common English words (`the`, `school`, `centre`, `clinic`, etc.) are excluded via `GENERIC_ORG_WORDS`. The full org name is matched first (longest match first, like student names). Category: `"Organisation name"`, confidence: `0.90`.
+
+### 20. Header/footer zone redaction ("Stage 0") blanks regions before PII redaction
+
+When `redact_header_footer=True`, `_redact_zones()` runs before any PII redaction. It blanks the top 12% (`HEADER_ZONE_RATIO = 0.12`) and bottom 8% (`FOOTER_ZONE_RATIO = 0.08`) of every page. Text-layer pages use `add_redact_annot()` + `apply_redactions()`; image-only pages use PIL `ImageDraw.rectangle()`. This removes school letterheads, addresses, and logos without needing to detect them as named PII.
+
 ---
 
 ## Session State Keys
@@ -251,6 +259,8 @@ All keys initialised in `session_state.init_session_state()`:
 | `global_decisions` | dict | Bulk approve/reject decisions |
 | `redacted_folder` | Path | Output folder path |
 | `log_content` | str | Audit log string |
+| `organisation_names` | str | Comma-separated organisation names |
+| `redact_header_footer` | bool | Whether to blank header/footer zones |
 | `processing_complete` | bool | Completion flag |
 | `verification_failures` | list | (filename, text) tuples where verification failed |
 | `ocr_warnings` | list | (filename, count) tuples for OCR page warnings |
@@ -272,13 +282,14 @@ All keys initialised in `session_state.init_session_state()`:
 | Centrelink CRN | 0.65 | Medium — contextual guard, pattern is broad |
 | Family/parent (contextual) | 0.65 | Medium — inferred from keyword proximity |
 | Parent/family (user-provided) | 0.95 | High — user explicitly named them |
+| Organisation name | 0.90 | High — user-provided, word-level matching with generic word filter |
 
 ---
 
 ## Test Structure
 
 ```
-tests/                                # 212 tests total
+tests/                                # 239 tests total
 ├── test_pii_detector.py              # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
 ├── test_pii_detector_names.py        # 54 tests: name variations, contextual detection, possessives, family
 ├── test_pii_orchestrator.py          # 22 tests: orchestrator merge, dedup, multi-engine coordination
@@ -289,7 +300,9 @@ tests/                                # 212 tests total
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
 ├── test_widget_redaction.py          # 6 tests: AcroForm widget deletion
-├── test_filename_redaction.py        # 12 tests: PII in filenames → [REDACTED] replacement
+├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
+├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
+├── test_session_state.py             # 2 tests: session state key initialisation
 └── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ```
 
