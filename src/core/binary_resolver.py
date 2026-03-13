@@ -34,7 +34,7 @@ def resolve_tesseract() -> str | None:
         if platform.system() == "Windows":
             candidate = resources / "tesseract" / "tesseract.exe"
         else:
-            candidate = resources / "tesseract"
+            candidate = resources / "bundled-tesseract" / "tesseract"
         if candidate.exists():
             return str(candidate)
 
@@ -66,7 +66,7 @@ def resolve_tessdata() -> str | None:
     """
     resources = _resources_path()
     if resources:
-        candidate = resources / "tessdata"
+        candidate = resources / "bundled-tesseract" / "tessdata"
         if candidate.exists():
             return str(candidate)
     return None

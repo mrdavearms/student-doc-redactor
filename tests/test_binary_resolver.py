@@ -22,7 +22,8 @@ def test_resolve_libreoffice_returns_string_or_none():
 def test_resolve_tesseract_uses_resources_path_when_set(tmp_path):
     from binary_resolver import resolve_tesseract
     # Simulate production: RESOURCES_PATH env var pointing to a temp dir
-    fake_binary = tmp_path / "tesseract"
+    (tmp_path / "bundled-tesseract").mkdir()
+    fake_binary = tmp_path / "bundled-tesseract" / "tesseract"
     fake_binary.touch()
     with patch.dict(os.environ, {"RESOURCES_PATH": str(tmp_path)}):
         with patch("platform.system", return_value="Darwin"):
@@ -46,7 +47,8 @@ def test_resolve_tessdata_returns_string_or_none():
 
 def test_resolve_tessdata_uses_resources_path_when_set(tmp_path):
     from binary_resolver import resolve_tessdata
-    fake_tessdata = tmp_path / "tessdata"
+    (tmp_path / "bundled-tesseract").mkdir()
+    fake_tessdata = tmp_path / "bundled-tesseract" / "tessdata"
     fake_tessdata.mkdir()
     with patch.dict(os.environ, {"RESOURCES_PATH": str(tmp_path)}):
         result = resolve_tessdata()

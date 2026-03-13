@@ -75,7 +75,7 @@ function startBackend() {
       ...process.env,
       PYTHONPATH: path.join(appRoot, 'src', 'core'),
       RESOURCES_PATH: resourcesPath,
-      TESSDATA_PREFIX: path.join(resourcesPath, 'tessdata'),
+      TESSDATA_PREFIX: path.join(resourcesPath, 'bundled-tesseract', 'tessdata'),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
