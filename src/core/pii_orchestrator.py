@@ -39,16 +39,18 @@ class PIIOrchestrator:
     Optionally runs: Presidio (if installed), GLiNER (if installed)
     """
 
-    def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None):
+    def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None, organisation_names: List[str] = None):
         self.student_name = student_name.strip()
         self.parent_names = parent_names or []
         self.family_names = family_names or []
+        self.organisation_names = organisation_names or []
 
         # Always create the regex detector
         self.regex_detector = PIIDetector(
             self.student_name,
             parent_names=self.parent_names,
             family_names=self.family_names,
+            organisation_names=self.organisation_names,
         )
 
         # Try to initialise Presidio

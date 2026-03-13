@@ -226,3 +226,24 @@ class TestPresidioIntegration:
         presidio_matches = [m for m in matches if m.source == "presidio"]
         person_matches = [m for m in presidio_matches if "person" in m.category.lower()]
         assert len(person_matches) > 0, "Presidio PERSON detection must still work after filtering"
+
+
+# ---------------------------------------------------------------------------
+# Organisation Name Passthrough Tests
+# ---------------------------------------------------------------------------
+
+class TestOrganisationNamePassthrough:
+
+    def test_org_names_passed_to_regex_detector(self):
+        orch = PIIOrchestrator("Jane Smith", organisation_names=["Greenwood PS"])
+        assert orch.regex_detector.organisation_names == ["Greenwood PS"]
+
+    def test_org_names_detected_through_orchestrator(self):
+        orch = PIIOrchestrator("Jane Smith", organisation_names=["Riverside Clinic"])
+        matches = orch.detect_pii_in_text("Riverside Clinic assessment results", page_num=1)
+        org_matches = [m for m in matches if m.category == "Organisation name"]
+        assert len(org_matches) >= 1
+
+    def test_org_names_default_to_empty(self):
+        orch = PIIOrchestrator("Jane Smith")
+        assert orch.regex_detector.organisation_names == []

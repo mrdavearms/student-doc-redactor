@@ -43,11 +43,13 @@ class DetectionService:
         student_name: str,
         parent_names: List[str] = None,
         family_names: List[str] = None,
+        organisation_names: List[str] = None,
     ):
         self._orchestrator = PIIOrchestrator(
             student_name=student_name,
             parent_names=parent_names or [],
             family_names=family_names or [],
+            organisation_names=organisation_names or [],
         )
         self._extractor = TextExtractor()
 
