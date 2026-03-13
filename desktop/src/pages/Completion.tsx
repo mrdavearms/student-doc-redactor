@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import {
   CheckCircle, AlertTriangle, XCircle, FolderOpen, FileText, RotateCcw,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, ArrowRight,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useStore } from '../store';
@@ -113,6 +113,36 @@ export default function Completion() {
           </button>
         </div>
       </motion.section>
+
+      {/* Filename audit */}
+      {r.document_results && r.document_results.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-white rounded-xl border border-slate-200 p-5"
+        >
+          <h3 className="text-sm font-medium text-slate-600 mb-3">Filename Audit</h3>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {r.document_results.map((d, i) => {
+              const inputName = d.document_name;
+              const outputName = d.output_path ? d.output_path.split('/').pop() : '—';
+              const renamed = inputName !== outputName;
+              return (
+                <div key={i} className="flex items-center gap-2 text-xs py-1">
+                  <span className="text-slate-500 truncate flex-1" title={inputName}>{inputName}</span>
+                  <ArrowRight size={10} className="text-slate-300 shrink-0" />
+                  <span className={`truncate flex-1 ${renamed ? 'text-primary-600 font-medium' : 'text-slate-400'}`} title={outputName || ''}>
+                    {outputName}
+                  </span>
+                  {!d.success && <XCircle size={12} className="text-red-400 shrink-0" />}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-2">Highlighted filenames had PII removed.</p>
+        </motion.section>
+      )}
 
       {/* Redaction log */}
       <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
