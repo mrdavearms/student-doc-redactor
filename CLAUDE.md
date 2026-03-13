@@ -10,7 +10,7 @@ A local Mac Streamlit app that redacts PII from student assessment PDFs and Word
 - **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
 - **Run**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `source venv/bin/activate && pytest tests/ -v` (257 tests, ~4m30s)
-- **Python**: 3.13+ (required for spaCy compatibility — the `venv/` dir uses 3.13, `venv_old/` is a legacy 3.14 venv that can be ignored)
+- **Python**: 3.13+ (required for spaCy compatibility)
 
 ---
 
@@ -375,15 +375,14 @@ Run with output: `pytest tests/ -v -s`
 
 ## What's Next / Known Gaps
 
-- **Mac `.app` bundle**: App is not yet packaged. Planned via PyInstaller or py2app. See `FINAL_SUMMARY.md`.
+- **Mac `.app` bundle**: DMG built via electron-builder (`cd desktop && npm run dist:mac`). Not code-signed yet (ad-hoc only).
 - **Windows/Linux (Phase 3)**: Not supported yet. Phase 3 roadmap includes Windows COM automation for Word conversion and bundled Tesseract.
 - **Packaging (Phase 4)**: electron-builder for .dmg + .exe not started.
 - **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
 - **Signature detection**: IMPLEMENTED (March 2026). Heuristic-based Stage 4 in `redact_pdf()`. See rule 21 below.
 - **Batch processing** (multiple students at once): Not implemented.
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
-- **`venv_old/`**: Legacy venv from Python 3.14 era. Not used. Can be deleted once confirmed stable on 3.13 venv.
-- **`GITHUB_SETUP.md`, `GIT_WORKFLOW.md`, `FINAL_SUMMARY.md`**: Legacy docs from early development. Outdated — may reference implementation details that have changed. README.md is now the authoritative user documentation.
+- **`docs/legacy/`**: Contains 6 legacy markdown files (`FINAL_SUMMARY.md`, `GITHUB_SETUP.md`, `GIT_WORKFLOW.md`, `LAUNCH_INSTRUCTIONS.md`, `PROJECT_SUMMARY.md`, `QUICK_START_CHECKLIST.md`) moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
 
 ---
 
