@@ -49,10 +49,6 @@ node_modules/
 # Application specific
 *.log
 redacted/
-sample/redacted_*/
-sample/redaction_log.txt
+# Sample documents — real student files, never commit
+sample/
 .temp_converted/
-
-# Sensitive data (don't commit real student documents)
-# sample/ folder is included for testing purposes only
-# In production, never commit actual student documents
