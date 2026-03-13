@@ -63,10 +63,35 @@ def folder_selection_screen():
         help="Enter sibling or other family member names"
     )
 
+    organisation_names = st.text_input(
+        "Organisation names (optional, comma-separated):",
+        value=st.session_state.organisation_names,
+        placeholder="e.g., Greenwood Primary School, Riverside Clinic",
+        help="Schools, clinics, or services whose names should be redacted"
+    )
+
+    st.info(
+        "💡 **Tip — providing names improves accuracy.**  "
+        "The redaction tool detects common PII patterns (phone numbers, emails, "
+        "addresses) automatically. Providing parent, family, and organisation names "
+        "helps catch references that would otherwise be missed."
+    )
+
     # Save inputs to session state
     st.session_state.student_name = student_name
     st.session_state.parent_names = parent_names
     st.session_state.family_names = family_names
+    st.session_state.organisation_names = organisation_names
+
+    st.divider()
+
+    # Header/footer zone redaction option
+    st.markdown("#### Redaction Options")
+    st.session_state.redact_header_footer = st.checkbox(
+        "Redact header and footer zones on every page",
+        value=st.session_state.redact_header_footer,
+        help="Blanks the top 12% and bottom 8% of every page — useful for removing school letterheads, addresses, and logos"
+    )
 
     st.divider()
 
@@ -190,11 +215,13 @@ def _run_detection():
 
     parent_list = [n.strip() for n in st.session_state.parent_names.split(',') if n.strip()]
     family_list = [n.strip() for n in st.session_state.family_names.split(',') if n.strip()]
+    org_list = [n.strip() for n in st.session_state.organisation_names.split(',') if n.strip()]
 
     service = DetectionService(
         student_name=st.session_state.student_name,
         parent_names=parent_list,
         family_names=family_list,
+        organisation_names=org_list,
     )
 
     detection_results = service.detect_all(all_pdfs)
@@ -429,6 +456,7 @@ def _run_redaction(folder_action_label):
 
     _parent_list = [n.strip() for n in st.session_state.parent_names.split(',') if n.strip()]
     _family_list = [n.strip() for n in st.session_state.family_names.split(',') if n.strip()]
+    _org_list = [n.strip() for n in st.session_state.organisation_names.split(',') if n.strip()]
 
     service = RedactionService()
     request = RedactionRequest(
@@ -440,6 +468,8 @@ def _run_redaction(folder_action_label):
         folder_action=folder_action,
         parent_names=_parent_list,
         family_names=_family_list,
+        organisation_names=_org_list,
+        redact_header_footer=st.session_state.redact_header_footer,
     )
 
     results = service.execute(request)
