@@ -1,7 +1,9 @@
 import { motion } from 'framer-motion';
-import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink } from 'lucide-react';
+import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info } from 'lucide-react';
+import { useState } from 'react';
 import { useStore } from '../store';
 import { SCREENS, type Screen } from '../types';
+import AboutModal from './AboutModal';
 
 const ICONS: Record<Screen, React.ReactNode> = {
   folder_selection: <FolderOpen size={18} />,
@@ -14,6 +16,7 @@ const ICONS: Record<Screen, React.ReactNode> = {
 export default function Sidebar() {
   const currentScreen = useStore((s) => s.currentScreen);
   const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   return (
     <aside className="w-64 min-h-full bg-white border-r border-slate-200 flex flex-col">
@@ -91,7 +94,16 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-6 py-4 border-t border-slate-100 space-y-2">
-        <p className="text-[10px] text-slate-300 uppercase tracking-widest">v0.1.0</p>
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] text-slate-300 uppercase tracking-widest">v0.1.0</p>
+          <button
+            onClick={() => setAboutOpen(true)}
+            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-primary-500 transition-colors"
+          >
+            <Info size={12} />
+            About
+          </button>
+        </div>
         <button
           onClick={() => window.electronAPI?.openExternal('https://github.com/mrdavearms/student-doc-redactor')}
           className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors"
@@ -100,6 +112,8 @@ export default function Sidebar() {
           Report issues on GitHub
         </button>
       </div>
+
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </aside>
   );
 }
