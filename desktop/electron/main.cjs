@@ -3,7 +3,7 @@
  * Spawns the Python FastAPI backend and creates the app window.
  */
 
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -147,6 +147,21 @@ function setupAutoUpdater() {
   // Check for updates after a short delay to avoid blocking startup
   setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10000);
 }
+
+// ── IPC handlers ─────────────────────────────────────────────────────
+
+ipcMain.handle('select-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select Document Folder',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('open-external', async (_event, url) => {
+  await shell.openExternal(url);
+});
 
 // ── App lifecycle ─────────────────────────────────────────────────────
 
