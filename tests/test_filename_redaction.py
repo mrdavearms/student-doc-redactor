@@ -76,3 +76,11 @@ class TestStripPiiFromFilename:
             "Joe Bloggs Report", ["Joe Bloggs", "Joe", "Bloggs"]
         )
         assert result == "Report"
+
+    def test_organisation_name_stripped(self):
+        variations = BLOGGS_VARIATIONS + ["Greenwood PS", "Greenwood"]
+        result = strip_pii_from_filename(
+            "Joe Bloggs Greenwood PS Assessment", variations
+        )
+        assert "Greenwood" not in result
+        assert "Assessment" in result

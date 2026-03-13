@@ -26,8 +26,9 @@ class RedactionRequest:
     user_selections: Dict[str, bool]
     # How to handle existing 'redacted' folder: 'overwrite' | 'new' | None (no existing)
     folder_action: Optional[str] = None
-    parent_names: List[str] = field(default_factory=list)   # NEW
-    family_names: List[str] = field(default_factory=list)   # NEW
+    parent_names: List[str] = field(default_factory=list)
+    family_names: List[str] = field(default_factory=list)
+    organisation_names: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -102,16 +103,24 @@ class RedactionService:
         logger = RedactionLogger(request.folder_path, request.student_name)
 
         # 2b. Build name variations for filename stripping
-        # Use PIIDetector to get student name variations, then append parent/family names
+        # Use PIIDetector to get student name variations, then append parent/family/org names
         _detector = PIIDetector(
             request.student_name,
             request.parent_names,
             request.family_names,
+            organisation_names=request.organisation_names,
         )
         name_variations = list(_detector.name_variations)
         for name in request.parent_names + request.family_names:
             if len(name) >= 3 and name not in name_variations:
                 name_variations.append(name)
+        # Include organisation name variations (full name + words ≥3 chars)
+        for org in request.organisation_names:
+            if org and org not in name_variations:
+                name_variations.append(org)
+            for word in org.split():
+                if len(word) >= 3 and word not in name_variations:
+                    name_variations.append(word)
 
         # 3. Process each document
         results = RedactionResults(redacted_folder=redacted_folder)
