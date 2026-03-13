@@ -1,15 +1,15 @@
 import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, User, Users, ArrowRight } from 'lucide-react';
+import { FolderOpen, User, Users, Building, ArrowRight, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 
 export default function FolderSelection() {
   const {
     folderPath, studentName, parentNames, familyNames,
-    folderValid,
+    organisationNames, redactHeaderFooter, folderValid,
     setFolderPath, setStudentName, setParentNames, setFamilyNames,
-    setFolderValid, navigateTo,
+    setOrganisationNames, setRedactHeaderFooter, setFolderValid, navigateTo,
   } = useStore();
 
   const [validating, setValidating] = useState(false);
@@ -30,6 +30,13 @@ export default function FolderSelection() {
       setValidating(false);
     }
   }, [setFolderPath, setFolderValid]);
+
+  const handleBrowse = useCallback(async () => {
+    const selected = await window.electronAPI?.selectFolder();
+    if (selected) {
+      validateFolder(selected);
+    }
+  }, [validateFolder]);
 
   const canProceed = folderValid && studentName.trim().length > 0;
 
@@ -52,21 +59,29 @@ export default function FolderSelection() {
           Input Folder
         </div>
 
-        <p className="text-xs text-slate-400">
-          In Finder, right-click the folder → hold Option → select "Copy as Pathname" → paste below.
-        </p>
-
-        <input
-          type="text"
-          value={folderPath}
-          onChange={(e) => validateFolder(e.target.value)}
-          placeholder="/Users/username/Documents/Student_Docs"
-          className={`
-            w-full px-4 py-2.5 rounded-lg border text-sm transition-colors
-            focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400
-            ${folderValid ? 'border-emerald-300 bg-emerald-50/50' : folderPath ? 'border-red-300 bg-red-50/30' : 'border-slate-200'}
-          `}
-        />
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={folderPath}
+            onChange={(e) => validateFolder(e.target.value)}
+            placeholder="/Users/username/Documents/Student_Docs"
+            className={`
+              flex-1 px-4 py-2.5 rounded-lg border text-sm transition-colors
+              focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400
+              ${folderValid ? 'border-emerald-300 bg-emerald-50/50' : folderPath ? 'border-red-300 bg-red-50/30' : 'border-slate-200'}
+            `}
+          />
+          <button
+            type="button"
+            onClick={handleBrowse}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-slate-50
+                       text-sm text-slate-600 font-medium hover:bg-slate-100 hover:border-slate-300
+                       transition-colors shrink-0"
+          >
+            <Search size={14} />
+            Browse
+          </button>
+        </div>
 
         {validating && <p className="text-xs text-slate-400">Checking folder...</p>}
         {!validating && folderPath && folderValid && (
@@ -136,6 +151,35 @@ export default function FolderSelection() {
             <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated</p>
           </div>
         </div>
+
+        <div>
+          <label className="block text-sm text-slate-600 mb-1.5">
+            <Building size={14} className="inline mr-1 text-slate-400" />
+            Organisation names
+          </label>
+          <input
+            type="text"
+            value={organisationNames}
+            onChange={(e) => setOrganisationNames(e.target.value)}
+            placeholder="Sunrise Primary School, City Paediatrics"
+            className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated — schools, clinics, etc.</p>
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={redactHeaderFooter}
+            onChange={(e) => setRedactHeaderFooter(e.target.checked)}
+            className="w-4 h-4 rounded border-slate-300 text-primary-600
+                       focus:ring-primary-200 focus:ring-offset-0"
+          />
+          <span className="text-sm text-slate-600">
+            Redact headers & footers (blanks top/bottom of every page — removes letterheads and addresses)
+          </span>
+        </label>
       </motion.section>
 
       {/* Warning + proceed */}
