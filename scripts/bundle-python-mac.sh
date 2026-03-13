@@ -42,17 +42,16 @@ PYTHON_BIN="$PYTHON_DEST/bin/python3"
 
 echo "==> Installing pip dependencies into bundled Python..."
 "$PYTHON_BIN" -m pip install --upgrade pip --quiet
-"$PYTHON_BIN" -m pip install -r "$REPO_ROOT/requirements.txt" --quiet
+"$PYTHON_BIN" -m pip install -r "$REPO_ROOT/requirements-desktop.txt" --quiet
 
 echo "==> Downloading spaCy model (en_core_web_lg)..."
 "$PYTHON_BIN" -m spacy download en_core_web_lg --quiet
 
-echo "==> Pre-warming GLiNER model (urchade/gliner_multi_pii-v1)..."
-"$PYTHON_BIN" -c "
-from gliner import GLiNER
-model = GLiNER.from_pretrained('urchade/gliner_multi_pii-v1')
-print('GLiNER model cached.')
-"
+echo "==> Cleaning up site-packages (removing __pycache__, .dist-info, tests)..."
+find "$PYTHON_DEST/lib" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find "$PYTHON_DEST/lib" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+find "$PYTHON_DEST/lib" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+find "$PYTHON_DEST/lib" -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
 
 # ── Bundle Tesseract ──────────────────────────────────────────────────
 echo "==> Bundling Tesseract..."
