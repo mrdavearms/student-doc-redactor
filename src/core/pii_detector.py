@@ -120,7 +120,7 @@ class PIIDetector:
         r'Parent/Guardian signature'
     ]
 
-    def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None):
+    def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None, organisation_names: List[str] = None):
         """
         Initialize the PII detector
 
@@ -128,10 +128,12 @@ class PIIDetector:
             student_name: Full name of the student
             parent_names: List of parent/guardian names
             family_names: List of other family member names
+            organisation_names: List of organisation/school names to detect
         """
         self.student_name = student_name.strip()
         self.parent_names = [n.strip() for n in (parent_names or [])]
         self.family_names = [n.strip() for n in (family_names or [])]
+        self.organisation_names = [n.strip() for n in (organisation_names or [])]
 
         # Generate name variations
         self.name_variations = self._generate_name_variations()
@@ -204,6 +206,9 @@ class PIIDetector:
 
             # Detect contextual family names
             matches.extend(self._detect_contextual_names(line, page_num, line_num))
+
+            # Detect organisation names
+            matches.extend(self._detect_organisation_names(line, page_num, line_num))
 
         return matches
 
@@ -415,6 +420,58 @@ class PIIDetector:
                     line_num=line_num,
                     context=context
                 ))
+
+        return matches
+
+    def _detect_organisation_names(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect user-provided organisation names and their significant words."""
+        matches = []
+
+        # Generic words that should NOT become standalone variations
+        _ORG_GENERIC_WORDS = {
+            'school', 'primary', 'secondary', 'college', 'clinic',
+            'centre', 'center', 'hospital', 'practice', 'academy',
+            'institute', 'university', 'department', 'service',
+            'services', 'psychology', 'medical', 'health', 'group',
+            'the', 'and', 'for', 'inc', 'ltd', 'pty',
+        }
+
+        for org_name in self.organisation_names:
+            # Full org name match
+            pattern = re.compile(r'\b' + re.escape(org_name) + r'\b', re.IGNORECASE)
+            for match in pattern.finditer(line):
+                context = self._get_context(line, match.start(), match.end())
+                matches.append(PIIMatch(
+                    text=match.group(),
+                    category='Organisation name',
+                    confidence=0.95,
+                    page_num=page_num,
+                    line_num=line_num,
+                    context=context,
+                    source='regex',
+                ))
+
+            # Individual word variations (3+ chars, skip common/generic words)
+            for word in org_name.split():
+                clean_word = word.strip("''\u2019")
+                if len(clean_word) < 3:
+                    continue
+                if clean_word.lower() in _CONTEXTUAL_NAME_EXCLUDE:
+                    continue
+                if clean_word.lower() in _ORG_GENERIC_WORDS:
+                    continue
+                word_pattern = re.compile(r'\b' + re.escape(clean_word) + r'\b', re.IGNORECASE)
+                for match in word_pattern.finditer(line):
+                    context = self._get_context(line, match.start(), match.end())
+                    matches.append(PIIMatch(
+                        text=match.group(),
+                        category='Organisation name',
+                        confidence=0.95,
+                        page_num=page_num,
+                        line_num=line_num,
+                        context=context,
+                        source='regex',
+                    ))
 
         return matches
 

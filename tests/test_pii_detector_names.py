@@ -463,3 +463,58 @@ class TestContextualNameParenthetical:
         contextual = [m for m in matches if m.category in ("Parent/Guardian", "Family member")]
         found_texts = [m.text for m in contextual]
         assert "Dad" not in found_texts, f"'Dad' should not be flagged as name, got {found_texts}"
+
+
+# ---------------------------------------------------------------------------
+# TestOrganisationNameDetection
+# ---------------------------------------------------------------------------
+
+class TestOrganisationNameDetection:
+    """Organisation names provided by the user should be detected as PII."""
+
+    def test_full_org_name_detected(self):
+        detector = PIIDetector("Jane Smith", organisation_names=["Greenwood Primary School"])
+        matches = detector.detect_pii_in_text("Report prepared by Greenwood Primary School", 1)
+        org_matches = [m for m in matches if m.category == 'Organisation name']
+        assert len(org_matches) >= 1
+        assert any("Greenwood Primary School" in m.text for m in org_matches)
+
+    def test_org_name_individual_words_detected(self):
+        """Individual significant words from org name should also match."""
+        detector = PIIDetector("Jane Smith", organisation_names=["Greenwood Primary School"])
+        matches = detector.detect_pii_in_text("The Greenwood campus is located nearby", 1)
+        org_matches = [m for m in matches if m.category == 'Organisation name']
+        assert len(org_matches) >= 1
+
+    def test_org_name_short_words_excluded(self):
+        """Words shorter than 3 chars from org names should not become variations."""
+        detector = PIIDetector("Jane Smith", organisation_names=["St Mary's"])
+        # "St" is only 2 chars — should not match standalone
+        matches = detector.detect_pii_in_text("St Patrick went to the store", 1)
+        org_matches = [m for m in matches if m.category == 'Organisation name']
+        # Should NOT match "St" alone — only full "St Mary's" or "Mary's" (5 chars)
+        assert not any(m.text == "St" for m in org_matches)
+
+    def test_org_name_confidence_is_095(self):
+        detector = PIIDetector("Jane Smith", organisation_names=["Riverside Clinic"])
+        matches = detector.detect_pii_in_text("Riverside Clinic assessment results", 1)
+        org_matches = [m for m in matches if m.category == 'Organisation name']
+        assert len(org_matches) >= 1
+        assert org_matches[0].confidence == 0.95
+
+    def test_multiple_org_names(self):
+        detector = PIIDetector("Jane Smith", organisation_names=["Greenwood PS", "Dr Kim Psychology"])
+        matches = detector.detect_pii_in_text("Referred by Dr Kim Psychology to Greenwood PS", 1)
+        org_matches = [m for m in matches if m.category == 'Organisation name']
+        assert len(org_matches) >= 2
+
+    def test_org_name_none_defaults_to_empty(self):
+        """Passing None for organisation_names should not crash."""
+        detector = PIIDetector("Jane Smith", organisation_names=None)
+        assert detector.organisation_names == []
+
+    def test_org_name_source_is_regex(self):
+        detector = PIIDetector("Jane Smith", organisation_names=["Riverside Clinic"])
+        matches = detector.detect_pii_in_text("Riverside Clinic report", 1)
+        org_matches = [m for m in matches if m.category == 'Organisation name']
+        assert all(m.source == 'regex' for m in org_matches)
