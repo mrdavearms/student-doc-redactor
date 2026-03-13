@@ -36,7 +36,7 @@ def strip_pii_from_filename(stem: str, name_variations: List[str]) -> str:
     if not name_variations:
         return stem
 
-    # Normalize underscores → spaces so word boundaries work on "Bloggs_Joe_..." format
+    # Normalize underscores → spaces so word boundaries work on "Surname_First_..." format
     result = stem.replace('_', ' ')
 
     # Sort longest-first: strip "Joe Bloggs" before "Joe" to avoid orphaned fragments

@@ -182,8 +182,8 @@ class TestStudentIDDetection:
         assert len(matches) == 0
 
     def test_surname_prefix_match_gives_high_confidence(self):
-        # Student is "Jane Bloggs", surname prefix = "FEN"
-        matches = self._student_id_matches("FEN1234")
+        # Student is "Jane Bloggs", surname prefix = "BLO"
+        matches = self._student_id_matches("BLO1234")
         assert len(matches) == 1
         assert matches[0].confidence >= 0.8
 
