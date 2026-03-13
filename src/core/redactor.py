@@ -15,6 +15,11 @@ from PIL import Image, ImageDraw
 import pytesseract
 
 
+# Zone redaction fractions — fraction of page height to blank
+HEADER_ZONE_FRACTION = 0.12   # top 12%
+FOOTER_ZONE_FRACTION = 0.08   # bottom 8%
+
+
 def strip_pii_from_filename(stem: str, name_variations: List[str]) -> str:
     """
     Remove PII name tokens from a filename stem, preserving document-type words.
@@ -84,7 +89,7 @@ class PDFRedactor:
     def __init__(self):
         pass
 
-    def redact_pdf(self, input_pdf: Path, output_pdf: Path, redaction_items: List[RedactionItem]) -> Tuple[bool, str]:
+    def redact_pdf(self, input_pdf: Path, output_pdf: Path, redaction_items: List[RedactionItem], redact_header_footer: bool = False) -> Tuple[bool, str]:
         """
         Create a redacted copy of a PDF
 
@@ -98,6 +103,12 @@ class PDFRedactor:
         """
         try:
             doc = fitz.open(str(input_pdf))
+
+            # ── Stage 0: Zone redaction (header/footer blanking) ──
+            # Runs on EVERY page, not just pages with detected PII.
+            if redact_header_footer:
+                for page in doc:
+                    self._redact_zones(page)
 
             # Group redactions by page for efficiency
             redactions_by_page = {}
@@ -232,6 +243,57 @@ class PDFRedactor:
         words = page.get_text("words")
         images = page.get_images(full=True)
         return len(words) == 0 and len(images) > 0
+
+    def _redact_zones(self, page: fitz.Page):
+        """
+        Blank header and footer zones on a single page.
+
+        For text-layer pages: adds redaction annotations covering the zone
+        rectangles and applies them (text removal + black fill).
+
+        For image-only pages: renders to PIL, draws black rectangles over
+        the zone pixel regions, and replaces the page content.
+        """
+        rect = page.rect
+        header_y = rect.height * HEADER_ZONE_FRACTION
+        footer_y = rect.height * (1 - FOOTER_ZONE_FRACTION)
+
+        if self._is_image_only_page(page):
+            # PIL path — render, paint black rects, replace page image
+            dpi = 300
+            scale = dpi / 72
+            pix = page.get_pixmap(dpi=dpi)
+            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+            draw = ImageDraw.Draw(img)
+
+            # Header zone (top of image)
+            draw.rectangle(
+                [0, 0, img.width, int(header_y * scale)],
+                fill="black",
+            )
+            # Footer zone (bottom of image)
+            draw.rectangle(
+                [0, int(footer_y * scale), img.width, img.height],
+                fill="black",
+            )
+
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
+
+            page.clean_contents()
+            doc = page.parent
+            for xref in page.get_contents():
+                doc.update_stream(xref, b"")
+            page.insert_image(page.rect, stream=img_bytes.read(), overlay=True)
+        else:
+            # Text-layer path — PyMuPDF redaction annotations
+            header_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, header_y)
+            footer_rect = fitz.Rect(rect.x0, footer_y, rect.x1, rect.y1)
+
+            page.add_redact_annot(header_rect, fill=(0, 0, 0))
+            page.add_redact_annot(footer_rect, fill=(0, 0, 0))
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
     def _check_tesseract(self) -> bool:
         """Check if Tesseract is installed and accessible."""
