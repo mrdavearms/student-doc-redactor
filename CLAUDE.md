@@ -4,12 +4,19 @@
 
 ## Project Overview
 
-A local Mac Streamlit app that redacts PII from student assessment PDFs and Word documents. Built for Australian teachers and school psychologists. All processing is local — no internet, no cloud services at runtime.
+A local Mac app that redacts PII from student assessment PDFs and Word documents. Built for Australian teachers and school psychologists. All processing is local — no internet, no cloud services at runtime.
+
+Two frontends exist:
+- **Desktop app** (primary): Electron + React + Vite + Tailwind v4, communicating with a FastAPI backend via HTTP. This is the user-facing product.
+- **Streamlit app** (legacy): The original prototype in `app.py`. Still functional but no longer the focus.
 
 - **Repo**: https://github.com/mrdavearms/student-doc-redactor (primary) · https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
 - **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
-- **Run**: `source venv/bin/activate && streamlit run app.py`
+- **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
+- **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
+- **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `source venv/bin/activate && pytest tests/ -v` (257 tests, ~4m30s)
+- **Build DMG**: `cd desktop && npm run dist:mac`
 - **Python**: 3.13+ (required for spaCy compatibility)
 
 ---
@@ -53,23 +60,51 @@ redact_pdf(input_pdf, output_pdf, redaction_items)
 └── doc.save(output_pdf)
 ```
 
-The service layer (`src/services/redaction_service.py`) orchestrates this and handles filename redaction, OCR warnings, and audit log entries.
+The service layer (`src/services/redaction_service.py`) orchestrates this and handles filename redaction, OCR warnings, custom output paths, and audit log entries.
+
+### Desktop App Architecture (Two-Process Model)
+
+Electron spawns FastAPI as a child process. React communicates with the backend via HTTP on `127.0.0.1:8765`.
+
+```
+Electron main.cjs
+├── Spawns: python3.13 -m uvicorn backend.main:app --port 8765
+├── Waits for /api/health → 200 OK
+└── Creates BrowserWindow → loads Vite dev server or built files
+
+React (Vite)
+├── App.tsx           → screen router (switch on currentScreen)
+├── Layout.tsx        → sidebar + animated page transitions (AnimatePresence)
+├── store.ts          → Zustand single store (mirrors Streamlit session_state)
+├── api.ts            → fetch wrapper for all backend endpoints
+├── pages/            → 5 wizard pages
+└── components/       → reusable UI components
+
+FastAPI (backend/main.py)
+├── /api/health, /api/dependencies/check
+├── /api/folder/process, /api/folder/validate, /api/folder/open
+├── /api/pii/detect   → returns matches, caches PIIMatch objects server-side
+├── /api/redact       → uses cached detection data + user selections
+└── /api/preview      → renders PDF page at 150 DPI, returns base64 PNG
+```
 
 ### Screen Flow
 
-`app.py` routes based on `st.session_state.current_screen`:
+Both Streamlit and Desktop versions share the same 5-screen wizard flow:
 
 ```
 folder_selection → conversion_status → document_review → final_confirmation → completion
 ```
 
-Navigation is handled by `session_state.navigate_to(screen_name)`, which sets the screen key and calls `st.rerun()`.
+In the desktop app, `App.tsx` switches on `currentScreen` from the Zustand store. Layout wraps children in `<AnimatePresence mode="wait">` with `key={currentScreen}` for animated transitions.
+
+In Streamlit, `app.py` routes based on `st.session_state.current_screen`.
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `app.py` | Entry point, CSS, screen router |
+| `app.py` | Streamlit entry point, CSS, screen router |
 | `src/core/pii_orchestrator.py` | **Main detection entry point** — merges all engines |
 | `src/core/pii_detector.py` | Regex engine + `PIIMatch` dataclass definition |
 | `src/core/presidio_recognizers.py` | 6 custom Australian Presidio recognizers |
@@ -83,15 +118,28 @@ Navigation is handled by `session_state.navigate_to(screen_name)`, which sets th
 | `src/ui/screens.py` | All 5 Streamlit screens (largest file) |
 | `src/services/conversion_service.py` | Framework-agnostic conversion business logic |
 | `src/services/detection_service.py` | Framework-agnostic PII detection business logic |
-| `src/services/redaction_service.py` | Framework-agnostic redaction orchestration |
-| `backend/main.py` | FastAPI API layer for desktop app (Phase 2) |
-| `desktop/` | Electron + React + Vite frontend (Phase 2) |
+| `src/services/redaction_service.py` | Framework-agnostic redaction orchestration + custom output path |
+| `backend/main.py` | FastAPI API layer + server-side detection cache |
+| `backend/schemas.py` | Pydantic request/response models |
+| `desktop/electron/main.cjs` | Electron main process — spawns backend, creates window |
+| `desktop/electron/preload.cjs` | Electron preload — exposes `selectFolder`, `openExternal` to renderer |
+| `desktop/src/App.tsx` | React entry point, screen router |
+| `desktop/src/store.ts` | Zustand store — single source of truth for UI state |
+| `desktop/src/api.ts` | HTTP client for all backend endpoints |
+| `desktop/src/components/Layout.tsx` | Main layout with sidebar + animated page transitions |
+| `desktop/src/components/Sidebar.tsx` | Step indicator, logo, walkthrough trigger, About modal |
+| `desktop/src/components/Walkthrough.tsx` | 4-step first-run onboarding modal |
+| `desktop/src/components/HelpTip.tsx` | Reusable `?` icon popover for contextual help |
+| `desktop/src/components/AboutModal.tsx` | 3-tab About dialog (About, How to Use, Features) |
+| `desktop/src/components/PreviewSection.tsx` | Before/after PDF preview (split view, on-demand fetch) |
+| `desktop/src/components/DocumentCard.tsx` | Expandable per-document summary card for completion screen |
+| `desktop/src/components/RedactionProgress.tsx` | Animated progress bar + rotating witty teacher comments |
 
 ---
 
 ## Critical Non-Obvious Rules
 
-### 1. `navigate_to()` must NEVER be inside a `with st.spinner():` block
+### 1. `navigate_to()` must NEVER be inside a `with st.spinner():` block (Streamlit only)
 
 `navigate_to()` calls `st.rerun()`, which raises `RerunException`. If called inside a `with st.spinner()` context manager, the `__exit__` never runs cleanly. Always structure like this:
 
@@ -262,9 +310,29 @@ if re.fullmatch(r"(?:['\u2019]s)?[^a-zA-Z0-9]*", remainder):
 
 This single regex handles: exact matches (empty remainder), possessives (`'s`), trailing punctuation (`,` `.` `)`), and combined forms like `'s,` or `'s.`. Previously, three separate conditions missed the combined possessive+punctuation case (e.g. "Joe's," was not redacted).
 
+### 23. Desktop: `<Walkthrough />` must NOT be inside Layout's animated children
+
+Layout wraps children in `<motion.div key={currentScreen}>` inside `<AnimatePresence mode="wait">`. When the screen changes, React unmounts/remounts the entire children block. Any component rendered inside this area will remount on every screen change. The Walkthrough component (first-run onboarding) must live in Sidebar (which is outside the animated area and never remounts) — NOT in App.tsx children. The first-run check uses `localStorage` with key `walkthrough_dismissed`.
+
+### 24. Desktop: Preview images must NEVER be stored in the Zustand store
+
+The before/after PDF preview (`PreviewSection.tsx`) fetches page images as base64 PNGs via `/api/preview`. These images contain actual document content (potentially including PII). They must be kept in **React component state only** (`useState`) — never in the Zustand store, which would persist them across screen transitions. When the component unmounts, the images are garbage collected.
+
+### 25. Desktop: Server-side detection cache bridges detect → redact
+
+`_detection_cache` in `backend/main.py` keeps full `PIIMatch` objects (with bboxes) between the detect and redact API calls. The frontend only sends back selection keys (`"docPath_idx"`) — not the full match data. The cache is cleared on each new detection run. If the cache is missing when redact is called, the backend returns HTTP 400.
+
+### 26. Desktop: `custom_output_path` overrides default subfolder
+
+`RedactionRequest.custom_output_path` (added March 2026) allows users to save redacted files to any location. When set, `_prepare_output_folder()` uses it directly with `mkdir(parents=True, exist_ok=True)`, bypassing the normal `redacted/` subfolder logic and the `folder_action` parameter entirely.
+
+### 27. Desktop: Tailwind v4 uses `@theme` block, not `tailwind.config.js`
+
+The desktop app uses `@tailwindcss/vite` plugin with `@import "tailwindcss"` and a `@theme` block in `index.css`. There is no `tailwind.config.js` file. Custom colours (e.g. `--color-primary-*`) are defined in the `@theme` block. The `.btn-press` utility class (active scale effect) is defined in `index.css`.
+
 ---
 
-## Session State Keys
+## Session State Keys (Streamlit)
 
 All keys initialised in `session_state.init_session_state()`:
 
@@ -289,6 +357,31 @@ All keys initialised in `session_state.init_session_state()`:
 | `processing_complete` | bool | Completion flag |
 | `verification_failures` | list | (filename, text) tuples where verification failed |
 | `ocr_warnings` | list | (filename, count) tuples for OCR page warnings |
+
+---
+
+## Zustand Store Keys (Desktop)
+
+Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises all selections to `true`.
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `currentScreen` | Screen | Active wizard step |
+| `folderPath` | string | Selected input folder |
+| `studentName` | string | Student full name |
+| `parentNames` | string | Comma-separated parent names |
+| `familyNames` | string | Comma-separated family names |
+| `organisationNames` | string | Comma-separated organisation names |
+| `redactHeaderFooter` | boolean | Blank header/footer zones |
+| `folderValid` | boolean | Whether folder path is valid |
+| `conversionResults` | ConversionResults \| null | Word → PDF conversion outcomes |
+| `detectionResults` | DetectionResults \| null | PII detection results (all documents) |
+| `currentDocIndex` | number | Which document is being reviewed |
+| `userSelections` | Record<string, boolean> | `"docPath_matchIdx"` → selected |
+| `redactionResults` | RedactionResults \| null | Final redaction outcomes |
+| `loading` | boolean | Generic loading overlay active |
+| `loadingMessage` | string | Loading overlay text |
+| `error` | string \| null | Global error toast message |
 
 ---
 
@@ -344,7 +437,8 @@ Run with output: `pytest tests/ -v -s`
 ## Dependencies
 
 ### Python (requirements.txt)
-- `streamlit>=1.31.0` — UI framework
+- `streamlit>=1.31.0` — UI framework (Streamlit version)
+- `fastapi>=0.109.0` + `uvicorn>=0.27.0` — API layer (Desktop version)
 - `pymupdf>=1.23.0` — PDF redaction (`import fitz`)
 - `pytesseract>=0.3.10` — OCR
 - `Pillow>=10.2.0` — Image handling for OCR verification
@@ -352,6 +446,14 @@ Run with output: `pytest tests/ -v -s`
 - `presidio-analyzer>=2.2.0` — Microsoft NER framework
 - `spacy>=3.7.0` — NLP backend for Presidio
 - `gliner>=0.2.0` — Zero-shot NER
+
+### Desktop (package.json)
+- `react` + `react-dom` — UI framework
+- `zustand` — State management
+- `framer-motion` — Animations (page transitions, micro-interactions)
+- `lucide-react` — Icons
+- `electron` — Desktop shell
+- `vite` + `@tailwindcss/vite` — Build tooling + Tailwind v4
 
 ### External (installed via Homebrew)
 - `LibreOffice` — Word → PDF conversion (`soffice` binary)
@@ -375,14 +477,14 @@ Run with output: `pytest tests/ -v -s`
 
 ## What's Next / Known Gaps
 
-- **Mac `.app` bundle**: DMG built via electron-builder (`cd desktop && npm run dist:mac`). Not code-signed yet (ad-hoc only).
+- **Mac DMG**: Built via electron-builder (`cd desktop && npm run dist:mac`). Not code-signed yet (ad-hoc only). Works on Apple Silicon + Intel.
+- **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
 - **Windows/Linux (Phase 3)**: Not supported yet. Phase 3 roadmap includes Windows COM automation for Word conversion and bundled Tesseract.
-- **Packaging (Phase 4)**: electron-builder for .dmg + .exe not started.
 - **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
-- **Signature detection**: IMPLEMENTED (March 2026). Heuristic-based Stage 4 in `redact_pdf()`. See rule 21 below.
 - **Batch processing** (multiple students at once): Not implemented.
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
-- **`docs/legacy/`**: Contains 6 legacy markdown files (`FINAL_SUMMARY.md`, `GITHUB_SETUP.md`, `GIT_WORKFLOW.md`, `LAUNCH_INSTRUCTIONS.md`, `PROJECT_SUMMARY.md`, `QUICK_START_CHECKLIST.md`) moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
+- **`docs/legacy/`**: Contains 6 legacy markdown files moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
+- **`docs/plans/`**: Contains implementation plans from each development phase. Reference only.
 
 ---
 

@@ -1,4 +1,4 @@
-# 🖊️ Bulk Redaction Tool
+# Bulk Redaction Tool
 
 **A free, private, Mac-based tool for removing student personal information from assessment documents — before you share them with anyone.**
 
@@ -6,18 +6,19 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
-## 📥 Downloads
+## Downloads
 
-> **Coming soon.** A one-click Mac installer (`.dmg`) is in development — no Terminal, no setup required.
+> **Mac DMG installer** is built and working. Not yet publicly distributed (pending code signing).
 >
-> In the meantime, follow the [Installation Guide](#-installation-guide) below to get started.
+> In the meantime, follow the [Installation Guide](#-installation-guide) below to run from source, or see [Desktop App (Developer)](#desktop-app-developer) to build the DMG yourself.
 >
-> **Star or watch this repository** on GitLab to be notified when the download is available:
-> 👉 [gitlab.com/davearmswork/bulk-redaction-tool](https://gitlab.com/davearmswork/bulk-redaction-tool)
+> **Star or watch this repository** to be notified when the download is available:
+> - GitHub: [github.com/mrdavearms/student-doc-redactor](https://github.com/mrdavearms/student-doc-redactor)
+> - GitLab: [gitlab.com/davearmswork/bulk-redaction-tool](https://gitlab.com/davearmswork/bulk-redaction-tool)
 
 ---
 
-## 🧭 What Is This?
+## What Is This?
 
 When sharing student assessment reports — with other schools, services, or agencies — Australian privacy law and professional ethics require that identifying information be removed. Doing this manually is slow, error-prone, and stressful.
 
@@ -31,41 +32,52 @@ When sharing student assessment reports — with other schools, services, or age
 
 > **Plain English:** It's like using a black marker on paper, except it works on PDFs and Word documents, it finds things you might miss, and it can't be undone by selecting the text.
 
+### Two Ways to Run
+
+| | Desktop App | Streamlit (browser) |
+|--|-------------|-------------------|
+| **What** | Native Mac app (Electron) | Opens in your web browser |
+| **Best for** | Everyday use | Developers / advanced users |
+| **Run** | Double-click the `.app` or `cd desktop && npm run dev:electron` | `source venv/bin/activate && streamlit run app.py` |
+| **Status** | Primary — actively developed | Legacy — still works, not the focus |
+
+Both use the same detection and redaction engines underneath.
+
 ---
 
-## 🔒 Privacy & Safety Guarantees
+## Privacy & Safety Guarantees
 
 This matters most for a tool handling children's data.
 
 | Guarantee | Detail |
 |-----------|--------|
-| ✅ **Original files never modified** | Redacted copies are saved separately. Your source documents are untouched. |
-| ✅ **Text is permanently destroyed** | Redacted text cannot be recovered via copy/paste, search, or any PDF tool. It is not hidden — it is gone. |
-| ✅ **Metadata is stripped** | Author names, dates, and hidden document properties (XMP data) are removed from output PDFs. |
-| ✅ **100% local processing** | No internet connection required. Your documents never leave your Mac. |
-| ✅ **No accounts or cloud services** | Nothing is uploaded anywhere. Ever. |
-| ✅ **Scanned pages handled** | Image-only pages (scans) are redacted via OCR + image rewriting. No page is left behind. |
-| ✅ **Redaction verified** | After redaction, the tool re-scans the output at 300 DPI to confirm the text is visually gone. |
-| ✅ **Form fields cleaned** | Interactive PDF form fields (AcroForm widgets) containing PII are deleted — not just hidden. |
-| ✅ **Signatures detected** | Handwritten signature images are automatically identified and blacked out using heuristic analysis. |
-| ✅ **Full audit trail** | A `redaction_log.txt` records every item redacted, with page numbers and confidence levels. |
+| Original files never modified | Redacted copies are saved separately. Your source documents are untouched. |
+| Text is permanently destroyed | Redacted text cannot be recovered via copy/paste, search, or any PDF tool. It is not hidden — it is gone. |
+| Metadata is stripped | Author names, dates, and hidden document properties (XMP data) are removed from output PDFs. |
+| 100% local processing | No internet connection required. Your documents never leave your Mac. |
+| No accounts or cloud services | Nothing is uploaded anywhere. Ever. |
+| Scanned pages handled | Image-only pages (scans) are redacted via OCR + image rewriting. No page is left behind. |
+| Redaction verified | After redaction, the tool re-scans the output at 300 DPI to confirm the text is visually gone. |
+| Form fields cleaned | Interactive PDF form fields (AcroForm widgets) containing PII are deleted — not just hidden. |
+| Signatures detected | Handwritten signature images are automatically identified and blacked out using heuristic analysis. |
+| Full audit trail | A `redaction_log.txt` records every item redacted, with page numbers and confidence levels. |
 
 ---
 
-## 🔍 How It Works
+## How It Works
 
 ### The Workflow
 
 ```mermaid
 flowchart TD
-    A["📂 1. Select Folder\nChoose a folder of student documents"] --> B
-    B["✏️ 2. Enter Student Details\nName, parent names (optional)"] --> C
-    C["🔄 3. Convert Documents\nWord files → PDF automatically"] --> D
-    D["🧠 4. Detect PII\n3 detection engines run in parallel"] --> E
-    E["👁️ 5. You Review Each Item\nApprove or reject every finding"] --> F
-    F["✅ 6. Confirm\nSummary of what will be redacted"] --> G
-    G["⬛ 7. Apply Redactions\nPermanent, verified, metadata-stripped"] --> H
-    H["📋 8. Done\nRedacted files + audit log saved to your folder"]
+    A["1. Select Folder\nChoose a folder of student documents"] --> B
+    B["2. Enter Student Details\nName, parent names (optional)"] --> C
+    C["3. Convert Documents\nWord files to PDF automatically"] --> D
+    D["4. Detect PII\n3 detection engines run in parallel"] --> E
+    E["5. You Review Each Item\nApprove or reject every finding"] --> F
+    F["6. Confirm\nSummary of what will be redacted"] --> G
+    G["7. Apply Redactions\nPermanent, verified, metadata-stripped"] --> H
+    H["8. Done\nRedacted files + audit log saved"]
 
     style A fill:#4A90D9,color:#fff
     style B fill:#4A90D9,color:#fff
@@ -83,20 +95,20 @@ The tool uses **three detection engines simultaneously**, then merges and dedupl
 
 ```mermaid
 graph TD
-    DOC["📄 Document Text"] --> RE
+    DOC["Document Text"] --> RE
     DOC --> PR
     DOC --> GL
 
-    RE["🔧 Regex Engine\nAustralian phone, Medicare,\naddress, DOB patterns"]
-    PR["🧠 Presidio + spaCy NER\nMicrosoft's AI recogniser\n+ 6 custom AU patterns"]
-    GL["🎯 GLiNER Zero-Shot NER\nCatches names in informal\nor unexpected contexts"]
+    RE["Regex Engine\nAustralian phone, Medicare,\naddress, DOB patterns"]
+    PR["Presidio + spaCy NER\nMicrosoft's AI recogniser\n+ 6 custom AU patterns"]
+    GL["GLiNER Zero-Shot NER\nCatches names in informal\nor unexpected contexts"]
 
     RE --> MRG
     PR --> MRG
     GL --> MRG
 
-    MRG["🔀 Merge & Deduplicate\nHighest confidence wins\nwhen engines overlap"]
-    MRG --> OUT["📋 PII Matches\nRanked by confidence (0.0 – 1.0)\nReady for your review"]
+    MRG["Merge and Deduplicate\nHighest confidence wins\nwhen engines overlap"]
+    MRG --> OUT["PII Matches\nRanked by confidence (0.0 - 1.0)\nReady for your review"]
 
     style RE fill:#4A90D9,color:#fff
     style PR fill:#7B68EE,color:#fff
@@ -112,7 +124,7 @@ graph TD
 
 ---
 
-## 🛡️ What Gets Detected
+## What Gets Detected
 
 All detection is tuned for **Australian** documents and naming conventions.
 
@@ -121,6 +133,7 @@ All detection is tuned for **Australian** documents and naming conventions.
 | Student name (all variations) | Full name, first name, last name, initials | Regex + Presidio + GLiNER |
 | Parent / guardian names | Names provided by you, or found near keywords like "Mother:", "Father:" | Regex + GLiNER |
 | Family member names | Siblings, carers, emergency contacts | Regex + GLiNER |
+| Organisation names | Schools, clinics, hospitals — user-provided, word-level matching | Regex |
 | Phone numbers | Mobile (04xx), landline, +61 format | Regex + Presidio |
 | Email addresses | Any format | Regex |
 | Home address | Street, suburb, state, postcode | Regex + Presidio |
@@ -159,7 +172,7 @@ This prevents accidental disclosure through file names in shared folders or emai
 
 ---
 
-## ⬛ How Redaction Works
+## How Redaction Works
 
 The tool uses **three different redaction strategies** depending on the type of content in each PDF page. This happens automatically — you don't need to choose.
 
@@ -191,28 +204,18 @@ Scanned documents (where each page is a photograph or scan) have **no text layer
 
 ### Strategy 3 — Form Widget Deletion (interactive PDFs)
 
-Some PDFs contain interactive form fields (text boxes, dropdowns) — called AcroForm widgets. These can contain PII that is invisible to text-layer search. For example, a student's name might be typed into a fillable "Name:" field.
-
-After text-layer and OCR redaction, the tool:
-
-1. Scans every form widget (annotation) on each page
-2. Reads the widget's field value
-3. If the value matches any redacted PII text, the **entire widget is deleted**
-
-This is important because form fields store data separately from the text layer — you can't redact them with black boxes alone.
+Some PDFs contain interactive form fields (text boxes, dropdowns) — called AcroForm widgets. These can contain PII that is invisible to text-layer search. After text-layer and OCR redaction, the tool scans every form widget, reads its field value, and deletes any widget containing PII.
 
 ### Strategy 4 — Signature Detection (heuristic image analysis)
 
 Handwritten signatures embedded as images in PDFs are automatically detected and blacked out. The tool examines every embedded image on every page using four heuristic gates:
 
-1. **Aspect ratio** — signatures are wide and short (width ÷ height > 2.0)
-2. **Position** — signatures don't span the full page width (bounding box < 250 points wide on the page)
-3. **Pixel size** — the image must be large enough to be a real signature (> 50 px wide, < 200 px tall)
-4. **Ink ratio** — signatures have thin pen strokes on a white background (< 30% dark pixels)
+1. **Aspect ratio** — signatures are wide and short (width / height > 2.0)
+2. **Position** — signatures don't span the full page width (< 250 points)
+3. **Pixel size** — large enough to be a real signature (> 50 px wide, < 200 px tall)
+4. **Ink ratio** — thin pen strokes on white background (< 30% dark pixels)
 
-Images that pass all four gates are replaced with solid black rectangles of the same size. This runs on **every page**, not just pages with other detected PII — because signatures often appear on pages with no other personal information.
-
-> **Plain English:** The tool looks at every picture embedded in the PDF. If a picture is wide, flat, small, and mostly white with thin dark lines — it's probably a signature, and it gets blacked out.
+This runs on **every page**, not just pages with other detected PII.
 
 ### Which Strategy Is Used When?
 
@@ -225,12 +228,11 @@ The tool checks **each page independently**:
 | Has form widgets | `page.widgets()` returns annotations | Widget deletion (Strategy 3, runs after 1 or 2) |
 | Has embedded images | `page.get_images()` returns image refs | Signature detection (Strategy 4, runs on all pages) |
 
-A single PDF can have mixed pages — some with text, some scanned. Each page gets the right strategy automatically. Strategy 4 runs on every page regardless of type.
+A single PDF can have mixed pages — some with text, some scanned. Each page gets the right strategy automatically.
 
 ### What Is NOT Redacted
 
 - Professional names (psychologists, teachers, doctors — unless they match the student name)
-- School names and organisations
 - Assessment dates (unless explicitly labelled as a date of birth)
 - Technical language, scores, and diagnostic terms
 - Non-signature images (logos, charts, photos that don't match the signature heuristic)
@@ -241,13 +243,27 @@ Every detected item is scored from **0.0** (uncertain) to **1.0** (certain). You
 
 ---
 
-## 💻 System Requirements
+## Desktop App Features
+
+The desktop app includes UX features designed for non-technical users:
+
+- **First-run walkthrough** — 4-step guided introduction that appears on first launch. Dismissible, with a "Quick Guide" button in the sidebar to re-open it any time.
+- **Contextual help tooltips** — `?` icons next to every input field explaining what it does and why, in plain English.
+- **Before/after preview** — Split-view comparison of original vs redacted pages on the completion screen. Images are fetched on-demand and never persisted to disk.
+- **Per-document summary cards** — Expandable cards showing category breakdown and confidence indicators for each document. Never displays actual PII text.
+- **Witty progress comments** — During the redaction step (which can take a minute for large batches), rotating teacher-themed comments keep you entertained. Shuffled randomly each time.
+- **Custom output location** — Save redacted files to the default subfolder or browse to any location on your computer.
+- **About modal** — Three tabs (About, How to Use, Features & Detection) accessible from the sidebar. Includes the full walkthrough content plus detection engine explanations.
+
+---
+
+## System Requirements
 
 | Requirement | Details |
 |-------------|---------|
 | **Operating system** | macOS (Apple Silicon M1/M2/M3 or Intel) |
 | **Python** | Version 3.13 or later |
-| **LibreOffice** | Required for Word → PDF conversion |
+| **LibreOffice** | Required for Word to PDF conversion |
 | **Tesseract OCR** | Required for scanned/image-only PDFs |
 | **Disk space** | ~2 GB (for AI models: spaCy + GLiNER) |
 | **RAM** | 8 GB recommended |
@@ -257,15 +273,15 @@ Every detected item is scored from **0.0** (uncertain) to **1.0** (certain). You
 
 ---
 
-## 🚀 Installation Guide
+## Installation Guide
 
-> 💡 **This guide assumes no prior experience** with Terminal or coding. Take it one step at a time. If anything goes wrong, see [Troubleshooting](#-troubleshooting).
+> This guide assumes no prior experience with Terminal or coding. Take it one step at a time. If anything goes wrong, see [Troubleshooting](#troubleshooting).
 
 ### Step 1 — Open Terminal
 
 Terminal is a built-in Mac app that lets you type instructions to your computer.
 
-1. Press **⌘ Command + Space** to open Spotlight Search
+1. Press **Command + Space** to open Spotlight Search
 2. Type `Terminal` and press **Enter**
 3. A window with a text prompt will appear — this is normal
 
@@ -318,15 +334,15 @@ brew install python@3.13
 If you have `git` installed:
 
 ```bash
-git clone https://gitlab.com/davearmswork/bulk-redaction-tool.git
-cd bulk-redaction-tool
+git clone https://github.com/mrdavearms/student-doc-redactor.git
+cd student-doc-redactor
 ```
 
-Or download the ZIP file from GitLab:
-1. Go to [gitlab.com/davearmswork/bulk-redaction-tool](https://gitlab.com/davearmswork/bulk-redaction-tool)
-2. Click the blue **Code** button → **Download source code** → **zip**
+Or download the ZIP file from GitHub:
+1. Go to [github.com/mrdavearms/student-doc-redactor](https://github.com/mrdavearms/student-doc-redactor)
+2. Click the green **Code** button, then **Download ZIP**
 3. Unzip the downloaded file
-4. In Terminal, navigate to the folder: `cd ~/Downloads/bulk-redaction-tool`
+4. In Terminal, navigate to the folder: `cd ~/Downloads/student-doc-redactor`
 
 ---
 
@@ -340,7 +356,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-This step downloads the AI models and may take **5–10 minutes**. You'll see a progress bar. That's normal.
+This step downloads the AI models and may take **5-10 minutes**. You'll see a progress bar. That's normal.
 
 ---
 
@@ -352,67 +368,69 @@ python -m spacy download en_core_web_lg
 
 ---
 
-### ✅ Installation Complete
+### Installation Complete
 
-You're ready to run the tool. You won't need to repeat these steps — just start from [Running the App](#-running-the-app) next time.
+You're ready to run the tool. You won't need to repeat these steps — just start from [Running the App](#running-the-app) next time.
 
 ---
 
-## 🎬 Running the App
+## Running the App
 
-### Every time you want to use the tool:
+### Streamlit version (browser-based)
 
 1. Open Terminal
-2. Navigate to the tool's folder (replace the path with wherever you saved it):
-
-```bash
-cd ~/bulk-redaction-tool
-```
-
+2. Navigate to the tool's folder:
+   ```bash
+   cd ~/student-doc-redactor
+   ```
 3. Run the app:
-
-```bash
-./run.sh
-```
-
+   ```bash
+   ./run.sh
+   ```
 4. Your browser will open automatically to `http://localhost:8501`
 
-If the browser doesn't open, manually visit: **http://localhost:8501**
+To stop: press **Control + C** in Terminal.
 
-### To stop the app:
+### Desktop App (Developer)
 
-Press **Control + C** in Terminal.
+To run the desktop app in development mode:
+
+```bash
+cd desktop && npm install && npm run dev:electron
+```
+
+This starts Vite (hot reload), auto-spawns the FastAPI backend, and opens the Electron window.
+
+To build the Mac DMG:
+
+```bash
+cd desktop && npm run dist:mac
+```
+
+The `.dmg` file will appear in `desktop/release/`.
 
 ---
 
-## 📖 Using the App — Screen by Screen
+## Using the App — Screen by Screen
 
 ### Screen 1 — Select Folder & Enter Student Details
 
-```
-┌─────────────────────────────────────────────────┐
-│  📂 Folder path: [/path/to/student/documents   ]│
-│                                                  │
-│  👤 Student name: [                            ] │
-│  👨‍👩‍👧 Parent name (optional): [                 ] │
-│  👪 Other family names (optional): [           ] │
-│                                                  │
-│              [ Start Processing → ]              │
-└─────────────────────────────────────────────────┘
-```
-
-- **Folder path**: Paste or type the full path to a folder containing the student's documents (PDFs and/or Word files). The folder can contain multiple documents.
+- **Folder path**: Paste or type the full path to a folder containing the student's documents (PDFs and/or Word files), or click **Browse** to select it.
 - **Student name**: First and last name. The tool automatically generates variations (first name only, last name only, initials, etc.)
-- **Parent/Guardian name**: Optional. Helps catch parent names that appear in documents.
+- **Parent/Guardian names**: Optional. Helps catch parent names that appear in documents.
 - **Other family names**: Optional. Siblings, carers, emergency contacts.
+- **Organisation names**: Optional. Schools, clinics, hospitals — any org that could identify the student.
+- **Redact headers & footers**: Optional. Blanks the top and bottom of every page to remove letterheads and addresses.
 
-> 💡 **Tip:** To find a folder's path on Mac, right-click the folder in Finder, hold **Option**, and select **Copy "folder" as Pathname**.
+Each field has a `?` tooltip explaining what it does and why it matters.
+
+> **Tip:** To find a folder's path on Mac, right-click the folder in Finder, hold **Option**, and select **Copy "folder" as Pathname**.
 
 ---
 
 ### Screen 2 — Document Conversion
 
-The tool shows which documents were found and whether Word files were successfully converted to PDF. Green = ready. Orange = needs attention (the original Word file is still processed where possible).
+The tool shows which documents were found and whether Word files were successfully converted to PDF. PII detection runs automatically after conversion completes.
 
 ---
 
@@ -420,54 +438,48 @@ The tool shows which documents were found and whether Word files were successful
 
 This is the most important screen. **You review every item the tool found** — nothing is redacted without your approval.
 
-```
-┌─────────────────────────────────────────────────┐
-│  Document: Assessment_Report.pdf     Page 2     │
-│  ─────────────────────────────────────────────  │
-│  ✅  "Joe Bloggs"        Student name    1.00    │
-│  ✅  "04 1234 5678"     Phone number    0.98    │
-│  ✅  "joe@email.com"   Email address   0.97    │
-│  ⬜  "John"             Person (NER)    0.62    │
-│  ⬜  "Melbourne"        Location (NER)  0.55    │
-│  ─────────────────────────────────────────────  │
-│  [ ← Previous ]              [ Next → Continue ]│
-└─────────────────────────────────────────────────┘
-```
-
 - **Tick the checkbox** next to items you want redacted
-- **Leave items unticked** if they should stay (e.g. a teacher's name, a school name)
-- **Confidence score** (0.0 – 1.0): Higher = more certain. Items below 0.7 are worth double-checking.
+- **Leave items unticked** if they should stay (e.g. a teacher's name)
+- **Confidence badges**: High (green), Medium (amber), Low (rose) — helps you decide
+- **Accept All & Continue**: Skip to the summary if you trust all detections
+- Documents with no PII are automatically skipped
 
 ---
 
-### Screen 4 — Confirm
+### Screen 4 — Final Confirmation
 
-A summary of how many items across how many documents will be redacted. Review it, then click **Create Redacted Documents**.
+A summary of how many items across how many documents will be redacted, broken down by category.
+
+**Output folder options:**
+- **Inside the source folder** (default) — a `redacted` subfolder is created alongside your originals
+- **Choose a different location** — browse to save redacted files anywhere on your computer
 
 ---
 
 ### Screen 5 — Complete
 
 - **Green banner**: Redaction succeeded and was verified
-- **Orange banner**: Some pages were image-only (scanned) and were redacted via OCR — review recommended, as OCR quality depends on scan quality
+- **Orange banner**: Some pages were image-only (scanned) and were redacted via OCR — review recommended
 - **Red banner**: A verification check failed — review that document carefully
-
-Links to open the output folder and view the audit log are on this screen.
+- **Before/after preview**: Side-by-side comparison of original and redacted pages
+- **Document summary cards**: Per-document breakdown of what was redacted, by category
+- **Open Folder** button to jump straight to the output
+- **Redaction Log**: Expandable audit trail of every item redacted
 
 ---
 
-## 📁 Output Files
+## Output Files
 
-After processing, two items are added to your original folder:
+After processing, redacted files are saved to your chosen location (default: a `redacted` subfolder):
 
 ```
 your-folder/
-├── original-document.pdf          ← never modified
-├── original-document.docx         ← never modified
+├── original-document.pdf          <-- never modified
+├── original-document.docx         <-- never modified
 ├── redacted/
-│   ├── original-document_redacted.pdf    ← redacted copy
+│   ├── original-document_redacted.pdf    <-- redacted copy
 │   └── another-doc_redacted.pdf
-└── redaction_log.txt              ← full audit trail
+└── redaction_log.txt              <-- full audit trail
 ```
 
 ### The Audit Log
@@ -476,11 +488,11 @@ your-folder/
 
 ```
 Document: Assessment_Report.pdf
-  Page 2, Line 4  │ "Joe Bloggs"     │ Student name  │ confidence: 1.00
-  Page 2, Line 7  │ "04 1234 5678"  │ Phone number  │ confidence: 0.98
-  Page 3, Line 1  │ "joe@mail.com" │ Email address │ confidence: 0.97
+  Page 2, Line 4  | "Joe Bloggs"     | Student name  | confidence: 1.00
+  Page 2, Line 7  | "04 1234 5678"  | Phone number  | confidence: 0.98
+  Page 3, Line 1  | "joe@mail.com" | Email address | confidence: 0.97
 
-ℹ️  NOTE: Scanned_Report.pdf
+NOTE: Scanned_Report.pdf
   Pages 1-3 used OCR redaction (image-only pages) — review recommended
 ```
 
@@ -488,7 +500,7 @@ Keep this log. It is your record of what was removed and when.
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### "LibreOffice not found"
 
@@ -513,9 +525,9 @@ pip install -r requirements.txt
 
 ### "Port already in use"
 
-Streamlit will automatically try the next available port (8502, 8503, etc.). Check the Terminal output for the correct URL.
+Streamlit will automatically try the next available port (8502, 8503, etc.). Check the Terminal output for the correct URL. For the desktop app, the backend runs on port 8765 — if that's in use, check for another instance running.
 
-### Browser doesn't open
+### Browser doesn't open (Streamlit)
 
 Manually navigate to: **http://localhost:8501**
 
@@ -529,25 +541,21 @@ Make sure Tesseract is installed (Step 4 above). Documents that are scans of pri
 
 ### A redaction didn't work on a scanned page
 
-Scanned pages are redacted using OCR (optical character recognition). The quality of redaction depends on the scan quality — blurry or low-resolution scans may cause Tesseract to misread words. If you see PII surviving redaction on a scanned page:
+Scanned pages are redacted using OCR (optical character recognition). The quality depends on scan quality — blurry or low-resolution scans may cause Tesseract to misread words. If you see PII surviving redaction:
 
 1. Check the scan quality — re-scan at 300 DPI or higher if possible
 2. The audit log will note which pages used OCR redaction
 3. For very poor scans, manual redaction may still be needed
 
-### "OCR redaction used" warning in the audit log
-
-This is informational, not an error. It means the tool detected image-only pages and used the OCR redaction path (Strategy 2 above). The redaction still happened — the warning is there so you know to double-check those pages, since OCR is less precise than text-layer redaction.
-
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 ```mermaid
 gantt
-    title Bulk Redaction Tool — Planned Features
+    title Bulk Redaction Tool — Development Status
     dateFormat  YYYY-MM
-    section Now Available
+    section Core Engine
     Regex PII detection           :done, 2025-02, 2025-03
     3-engine AI detection         :done, 2025-03, 2026-02
     Metadata stripping            :done, 2026-02, 2026-02
@@ -556,10 +564,20 @@ gantt
     Filename PII redaction        :done, 2026-03, 2026-03
     OCR redaction (scanned pages) :done, 2026-03, 2026-03
     Signature detection           :done, 2026-03, 2026-03
+    Organisation name detection   :done, 2026-03, 2026-03
+    Header/footer zone blanking   :done, 2026-03, 2026-03
     257-test suite                :done, 2026-03, 2026-03
+    section Desktop App
+    Electron + React + FastAPI    :done, 2026-03, 2026-03
+    Mac DMG build                 :done, 2026-03, 2026-03
+    Walkthrough + onboarding      :done, 2026-03, 2026-03
+    Contextual help tooltips      :done, 2026-03, 2026-03
+    Before/after preview          :done, 2026-03, 2026-03
+    Custom output path            :done, 2026-03, 2026-03
+    Witty progress comments       :done, 2026-03, 2026-03
     section Coming Soon
-    Mac .app bundle (no Terminal) :active, 2026-03, 2026-05
-    DMG installer                 :2026-05, 2026-06
+    Mac code signing              :active, 2026-03, 2026-05
+    Public DMG download           :2026-04, 2026-06
     section Future
     Windows support               :2026-06, 2026-09
     Batch processing (multiple students) :2026-07, 2026-10
@@ -567,12 +585,13 @@ gantt
 
 ---
 
-## 🏗️ For Developers
+## For Developers
 
 ### Repository
 
 ```
-https://gitlab.com/davearmswork/bulk-redaction-tool
+GitHub: https://github.com/mrdavearms/student-doc-redactor (primary)
+GitLab: https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
 ```
 
 Branches: `main` (stable) · `test` (development)
@@ -580,11 +599,11 @@ Branches: `main` (stable) · `test` (development)
 ### File Structure
 
 ```
-bulk-redaction-tool/
-├── app.py                          # Streamlit entry point
-├── run.sh                          # Launch script
+student-doc-redactor/
+├── app.py                          # Streamlit entry point (legacy)
+├── run.sh                          # Streamlit launch script
 ├── requirements.txt                # Python dependencies
-├── venv/                           # Virtual environment (not in git)
+├── CLAUDE.md                       # AI development context
 │
 ├── src/
 │   ├── core/
@@ -592,45 +611,73 @@ bulk-redaction-tool/
 │   │   ├── pii_detector.py         # Regex detection engine + PIIMatch dataclass
 │   │   ├── presidio_recognizers.py # 6 custom Australian Presidio recognizers
 │   │   ├── gliner_provider.py      # GLiNER zero-shot NER wrapper
-│   │   ├── redactor.py             # Multi-path redaction (text-layer + OCR + signature) + metadata strip
+│   │   ├── redactor.py             # Multi-path redaction + metadata strip + signature detection
 │   │   ├── text_extractor.py       # Text + OCR extraction from PDFs
-│   │   ├── document_converter.py   # LibreOffice Word → PDF conversion
-│   │   ├── binary_resolver.py      # Cross-platform binary path resolution (Tesseract, LibreOffice)
+│   │   ├── document_converter.py   # LibreOffice Word to PDF conversion
+│   │   ├── binary_resolver.py      # Cross-platform binary path resolution
 │   │   ├── logger.py               # Audit log generation and save
-│   │   └── session_state.py        # Streamlit session management + navigate_to()
+│   │   └── session_state.py        # Streamlit session management
 │   ├── services/
 │   │   ├── conversion_service.py   # Document conversion business logic
 │   │   ├── detection_service.py    # PII detection business logic
-│   │   └── redaction_service.py    # Redaction orchestration (routes text-layer vs OCR pages)
+│   │   └── redaction_service.py    # Redaction orchestration + custom output paths
 │   └── ui/
 │       └── screens.py              # All 5 Streamlit screens
 │
 ├── backend/
-│   ├── main.py                     # FastAPI API layer (Phase 2 desktop app)
+│   ├── main.py                     # FastAPI API layer + detection cache
 │   └── schemas.py                  # Pydantic request/response models
 │
-├── desktop/                        # Vite + React + Electron frontend (Phase 2)
+├── desktop/
 │   ├── electron/
-│   │   ├── main.cjs                # Electron main process
-│   │   └── preload.cjs             # Electron preload script
-│   └── src/
-│       ├── pages/                  # 5 wizard pages
-│       └── components/             # Layout, Sidebar
+│   │   ├── main.cjs                # Electron main process (spawns backend)
+│   │   └── preload.cjs             # Electron preload (IPC bridge)
+│   ├── src/
+│   │   ├── App.tsx                 # React entry point, screen router
+│   │   ├── main.tsx                # Vite entry point
+│   │   ├── store.ts                # Zustand single store
+│   │   ├── api.ts                  # HTTP client for backend
+│   │   ├── types.ts                # TypeScript type definitions
+│   │   ├── index.css               # Tailwind v4 theme + utility classes
+│   │   ├── electron.d.ts           # Electron IPC type declarations
+│   │   ├── pages/
+│   │   │   ├── FolderSelection.tsx     # Step 1: folder + student details
+│   │   │   ├── ConversionStatus.tsx    # Step 2: Word to PDF conversion
+│   │   │   ├── DocumentReview.tsx      # Step 3: review detected PII
+│   │   │   ├── FinalConfirmation.tsx   # Step 4: confirm + output options
+│   │   │   └── Completion.tsx          # Step 5: results + preview
+│   │   └── components/
+│   │       ├── Layout.tsx              # Main layout, animated transitions
+│   │       ├── Sidebar.tsx             # Step indicator, logo, walkthrough
+│   │       ├── Walkthrough.tsx         # 4-step first-run onboarding
+│   │       ├── HelpTip.tsx             # Contextual ? tooltip popover
+│   │       ├── AboutModal.tsx          # 3-tab About dialog
+│   │       ├── PreviewSection.tsx      # Before/after PDF preview
+│   │       ├── DocumentCard.tsx        # Per-document summary card
+│   │       └── RedactionProgress.tsx   # Progress bar + witty comments
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── docs/
+│   ├── plans/                      # Implementation plans (reference only)
+│   └── legacy/                     # Outdated docs moved from root
 │
 └── tests/
-    ├── test_pii_detector.py         # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
-    ├── test_pii_detector_names.py   # 54 tests: name variations, contextual, possessives, family
-    ├── test_pii_orchestrator.py     # 22 tests: orchestrator merge, dedup, multi-engine
-    ├── test_presidio_recognizers.py # 18 tests: 6 AU recognizer unit tests
-    ├── test_gliner_provider.py      # 12 tests: GLiNER wrapper tests
-    ├── test_redactor.py             # 11 tests: text-layer redaction, metadata, routing, possessive matching
-    ├── test_signature_detection.py  # 16 tests: signature heuristic gates, image replacement
-    ├── test_ocr_redaction.py        # 19 tests: OCR page detection, image redaction, word matching
-    ├── test_ocr_verification.py     # 7 tests: post-redaction OCR verification
-    ├── test_metadata_stripping.py   # 8 tests: PDF metadata removal
-    ├── test_widget_redaction.py     # 6 tests: AcroForm widget deletion
-    ├── test_filename_redaction.py   # 13 tests: PII in filenames
-    └── test_binary_resolver.py      # 6 tests: cross-platform binary path resolution
+    ├── test_pii_detector.py         # 39 tests
+    ├── test_pii_detector_names.py   # 54 tests
+    ├── test_pii_orchestrator.py     # 22 tests
+    ├── test_presidio_recognizers.py # 18 tests
+    ├── test_gliner_provider.py      # 12 tests
+    ├── test_redactor.py             # 11 tests
+    ├── test_signature_detection.py  # 16 tests
+    ├── test_ocr_redaction.py        # 19 tests
+    ├── test_ocr_verification.py     # 7 tests
+    ├── test_metadata_stripping.py   # 8 tests
+    ├── test_widget_redaction.py     # 6 tests
+    ├── test_filename_redaction.py   # 13 tests
+    ├── test_zone_redaction.py       # 5 tests
+    ├── test_session_state.py        # 2 tests
+    └── test_binary_resolver.py      # 6 tests
 ```
 
 ### Running Tests
@@ -646,34 +693,34 @@ All 257 tests should pass in under 5 minutes.
 
 | Component | Technology |
 |-----------|-----------|
-| UI (Streamlit version) | Streamlit |
-| UI (Desktop version) | Electron + React + Vite + Tailwind v4 |
-| API layer (Desktop) | FastAPI |
+| Desktop UI | Electron + React + Vite + Tailwind v4 + Framer Motion |
+| Desktop state | Zustand |
+| API layer | FastAPI + Pydantic |
+| Legacy UI | Streamlit |
 | PDF processing | PyMuPDF (fitz) |
 | Image redaction | Pillow (PIL) ImageDraw |
 | AI / NER | Microsoft Presidio + spaCy `en_core_web_lg` |
 | Zero-shot NER | GLiNER |
 | OCR | Tesseract + pytesseract |
 | Word conversion | LibreOffice headless |
-| State management (Desktop) | Zustand |
 | Tests | pytest (257 tests) |
-| Language | Python 3.13+ |
+| Language | Python 3.13+ / TypeScript |
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-This tool is actively developed. Bug reports and suggestions are welcome — please open an issue on GitLab.
+This tool is actively developed. Bug reports and suggestions are welcome — please open an issue on GitHub.
 
 If you are a teacher, school psychologist, or support staff and would like to share feedback about what the tool does or doesn't catch in real documents (without sharing the documents themselves), please open an issue with the label `feedback`.
 
 ---
 
-## 📄 Licence
+## Licence
 
 This project is currently unlicensed (private development). A licence will be added when the public release is made. Until then, please do not redistribute.
 
 ---
 
-*Built with ❤️ for Australian educators handling sensitive student data.*
+*Built for Australian educators handling sensitive student data.*
 *All processing is local. Your students' information stays on your Mac.*
