@@ -1,21 +1,39 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ExternalLink, ShieldCheck, FileText, Eye, AlertTriangle } from 'lucide-react';
+import { X, ExternalLink, ShieldCheck, FolderOpen, Eye, Lightbulb, Zap } from 'lucide-react';
+import { resetWalkthrough } from './Walkthrough';
 
 interface AboutModalProps {
   open: boolean;
   onClose: () => void;
+  onShowWalkthrough: () => void;
 }
 
-export default function AboutModal({ open, onClose }: AboutModalProps) {
+type Tab = 'about' | 'how-to-use' | 'features';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'about', label: 'About' },
+  { key: 'how-to-use', label: 'How to Use' },
+  { key: 'features', label: 'Features & Detection' },
+];
+
+export default function AboutModal({ open, onClose, onShowWalkthrough }: AboutModalProps) {
+  const [activeTab, setActiveTab] = useState<Tab>('about');
+
   const openLink = (url: string) => {
     window.electronAPI?.openExternal(url);
+  };
+
+  const handleShowWalkthrough = () => {
+    resetWalkthrough();
+    onClose();
+    onShowWalkthrough();
   };
 
   return (
     <AnimatePresence>
       {open && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -23,8 +41,6 @@ export default function AboutModal({ open, onClose }: AboutModalProps) {
             onClick={onClose}
             className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm"
           />
-
-          {/* Modal */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -32,12 +48,18 @@ export default function AboutModal({ open, onClose }: AboutModalProps) {
             transition={{ type: 'spring', stiffness: 350, damping: 28 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none"
           >
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto pointer-events-auto">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden pointer-events-auto flex flex-col">
+              {/* Header with typographic logo */}
+              <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-800">Redaction Tool</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">v0.1.0</p>
+                  <h2 className="text-lg tracking-tight">
+                    <span className="font-bold text-primary-600">Redact</span>
+                    <span className="text-slate-300 mx-1.5 font-light">|</span>
+                    <span className="font-light text-slate-400">Tool</span>
+                  </h2>
+                  <p className="text-[10px] text-slate-400 mt-0.5 tracking-widest uppercase">
+                    Protect student privacy
+                  </p>
                 </div>
                 <button
                   onClick={onClose}
@@ -47,128 +69,48 @@ export default function AboutModal({ open, onClose }: AboutModalProps) {
                 </button>
               </div>
 
-              {/* Content */}
-              <div className="px-6 py-5 space-y-5">
-
-                {/* Developer */}
-                <section>
-                  <p className="text-sm text-slate-600">
-                    Developed by <span className="font-medium text-slate-800">David Armstrong</span>
-                  </p>
+              {/* Tabs */}
+              <div className="flex gap-6 px-6 pt-4 border-b border-slate-100 shrink-0">
+                {TABS.map((tab) => (
                   <button
-                    onClick={() => openLink('https://github.com/mrdavearms/student-doc-redactor')}
-                    className="flex items-center gap-1.5 mt-1.5 text-xs text-primary-500 hover:text-primary-600 transition-colors"
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`pb-3 text-sm transition-colors relative ${
+                      activeTab === tab.key
+                        ? 'text-primary-600 font-medium'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
                   >
-                    <ExternalLink size={11} />
-                    View on GitHub
+                    {tab.label}
+                    {activeTab === tab.key && (
+                      <motion.div
+                        layoutId="aboutTab"
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 rounded-full"
+                      />
+                    )}
                   </button>
-                </section>
+                ))}
+              </div>
 
-                {/* What it does */}
-                <section>
-                  <h3 className="text-sm font-medium text-slate-700 mb-2">What This App Does</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed">
-                    Bulk-redacts personally identifiable information (PII) from student assessment
-                    PDFs and Word documents. Built for Australian teachers and school psychologists
-                    who need to share reports while protecting student privacy.
-                  </p>
-                </section>
-
-                {/* How to use */}
-                <section>
-                  <h3 className="text-sm font-medium text-slate-700 mb-2">How to Use</h3>
-                  <div className="space-y-2">
-                    {[
-                      { icon: <FileText size={14} />, step: '1', text: 'Select a folder containing student documents (PDFs and Word files).' },
-                      { icon: <Eye size={14} />, step: '2', text: 'Enter the student name and any parent, family, or organisation names to detect.' },
-                      { icon: <ShieldCheck size={14} />, step: '3', text: 'Review detected PII, accept or reject each item, then create redacted copies.' },
-                    ].map((item) => (
-                      <div key={item.step} className="flex gap-3 items-start">
-                        <div className="w-6 h-6 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold shrink-0 mt-0.5">
-                          {item.step}
-                        </div>
-                        <p className="text-sm text-slate-500 leading-relaxed">{item.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                {/* Features */}
-                <section>
-                  <h3 className="text-sm font-medium text-slate-700 mb-2">Features</h3>
-                  <ul className="space-y-1.5 text-sm text-slate-500">
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Multi-engine PII detection (regex, Presidio NER, GLiNER zero-shot NER)</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Detects names, phone numbers, emails, addresses, Medicare numbers, dates of birth, student IDs, and more</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Redacts both text-layer and scanned/OCR pages in PDFs</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Automatic Word to PDF conversion via LibreOffice</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Header/footer zone blanking for school letterheads</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Signature image detection and removal</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>PII removed from output filenames</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>Full audit log of every redaction</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-emerald-500 mt-1 shrink-0">•</span>
-                      <span>100% local processing — no data leaves your machine</span>
-                    </li>
-                  </ul>
-                </section>
-
-                {/* Limitations */}
-                <section>
-                  <h3 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                    <AlertTriangle size={14} className="text-amber-500" />
-                    Limitations
-                  </h3>
-                  <ul className="space-y-1.5 text-sm text-slate-500">
-                    <li className="flex gap-2 items-start">
-                      <span className="text-amber-500 mt-1 shrink-0">•</span>
-                      <span>OCR accuracy depends on scan quality — low-DPI or blurry scans may miss words</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-amber-500 mt-1 shrink-0">•</span>
-                      <span>No fuzzy name matching yet — misspelled names may not be detected</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-amber-500 mt-1 shrink-0">•</span>
-                      <span>Requires LibreOffice and Tesseract OCR installed separately</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-amber-500 mt-1 shrink-0">•</span>
-                      <span>macOS only (Apple Silicon) in this version</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <span className="text-amber-500 mt-1 shrink-0">•</span>
-                      <span>Always manually review redacted documents before sharing</span>
-                    </li>
-                  </ul>
-                </section>
+              {/* Tab content */}
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={activeTab}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                  >
+                    {activeTab === 'about' && <TabAbout openLink={openLink} />}
+                    {activeTab === 'how-to-use' && <TabHowToUse onShowWalkthrough={handleShowWalkthrough} />}
+                    {activeTab === 'features' && <TabFeatures />}
+                  </motion.div>
+                </AnimatePresence>
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 border-t border-slate-100 text-center">
+              <div className="px-6 py-4 border-t border-slate-100 text-center shrink-0">
                 <p className="text-[10px] text-slate-300">
                   © 2026 David Armstrong · Built for Australian educators
                 </p>
@@ -178,5 +120,146 @@ export default function AboutModal({ open, onClose }: AboutModalProps) {
         </>
       )}
     </AnimatePresence>
+  );
+}
+
+/* ── Tab Content ──────────────────────────────────────────────────── */
+
+function TabAbout({ openLink }: { openLink: (url: string) => void }) {
+  return (
+    <div className="space-y-5">
+      <section>
+        <p className="text-sm text-slate-600">
+          Developed by <span className="font-medium text-slate-800">David Armstrong</span>
+        </p>
+        <button
+          onClick={() => openLink('https://github.com/mrdavearms/student-doc-redactor')}
+          className="flex items-center gap-1.5 mt-1.5 text-xs text-primary-500 hover:text-primary-600 transition-colors"
+        >
+          <ExternalLink size={11} /> View on GitHub
+        </button>
+      </section>
+      <section>
+        <h3 className="text-sm font-medium text-slate-700 mb-2">What This App Does</h3>
+        <p className="text-sm text-slate-500 leading-relaxed">
+          Finds and removes personally identifiable information from student assessment
+          documents — names, phone numbers, emails, addresses, and more. Built for teachers
+          and school psychologists who need to share reports while protecting student privacy.
+          All processing happens locally on your computer.
+        </p>
+      </section>
+      <section>
+        <p className="text-[10px] text-slate-400 uppercase tracking-widest">v0.1.0</p>
+      </section>
+    </div>
+  );
+}
+
+function TabHowToUse({ onShowWalkthrough }: { onShowWalkthrough: () => void }) {
+  return (
+    <div className="space-y-5">
+      <section>
+        <h3 className="text-sm font-medium text-slate-700 mb-3">Getting Started</h3>
+        <div className="space-y-3">
+          {[
+            { icon: <FolderOpen size={14} />, step: '1', text: 'Select a folder containing student documents (PDFs and Word files) and enter the student\'s name.' },
+            { icon: <Eye size={14} />, step: '2', text: 'Enter parent, family, and organisation names — the more you provide, the more thorough the detection.' },
+            { icon: <ShieldCheck size={14} />, step: '3', text: 'Review detected PII, accept or reject each item, then create redacted copies in a new folder.' },
+          ].map((item) => (
+            <div key={item.step} className="flex gap-3 items-start">
+              <div className="w-6 h-6 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold shrink-0 mt-0.5">
+                {item.step}
+              </div>
+              <p className="text-sm text-slate-500 leading-relaxed">{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+          <Lightbulb size={14} className="text-primary-500" />
+          Tips for the Best Results
+        </h3>
+        <div className="space-y-2">
+          {[
+            'Enter all the names you can — student, parents, siblings, schools, clinics.',
+            'Unusual name spellings may occasionally be missed — a quick review of the output gives you full confidence.',
+            'Scanned and handwritten documents are analysed, though low-quality scans may need a glance.',
+            'We recommend a quick review of your redacted documents before sharing.',
+          ].map((tip, i) => (
+            <div key={i} className="flex gap-2 items-start">
+              <Lightbulb size={12} className="text-primary-400 shrink-0 mt-0.5" />
+              <p className="text-sm text-slate-500 leading-relaxed">{tip}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <button
+        onClick={onShowWalkthrough}
+        className="text-xs text-primary-500 hover:text-primary-600 transition-colors"
+      >
+        Show welcome walkthrough again
+      </button>
+    </div>
+  );
+}
+
+function TabFeatures() {
+  return (
+    <div className="space-y-5">
+      <section>
+        <h3 className="text-sm font-medium text-slate-700 mb-2">Features</h3>
+        <ul className="space-y-1.5 text-sm text-slate-500">
+          {[
+            'Detects names, phone numbers, emails, addresses, Medicare numbers, dates of birth, student IDs, and more',
+            'Redacts both text-layer and scanned/OCR pages in PDFs',
+            'Automatic Word to PDF conversion',
+            'Header/footer zone blanking for school letterheads',
+            'Signature image detection and removal',
+            'PII removed from output filenames',
+            'Full audit log of every redaction',
+            '100% local processing — no data leaves your machine',
+          ].map((f, i) => (
+            <li key={i} className="flex gap-2 items-start">
+              <span className="text-emerald-500 mt-1 shrink-0">•</span>
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
+          <Zap size={14} className="text-primary-500" />
+          Detection Engines
+        </h3>
+        <p className="text-sm text-slate-500 leading-relaxed">
+          This tool uses three detection methods working together — pattern matching for
+          structured data like phone numbers and emails, named entity recognition for names
+          and addresses, and zero-shot AI detection for unusual PII formats. Each item is
+          checked by multiple engines for reliability.
+        </p>
+      </section>
+
+      <section>
+        <h3 className="text-sm font-medium text-slate-700 mb-2">Confidence Levels</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            <span className="text-slate-500"><span className="font-medium text-slate-700">High</span> — the tool is very confident this is personal information</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+            <span className="text-slate-500"><span className="font-medium text-slate-700">Medium</span> — likely PII, but worth a quick check</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+            <span className="text-slate-500"><span className="font-medium text-slate-700">Low</span> — possible match, review recommended</span>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
