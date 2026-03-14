@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import { useStore } from '../store';
+import type { UpdateState } from '../hooks/useUpdater';
 
 const pageVariants = {
   initial: { opacity: 0, y: 12 },
@@ -8,14 +9,20 @@ const pageVariants = {
   exit: { opacity: 0, y: -12 },
 };
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+interface LayoutProps {
+  children: React.ReactNode;
+  updateState: UpdateState;
+  onCheckForUpdates: () => void;
+}
+
+export default function Layout({ children, updateState, onCheckForUpdates }: LayoutProps) {
   const currentScreen = useStore((s) => s.currentScreen);
   const loading = useStore((s) => s.loading);
   const loadingMessage = useStore((s) => s.loadingMessage);
 
   return (
     <div className="flex h-full">
-      <Sidebar />
+      <Sidebar updateState={updateState} onCheckForUpdates={onCheckForUpdates} />
 
       <main className="flex-1 overflow-y-auto relative">
         {/* Loading overlay */}
