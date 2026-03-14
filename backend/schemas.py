@@ -108,6 +108,19 @@ class RedactionResultsResponse(BaseModel):
     ocr_warnings: List[Dict[str, int]]  # [{filename, count}]
 
 
+# ── Preview ──────────────────────────────────────────────────────────────
+
+class PreviewRequest(BaseModel):
+    pdf_path: str
+    page_num: int  # 0-indexed
+
+
+class PreviewResponse(BaseModel):
+    image_base64: str
+    total_pages: int
+    page_num: int
+
+
 # ── Utility ───────────────────────────────────────────────────────────────
 
 class OpenFolderRequest(BaseModel):

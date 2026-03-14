@@ -3,6 +3,7 @@ FastAPI Backend — HTTP API wrapping the service layer.
 Run with: uvicorn backend.main:app --port 8765 --reload
 """
 
+import base64
 import os
 import platform
 import subprocess
@@ -33,6 +34,8 @@ from backend.schemas import (
     HealthResponse,
     OpenFolderRequest,
     PIIMatchResponse,
+    PreviewRequest,
+    PreviewResponse,
     ProcessFolderRequest,
     RedactRequest,
     RedactionResultsResponse,
@@ -255,6 +258,44 @@ def redact_documents(req: RedactRequest):
         ocr_warnings=[
             {"filename": f, "count": c} for f, c in results.ocr_warnings
         ],
+    )
+
+
+# ── Preview ──────────────────────────────────────────────────────────────
+
+@app.post("/api/preview", response_model=PreviewResponse)
+def preview_page(req: PreviewRequest):
+    """Render a single PDF page at 150 DPI and return as base64 PNG."""
+    import fitz
+
+    pdf_path = Path(req.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {req.pdf_path}")
+
+    try:
+        doc = fitz.open(str(pdf_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot open PDF: {e}")
+
+    if req.page_num < 0 or req.page_num >= len(doc):
+        doc.close()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Page {req.page_num} out of range (0-{len(doc) - 1})",
+        )
+
+    page = doc[req.page_num]
+    # 150 DPI: multiply by 150/72
+    mat = fitz.Matrix(150 / 72, 150 / 72)
+    pix = page.get_pixmap(matrix=mat)
+    img_bytes = pix.tobytes("png")
+    total = len(doc)
+    doc.close()
+
+    return PreviewResponse(
+        image_base64=base64.b64encode(img_bytes).decode("ascii"),
+        total_pages=total,
+        page_num=req.page_num,
     )
 
 
