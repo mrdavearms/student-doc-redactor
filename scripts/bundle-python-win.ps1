@@ -42,7 +42,7 @@ $PythonBin = Join-Path $PythonDest "python.exe"
 
 Write-Host "==> Installing pip dependencies into bundled Python..."
 & $PythonBin -m pip install --upgrade pip --quiet
-& $PythonBin -m pip install -r (Join-Path $RepoRoot "requirements.txt") --quiet
+& $PythonBin -m pip install -r (Join-Path $RepoRoot "requirements-desktop.txt") --quiet
 
 Write-Host "==> Downloading spaCy model (en_core_web_lg)..."
 & $PythonBin -m spacy download en_core_web_lg --quiet
