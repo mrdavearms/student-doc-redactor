@@ -1,20 +1,23 @@
 # Bulk Redaction Tool
 
-**A free, private, Mac-based tool for removing student personal information from assessment documents — before you share them with anyone.**
+**A free, private tool for removing student personal information from assessment documents — before you share them with anyone.**
 
-Built for Australian teachers, psychologists, and support staff who handle sensitive student records. Everything runs on your own Mac. No accounts. No subscriptions. No data ever leaves your computer.
+Built for Australian teachers, psychologists, and support staff who handle sensitive student records. Everything runs on your own computer — Mac or Windows. No accounts. No subscriptions. No data ever leaves your machine.
 
 ---
 
 ## Downloads
 
-> **Mac DMG installer is ready.** Download the latest version from [GitHub Releases](https://github.com/mrdavearms/student-doc-redactor/releases).
+> **Download the latest version for your platform from [GitHub Releases](https://github.com/mrdavearms/student-doc-redactor/releases):**
 >
-> If you prefer to run from source or build the app yourself, see [Installation Guide](#-installation-guide) or [Desktop App (Developer)](#desktop-app-developer) below.
+> | Platform | File | Notes |
+> |----------|------|-------|
+> | **macOS** (Apple Silicon) | `.dmg` installer | Drag to Applications. Not code-signed yet — see [macOS Gatekeeper note](#macos-gatekeeper-note) below. |
+> | **Windows** (64-bit) | `.exe` installer | Standard NSIS installer. Choose your install directory. |
 >
-> **Follow this repository** to stay notified of updates:
-> - GitHub: [github.com/mrdavearms/student-doc-redactor](https://github.com/mrdavearms/student-doc-redactor)
-> - GitLab: [gitlab.com/davearmswork/bulk-redaction-tool](https://gitlab.com/davearmswork/bulk-redaction-tool)
+> **LibreOffice** (free) is required to process Word documents. The app will prompt you to install it on first launch if it's missing. [Download LibreOffice](https://www.libreoffice.org/download/download-libreoffice/). If you only work with PDFs, LibreOffice is not needed.
+>
+> If you prefer to run from source, see [Installation Guide](#-installation-guide) or [Desktop App (Developer)](#desktop-app-developer) below.
 
 ---
 
@@ -36,9 +39,9 @@ When sharing student assessment reports — with other schools, services, or age
 
 | | Desktop App | Streamlit (browser) |
 |--|-------------|-------------------|
-| **What** | Native Mac app (Electron) | Opens in your web browser |
+| **What** | Native app for Mac and Windows (Electron) | Opens in your web browser |
 | **Best for** | Everyday use | Developers / advanced users |
-| **Run** | Double-click the `.app` or `cd desktop && npm run dev:electron` | `source venv/bin/activate && streamlit run app.py` |
+| **Run** | Double-click the installed app, or `cd desktop && npm run dev:electron` | `source venv/bin/activate && streamlit run app.py` |
 | **Status** | Primary — actively developed | Legacy — still works, not the focus |
 
 Both use the same detection and redaction engines underneath.
@@ -54,7 +57,7 @@ This matters most for a tool handling children's data.
 | Original files never modified | Redacted copies are saved separately. Your source documents are untouched. |
 | Text is permanently destroyed | Redacted text cannot be recovered via copy/paste, search, or any PDF tool. It is not hidden — it is gone. |
 | Metadata is stripped | Author names, dates, and hidden document properties (XMP data) are removed from output PDFs. |
-| 100% local processing | No internet connection required. Your documents never leave your Mac. |
+| 100% local processing | No internet connection required. Your documents never leave your computer. |
 | No accounts or cloud services | Nothing is uploaded anywhere. Ever. |
 | Scanned pages handled | Image-only pages (scans) are redacted via OCR + image rewriting. No page is left behind. |
 | Redaction verified | After redaction, the tool re-scans the output at 300 DPI to confirm the text is visually gone. |
@@ -259,22 +262,46 @@ The desktop app includes UX features designed for non-technical users:
 
 ## System Requirements
 
+### Desktop App (recommended)
+
+| Requirement | macOS | Windows |
+|-------------|-------|---------|
+| **OS** | macOS 12+ (Apple Silicon or Intel) | Windows 10/11 (64-bit) |
+| **LibreOffice** | Needed for Word docs — [download](https://www.libreoffice.org/download/download-libreoffice/) | Needed for Word docs — [download](https://www.libreoffice.org/download/download-libreoffice/) |
+| **Tesseract OCR** | Bundled in the app | Bundled in the app |
+| **Disk space** | ~2 GB | ~2 GB |
+| **RAM** | 8 GB recommended | 8 GB recommended |
+| **Internet** | Only during installation | Only during installation |
+
+The desktop app bundles Python, Tesseract, and all AI models. You only need to install LibreOffice separately if you want to process Word documents (.doc/.docx). If you only work with PDFs, nothing else is needed.
+
+### Running from source (developers)
+
 | Requirement | Details |
 |-------------|---------|
-| **Operating system** | macOS (Apple Silicon M1/M2/M3 or Intel) |
 | **Python** | Version 3.13 or later |
 | **LibreOffice** | Required for Word to PDF conversion |
 | **Tesseract OCR** | Required for scanned/image-only PDFs |
 | **Disk space** | ~2 GB (for AI models: spaCy + GLiNER) |
-| **RAM** | 8 GB recommended |
-| **Internet** | Only needed during installation |
 
-> **Windows and Linux** are not currently supported. They are on the roadmap.
+> **Linux** is not currently supported but is on the roadmap.
+
+### macOS Gatekeeper Note
+
+The Mac app is not code-signed yet. When you first open it, macOS may block it with "App can't be opened because it is from an unidentified developer." To bypass this:
+
+1. Right-click (or Control-click) the app in Finder
+2. Select **Open** from the context menu
+3. Click **Open** in the dialog that appears
+
+You only need to do this once — macOS remembers your choice. Code signing is planned for a future release.
 
 ---
 
 ## Installation Guide
 
+> **Note:** This guide is for running from source on macOS. Most users should download the desktop app from [GitHub Releases](https://github.com/mrdavearms/student-doc-redactor/releases) instead — no installation steps required.
+>
 > This guide assumes no prior experience with Terminal or coding. Take it one step at a time. If anything goes wrong, see [Troubleshooting](#troubleshooting).
 
 ### Step 1 — Open Terminal
@@ -401,13 +428,17 @@ cd desktop && npm install && npm run dev:electron
 
 This starts Vite (hot reload), auto-spawns the FastAPI backend, and opens the Electron window.
 
-To build the Mac DMG:
+To build installers locally:
 
 ```bash
+# Mac DMG (run on macOS)
 cd desktop && npm run dist:mac
+
+# Windows installer (run on Windows)
+cd desktop && npm run dist:win
 ```
 
-The `.dmg` file will appear in `desktop/release/`.
+The output appears in `desktop/release/`.
 
 ---
 
@@ -575,11 +606,13 @@ gantt
     Before/after preview          :done, 2026-03, 2026-03
     Custom output path            :done, 2026-03, 2026-03
     Witty progress comments       :done, 2026-03, 2026-03
+    Windows support + installer   :done, 2026-03, 2026-03
+    First-run setup screen        :done, 2026-03, 2026-03
+    Auto-update system            :done, 2026-03, 2026-03
     section Coming Soon
     Mac code signing              :active, 2026-03, 2026-05
-    Public DMG download           :2026-04, 2026-06
     section Future
-    Windows support               :2026-06, 2026-09
+    Linux support                 :2026-06, 2026-09
     Batch processing (multiple students) :2026-07, 2026-10
 ```
 
@@ -640,12 +673,15 @@ student-doc-redactor/
 │   │   ├── types.ts                # TypeScript type definitions
 │   │   ├── index.css               # Tailwind v4 theme + utility classes
 │   │   ├── electron.d.ts           # Electron IPC type declarations
+│   │   ├── hooks/
+│   │   │   └── useUpdater.ts           # Auto-update state machine
 │   │   ├── pages/
 │   │   │   ├── FolderSelection.tsx     # Step 1: folder + student details
 │   │   │   ├── ConversionStatus.tsx    # Step 2: Word to PDF conversion
 │   │   │   ├── DocumentReview.tsx      # Step 3: review detected PII
 │   │   │   ├── FinalConfirmation.tsx   # Step 4: confirm + output options
-│   │   │   └── Completion.tsx          # Step 5: results + preview
+│   │   │   ├── Completion.tsx          # Step 5: results + preview
+│   │   │   └── Setup.tsx                # First-run: LibreOffice check
 │   │   └── components/
 │   │       ├── Layout.tsx              # Main layout, animated transitions
 │   │       ├── Sidebar.tsx             # Step indicator, logo, walkthrough
@@ -654,7 +690,8 @@ student-doc-redactor/
 │   │       ├── AboutModal.tsx          # 3-tab About dialog
 │   │       ├── PreviewSection.tsx      # Before/after PDF preview
 │   │       ├── DocumentCard.tsx        # Per-document summary card
-│   │       └── RedactionProgress.tsx   # Progress bar + witty comments
+│   │       ├── RedactionProgress.tsx   # Progress bar + witty comments
+│   │       └── UpdateBanner.tsx         # Auto-update notification bar
 │   ├── package.json
 │   └── vite.config.ts
 │
@@ -723,4 +760,4 @@ This project is currently unlicensed (private development). A licence will be ad
 ---
 
 *Built for Australian educators handling sensitive student data.*
-*All processing is local. Your students' information stays on your Mac.*
+*All processing is local. Your students' information stays on your computer.*
