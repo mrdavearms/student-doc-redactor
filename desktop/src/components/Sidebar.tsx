@@ -10,6 +10,7 @@ import type { UpdateState } from '../hooks/useUpdater';
 const WALKTHROUGH_STORAGE_KEY = 'walkthrough_dismissed';
 
 const ICONS: Record<Screen, React.ReactNode> = {
+  setup: <RefreshCw size={18} />,
   folder_selection: <FolderOpen size={18} />,
   conversion_status: <RefreshCw size={18} />,
   document_review: <Search size={18} />,
