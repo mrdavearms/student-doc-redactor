@@ -94,8 +94,9 @@ export default function DocumentReview() {
             <FileText size={18} className="text-primary-500" />
             <h3 className="font-medium text-slate-700">{doc.filename}</h3>
           </div>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-400 flex items-center gap-1.5">
             {selectedCount}/{matches.length} selected
+            <HelpTip text="High confidence means the tool is very sure this is personal information. Medium means it's likely but worth checking. Items are pre-selected for redaction — uncheck any you want to keep." />
           </span>
         </div>
 

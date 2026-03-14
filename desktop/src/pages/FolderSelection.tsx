@@ -139,9 +139,10 @@ export default function FolderSelection() {
           </div>
 
           <div>
-            <label className="block text-sm text-slate-600 mb-1.5">
-              <Users size={14} className="inline mr-1 text-slate-400" />
+            <label className="flex items-center gap-1.5 text-sm text-slate-600 mb-1.5">
+              <Users size={14} className="text-slate-400" />
               Other family members
+              <HelpTip text="Siblings or other family members sometimes appear in assessment reports, especially in background history sections." />
             </label>
             <input
               type="text"
@@ -156,9 +157,10 @@ export default function FolderSelection() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-600 mb-1.5">
-            <Building size={14} className="inline mr-1 text-slate-400" />
+          <label className="flex items-center gap-1.5 text-sm text-slate-600 mb-1.5">
+            <Building size={14} className="text-slate-400" />
             Organisation names
+            <HelpTip text="Schools, clinics, hospitals, therapy centres — any organisation name that could identify the student's location or service providers." />
           </label>
           <input
             type="text"
@@ -179,8 +181,9 @@ export default function FolderSelection() {
             className="w-4 h-4 rounded border-slate-300 text-primary-600
                        focus:ring-primary-200 focus:ring-offset-0"
           />
-          <span className="text-sm text-slate-600">
+          <span className="text-sm text-slate-600 flex items-center gap-1.5">
             Redact headers & footers (blanks top/bottom of every page — removes letterheads and addresses)
+            <HelpTip text="Blanks the top and bottom of every page. Useful for removing school letterheads, clinic logos, and addresses that appear in page margins." />
           </span>
         </label>
       </motion.section>

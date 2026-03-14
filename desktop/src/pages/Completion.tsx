@@ -6,6 +6,7 @@ import {
 import { useState } from 'react';
 import { useStore } from '../store';
 import { api } from '../api';
+import HelpTip from '../components/HelpTip';
 
 export default function Completion() {
   const { redactionResults, reset } = useStore();
@@ -64,6 +65,7 @@ export default function Completion() {
           <div className="flex items-center gap-2 text-sm font-medium text-red-700 mb-2">
             <XCircle size={16} />
             {r.verification_failures.length} verification failure(s)
+            <HelpTip text="The tool re-checks each redacted document to confirm the text was fully removed. A failure here means the original text may still be visible — open the file and check manually." />
           </div>
           <p className="text-xs text-red-600 mb-3">
             The original text may still be present in these files. Review the log and check manually.
@@ -153,7 +155,10 @@ export default function Completion() {
           className="w-full flex items-center gap-2 px-5 py-3 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
         >
           <FileText size={14} className="text-slate-400" />
-          <span className="flex-1 text-left font-medium">Redaction Log</span>
+          <span className="flex-1 text-left font-medium flex items-center gap-1.5">
+            Redaction Log
+            <HelpTip text="A detailed record of every item that was redacted, which document it came from, and which detection engine found it. Useful for your own records." />
+          </span>
           {logExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
         {logExpanded && (
