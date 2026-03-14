@@ -28,7 +28,7 @@ export default function ConversionStatus() {
 
   // Process folder on mount (if not already done)
   useEffect(() => {
-    if (conversionResults || !deps?.can_convert_word) return;
+    if (conversionResults || !deps) return;
     setProcessing(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -96,8 +96,19 @@ export default function ConversionStatus() {
         )}
 
         {deps && !deps.can_convert_word && (
-          <div className="mt-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700">
-            Cannot proceed without LibreOffice. Please install it first.
+          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 space-y-2">
+            <p className="font-medium">LibreOffice is needed to convert Word documents to PDF.</p>
+            <p>If your folder only contains PDF files, you can continue without it.</p>
+            <p>
+              To install: visit{' '}
+              <button
+                onClick={() => window.electronAPI?.openExternal?.('https://www.libreoffice.org/download/download-libreoffice/')}
+                className="text-primary-600 underline hover:text-primary-800"
+              >
+                libreoffice.org/download
+              </button>
+              , download the installer, and run it. Then restart this app.
+            </p>
           </div>
         )}
       </motion.section>

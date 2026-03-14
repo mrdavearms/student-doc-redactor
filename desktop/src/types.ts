@@ -1,5 +1,6 @@
 /** Screens in the wizard flow */
 export type Screen =
+  | 'setup'
   | 'folder_selection'
   | 'conversion_status'
   | 'document_review'

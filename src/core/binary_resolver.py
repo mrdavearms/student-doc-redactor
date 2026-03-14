@@ -32,7 +32,7 @@ def resolve_tesseract() -> str | None:
     resources = _resources_path()
     if resources:
         if platform.system() == "Windows":
-            candidate = resources / "tesseract" / "tesseract.exe"
+            candidate = resources / "bundled-tesseract" / "tesseract.exe"
         else:
             candidate = resources / "bundled-tesseract" / "tesseract"
         if candidate.exists():

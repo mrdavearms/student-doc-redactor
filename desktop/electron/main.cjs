@@ -51,17 +51,26 @@ function showErrorWindow(title, message) {
 /** Start the Python FastAPI backend. */
 function startBackend() {
   const resourcesPath = isDev
-    ? path.resolve(__dirname, '..', '..')   // redaction tool/ in dev
+    ? path.resolve(__dirname, '..', '..')   // repo root in dev
     : process.resourcesPath;
 
   const appRoot = isDev
-    ? resourcesPath                          // redaction tool/
+    ? resourcesPath
     : path.join(resourcesPath, 'app');
 
-  // Find the Python executable
-  const pythonPath = isDev
-    ? path.join(appRoot, 'venv', 'bin', 'python3.13')
-    : path.join(resourcesPath, 'bundled-python', 'bin', 'python3');
+  const isWin = process.platform === 'win32';
+
+  // Find the Python executable (platform-aware)
+  let pythonPath;
+  if (isDev) {
+    pythonPath = isWin
+      ? path.join(appRoot, 'venv', 'Scripts', 'python.exe')
+      : path.join(appRoot, 'venv', 'bin', 'python3.13');
+  } else {
+    pythonPath = isWin
+      ? path.join(resourcesPath, 'bundled-python', 'python.exe')
+      : path.join(resourcesPath, 'bundled-python', 'bin', 'python3');
+  }
 
   console.log(`Starting backend: ${pythonPath} -m uvicorn backend.main:app --port ${BACKEND_PORT}`);
 
@@ -100,7 +109,7 @@ function createWindow() {
     height: 750,
     minWidth: 900,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
     backgroundColor: '#f8fafc',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

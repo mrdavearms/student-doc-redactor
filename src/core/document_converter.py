@@ -3,10 +3,23 @@ Document Converter
 Converts Word documents to PDF using LibreOffice in headless mode.
 """
 
+import platform
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple
 import fitz  # PyMuPDF
+
+
+def _libreoffice_install_hint() -> str:
+    """Return a platform-appropriate install instruction for LibreOffice."""
+    system = platform.system()
+    if system == "Windows":
+        return "LibreOffice not found. Download from libreoffice.org and install it."
+    elif system == "Darwin":
+        return "LibreOffice not found. Install via: brew install --cask libreoffice"
+    else:
+        return "LibreOffice not found. Install via your package manager (e.g. sudo apt install libreoffice)."
+
 
 class DocumentConverter:
     """Handles conversion of Word documents to PDF"""
@@ -24,7 +37,7 @@ class DocumentConverter:
         """
         if self.soffice_path and Path(self.soffice_path).exists():
             return True, "LibreOffice installed"
-        return False, "LibreOffice not found. Install via: brew install --cask libreoffice"
+        return False, _libreoffice_install_hint()
 
     def convert_to_pdf(self, input_file: Path, output_dir: Path) -> Tuple[bool, str, Path]:
         """
@@ -41,7 +54,7 @@ class DocumentConverter:
             return False, f"Not a Word document: {input_file.suffix}", None
 
         if not self.soffice_path:
-            return False, "LibreOffice not found. Install via: brew install --cask libreoffice", None
+            return False, _libreoffice_install_hint(), None
 
         try:
             # Use LibreOffice in headless mode to convert

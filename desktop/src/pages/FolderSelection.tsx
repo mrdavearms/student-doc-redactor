@@ -65,7 +65,9 @@ export default function FolderSelection() {
             type="text"
             value={folderPath}
             onChange={(e) => validateFolder(e.target.value)}
-            placeholder="/Users/username/Documents/Student_Docs"
+            placeholder={window.electronAPI?.platform === 'win32'
+              ? 'C:\\Users\\username\\Documents\\Student_Docs'
+              : '/Users/username/Documents/Student_Docs'}
             className={`
               flex-1 px-4 py-2.5 rounded-lg border text-sm transition-colors
               focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400

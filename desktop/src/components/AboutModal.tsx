@@ -183,18 +183,22 @@ function TabAbout({ openLink, updateState, onCheckForUpdates }: {
           All processing happens locally on your computer.
         </p>
       </section>
-      <section className="flex items-center justify-between">
-        <p className="text-[10px] text-slate-400 uppercase tracking-widest">
-          {appVersion ? `v${appVersion}` : 'v—'}
-        </p>
-        <button
-          onClick={onCheckForUpdates}
-          disabled={checkButtonDisabled}
-          className="flex items-center gap-1.5 text-xs text-primary-500 hover:text-primary-600 disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
-        >
-          <RefreshCw size={11} className={updateState.status === 'checking' ? 'animate-spin' : ''} />
-          {checkButtonLabel()}
-        </button>
+      <section className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-slate-500">
+            Version <span className="font-medium text-slate-700">{appVersion || '—'}</span>
+          </p>
+          <button
+            onClick={onCheckForUpdates}
+            disabled={checkButtonDisabled}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium
+                       bg-primary-600 text-white hover:bg-primary-700 disabled:bg-slate-200
+                       disabled:text-slate-400 disabled:cursor-not-allowed shadow-sm transition-all btn-press"
+          >
+            <RefreshCw size={13} className={updateState.status === 'checking' ? 'animate-spin' : ''} />
+            {checkButtonLabel()}
+          </button>
+        </div>
       </section>
     </div>
   );
