@@ -59,6 +59,7 @@ export const api = {
     detected_pii: Record<string, unknown[]>;
     selected_keys: string[];
     folder_action: string | null;
+    custom_output_path?: string | null;
   }, options?: RequestInit) =>
     request<import('./types').RedactionResults>('/api/redact', {
       method: 'POST',

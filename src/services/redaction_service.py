@@ -26,6 +26,8 @@ class RedactionRequest:
     user_selections: Dict[str, bool]
     # How to handle existing 'redacted' folder: 'overwrite' | 'new' | None (no existing)
     folder_action: Optional[str] = None
+    # Optional user-chosen output folder (overrides default subfolder)
+    custom_output_path: Optional[Path] = None
     parent_names: List[str] = field(default_factory=list)
     family_names: List[str] = field(default_factory=list)
     organisation_names: List[str] = field(default_factory=list)
@@ -97,7 +99,7 @@ class RedactionService:
         """
         # 1. Prepare output folder
         redacted_folder = self._prepare_output_folder(
-            request.folder_path, request.folder_action
+            request.folder_path, request.folder_action, request.custom_output_path
         )
 
         # 2. Initialise logger
@@ -155,9 +157,15 @@ class RedactionService:
         return results
 
     def _prepare_output_folder(
-        self, folder_path: Path, folder_action: Optional[str]
+        self, folder_path: Path, folder_action: Optional[str],
+        custom_output_path: Optional[Path] = None,
     ) -> Path:
         """Create or resolve the output folder for redacted files."""
+        # If user chose a custom output location, use that directly
+        if custom_output_path:
+            custom_output_path.mkdir(parents=True, exist_ok=True)
+            return custom_output_path
+
         redacted_folder = folder_path / "redacted"
 
         if folder_action == "overwrite":

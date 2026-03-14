@@ -226,6 +226,7 @@ def redact_documents(req: RedactRequest):
         detected_pii=detected_pii,
         user_selections=user_selections,
         folder_action=req.folder_action,
+        custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
         parent_names=req.parent_names,
         family_names=req.family_names,
         organisation_names=req.organisation_names,

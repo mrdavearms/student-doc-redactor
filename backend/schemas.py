@@ -81,6 +81,7 @@ class RedactRequest(BaseModel):
     detected_pii: Dict[str, List[Dict]]  # {doc_path: [match_dicts]}
     selected_keys: List[str]  # ["<doc_path>_<idx>", ...]
     folder_action: Optional[str] = None  # 'overwrite' | 'new' | None
+    custom_output_path: Optional[str] = None  # User-chosen output folder
     parent_names: List[str] = []
     family_names: List[str] = []
     organisation_names: List[str] = []

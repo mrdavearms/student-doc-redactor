@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
-import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info } from 'lucide-react';
-import { useState } from 'react';
+import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info, BookOpen } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { SCREENS, type Screen } from '../types';
 import AboutModal from './AboutModal';
 import Walkthrough from './Walkthrough';
+
+const WALKTHROUGH_STORAGE_KEY = 'walkthrough_dismissed';
 
 const ICONS: Record<Screen, React.ReactNode> = {
   folder_selection: <FolderOpen size={18} />,
@@ -19,6 +21,14 @@ export default function Sidebar() {
   const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
+
+  // First-run check: show walkthrough on initial mount only (Sidebar never remounts)
+  useEffect(() => {
+    const dismissed = localStorage.getItem(WALKTHROUGH_STORAGE_KEY);
+    if (!dismissed) {
+      setWalkthroughOpen(true);
+    }
+  }, []);
 
   return (
     <aside className="w-64 min-h-full bg-white border-r border-slate-200 flex flex-col">
@@ -108,6 +118,13 @@ export default function Sidebar() {
             About
           </button>
         </div>
+        <button
+          onClick={() => setWalkthroughOpen(true)}
+          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
+        >
+          <BookOpen size={10} />
+          Quick Guide
+        </button>
         <button
           onClick={() => window.electronAPI?.openExternal('https://github.com/mrdavearms/student-doc-redactor')}
           className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"

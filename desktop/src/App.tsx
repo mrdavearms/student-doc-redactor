@@ -1,5 +1,4 @@
 import Layout from './components/Layout';
-import Walkthrough from './components/Walkthrough';
 import { useStore } from './store';
 import FolderSelection from './pages/FolderSelection';
 import ConversionStatus from './pages/ConversionStatus';
@@ -29,7 +28,6 @@ function App() {
 
   return (
     <Layout>
-      <Walkthrough />
       {/* Global error toast */}
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start justify-between">
