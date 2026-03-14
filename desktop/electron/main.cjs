@@ -144,6 +144,21 @@ function setupAutoUpdater() {
     console.error('Auto-updater error:', err.message);
   });
 
+  autoUpdater.on('update-not-available', () => {
+    console.log('No update available');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-not-available');
+    }
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('download-progress', Math.round(progress.percent));
+    }
+  });
+
+  // NOTE: For updates to work, the GitHub repo must be public, or GH_TOKEN must be
+  // set in the environment. See package.json "publish" config for repo details.
   // Check for updates after a short delay to avoid blocking startup
   setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10000);
 }
@@ -161,6 +176,20 @@ ipcMain.handle('select-folder', async () => {
 
 ipcMain.handle('open-external', async (_event, url) => {
   await shell.openExternal(url);
+});
+
+ipcMain.handle('restart-and-install', () => {
+  autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('check-for-updates', async () => {
+  // In dev, autoUpdater is not set up — ignore silently
+  if (isDev) return;
+  await autoUpdater.checkForUpdates().catch(() => {});
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
 });
 
 // ── App lifecycle ─────────────────────────────────────────────────────
