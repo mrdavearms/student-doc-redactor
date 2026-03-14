@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Download, CheckCircle, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Download, CheckCircle, AlertTriangle } from 'lucide-react';
 import type { UpdateState } from '../hooks/useUpdater';
 
 interface UpdateBannerProps {
