@@ -77,8 +77,8 @@ export default function FinalConfirmation() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-800">Final Confirmation</h2>
-        <p className="text-slate-500 mt-1">Review your selections before creating redacted documents.</p>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Final Confirmation</h2>
+        <p className="text-sm text-slate-400 mt-1">Review your selections before creating redacted documents.</p>
       </div>
 
       {/* Summary metrics */}
@@ -169,7 +169,7 @@ export default function FinalConfirmation() {
         <button
           onClick={() => navigateTo('document_review')}
           disabled={redacting}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 btn-press"
         >
           <ArrowLeft size={16} /> Back to Review
         </button>
@@ -182,7 +182,7 @@ export default function FinalConfirmation() {
                   abortRef.current?.abort();
                 }
               }}
-              className="px-4 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
+              className="px-4 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors btn-press"
             >
               Cancel
             </button>
@@ -193,7 +193,7 @@ export default function FinalConfirmation() {
             className={`
               flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
               ${totalSelected > 0 && !redacting
-                ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow'
+                ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow btn-press'
                 : 'bg-slate-100 text-slate-300 cursor-not-allowed'
               }
             `}

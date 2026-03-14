@@ -26,7 +26,7 @@ export default function Completion() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-800">Processing Complete</h2>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Processing Complete</h2>
       </div>
 
       {/* Success banner */}
@@ -45,7 +45,9 @@ export default function Completion() {
           <CheckCircle size={40} className="mx-auto text-emerald-500 mb-2" />
         )}
         <h3 className={`text-lg font-semibold ${hasFailures ? 'text-amber-800' : 'text-emerald-800'}`}>
-          {hasFailures ? 'Completed with warnings' : 'Successfully processed!'}
+          {hasFailures
+            ? 'Completed with warnings'
+            : `All ${r.total_documents} document${r.total_documents === 1 ? '' : 's'} redacted successfully`}
         </h3>
         <p className="text-sm mt-1 text-slate-500">
           {r.successfully_redacted} of {r.total_documents} documents redacted
@@ -107,7 +109,7 @@ export default function Completion() {
           </code>
           <button
             onClick={() => api.openFolder(r.redacted_folder)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shrink-0 btn-press"
           >
             <FolderOpen size={14} /> Open Folder
           </button>
@@ -168,7 +170,7 @@ export default function Completion() {
         <button
           onClick={reset}
           className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
-                     bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all"
+                     bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
         >
           <RotateCcw size={16} /> Process Another Folder
         </button>

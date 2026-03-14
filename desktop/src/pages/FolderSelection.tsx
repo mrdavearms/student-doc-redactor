@@ -43,8 +43,8 @@ export default function FolderSelection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-800">Select Folder & Student Details</h2>
-        <p className="text-slate-500 mt-1">Choose the folder containing student documents and enter identifying information.</p>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Select Folder & Student Details</h2>
+        <p className="text-sm text-slate-400 mt-1">Choose the folder containing student documents and enter identifying information.</p>
       </div>
 
       {/* Folder selection */}
@@ -76,7 +76,7 @@ export default function FolderSelection() {
             onClick={handleBrowse}
             className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-slate-50
                        text-sm text-slate-600 font-medium hover:bg-slate-100 hover:border-slate-300
-                       transition-colors shrink-0"
+                       transition-colors shrink-0 btn-press"
           >
             <Search size={14} />
             Browse
@@ -196,7 +196,7 @@ export default function FolderSelection() {
           className={`
             flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
             ${canProceed
-              ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow'
+              ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow btn-press'
               : 'bg-slate-100 text-slate-300 cursor-not-allowed'
             }
           `}

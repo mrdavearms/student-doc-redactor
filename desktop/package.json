@@ -50,6 +50,9 @@
     "appId": "au.com.antigravity.redaction-tool",
     "productName": "Redaction Tool",
     "copyright": "Copyright © 2026 Antigravity",
+    "directories": {
+      "output": "release"
+    },
     "publish": {
       "provider": "github",
       "owner": "mrdavearms",

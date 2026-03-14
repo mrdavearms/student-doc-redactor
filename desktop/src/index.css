@@ -36,5 +36,29 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
+/* Micro-interactions */
+.btn-press { transition: transform 0.1s ease; }
+.btn-press:active { transform: scale(0.98); }
+
+/* Card elevation */
+.card-elevated {
+  background: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  ring: 1px rgb(241 245 249);  /* slate-100 */
+}
+
+/* Skeleton loader pulse */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+.skeleton {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  border-radius: 0.5rem;
+}
+
 .drag-region { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }

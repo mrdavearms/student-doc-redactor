@@ -73,8 +73,8 @@ export default function ConversionStatus() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-800">Document Conversion</h2>
-        <p className="text-slate-500 mt-1">Checking dependencies and converting Word documents to PDF.</p>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Document Conversion</h2>
+        <p className="text-sm text-slate-400 mt-1">Checking dependencies and converting Word documents to PDF.</p>
       </div>
 
       {/* Dependencies */}
@@ -117,7 +117,7 @@ export default function ConversionStatus() {
                 navigateTo('folder_selection');
               }
             }}
-            className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
+            className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors btn-press"
           >
             Cancel
           </button>
@@ -213,7 +213,7 @@ export default function ConversionStatus() {
           <button
             onClick={handleContinue}
             className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
-                       bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all"
+                       bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
           >
             Continue <ArrowRight size={16} />
           </button>

@@ -51,8 +51,8 @@ export default function DocumentReview() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-800">Review Detected PII</h2>
-        <p className="text-slate-500 mt-1">Review and select which items to redact from each document.</p>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Review Detected PII</h2>
+        <p className="text-sm text-slate-400 mt-1">Review and select which items to redact from each document.</p>
       </div>
 
       {/* Progress bar */}
@@ -80,7 +80,7 @@ export default function DocumentReview() {
         <button
           onClick={() => navigateTo('final_confirmation')}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                     bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm hover:shadow transition-all"
+                     bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm hover:shadow transition-all btn-press"
         >
           <CheckCircle2 size={16} /> Accept All & Continue to Summary
         </button>
@@ -126,7 +126,7 @@ export default function DocumentReview() {
                 const confColor = {
                   high: 'bg-emerald-100 text-emerald-700',
                   medium: 'bg-amber-100 text-amber-700',
-                  low: 'bg-red-100 text-red-700',
+                  low: 'bg-rose-100 text-rose-700',
                 }[match.confidence_label] || 'bg-slate-100 text-slate-600';
 
                 return (
@@ -139,8 +139,8 @@ export default function DocumentReview() {
                     className={`
                       flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
                       ${selected
-                        ? 'border-primary-200 bg-primary-50/40'
-                        : 'border-slate-100 bg-white hover:border-slate-200'
+                        ? 'border-primary-200 bg-primary-50/40 hover:shadow-md'
+                        : 'border-slate-100 bg-white hover:border-slate-200 hover:shadow-md'
                       }
                     `}
                   >
@@ -193,7 +193,7 @@ export default function DocumentReview() {
                 }
                 setCurrentDocIndex(Math.max(0, currentDocIndex - 1));
               }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors btn-press"
             >
               <ArrowLeft size={16} /> Previous
             </button>
@@ -218,7 +218,7 @@ export default function DocumentReview() {
                 }
               }}
               className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
-                         bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all"
+                         bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
             >
               Next Document <ArrowRight size={16} />
             </button>
@@ -226,7 +226,7 @@ export default function DocumentReview() {
             <button
               onClick={() => navigateTo('final_confirmation')}
               className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
-                         bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all"
+                         bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
             >
               Review Summary <ArrowRight size={16} />
             </button>

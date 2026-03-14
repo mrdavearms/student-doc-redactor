@@ -27,12 +27,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               exit={{ opacity: 0 }}
               className="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm flex items-center justify-center"
             >
-              <div className="flex flex-col items-center gap-3">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                  className="w-8 h-8 border-3 border-primary-200 border-t-primary-600 rounded-full"
-                />
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-primary-500 rounded-full"
+                    initial={{ width: '0%' }}
+                    animate={{ width: ['0%', '60%', '80%', '95%'] }}
+                    transition={{ duration: 8, ease: 'easeOut', times: [0, 0.3, 0.6, 1] }}
+                  />
+                </div>
                 <p className="text-sm text-slate-500">{loadingMessage}</p>
               </div>
             </motion.div>
