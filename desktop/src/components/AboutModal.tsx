@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ExternalLink, ShieldCheck, FolderOpen, Eye, Lightbulb, Zap } from 'lucide-react';
+import { X, ExternalLink, ShieldCheck, FolderOpen, Eye, Lightbulb, Zap, RefreshCw } from 'lucide-react';
 import { resetWalkthrough } from './Walkthrough';
+import type { UpdateState } from '../hooks/useUpdater';
 
 interface AboutModalProps {
   open: boolean;
   onClose: () => void;
   onShowWalkthrough: () => void;
+  updateState: UpdateState;
+  onCheckForUpdates: () => void;
 }
 
 type Tab = 'about' | 'how-to-use' | 'features';
@@ -17,7 +20,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'features', label: 'Features & Detection' },
 ];
 
-export default function AboutModal({ open, onClose, onShowWalkthrough }: AboutModalProps) {
+export default function AboutModal({ open, onClose, onShowWalkthrough, updateState, onCheckForUpdates }: AboutModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>('about');
 
   const openLink = (url: string) => {
@@ -102,7 +105,13 @@ export default function AboutModal({ open, onClose, onShowWalkthrough }: AboutMo
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.12 }}
                   >
-                    {activeTab === 'about' && <TabAbout openLink={openLink} />}
+                    {activeTab === 'about' && (
+                      <TabAbout
+                        openLink={openLink}
+                        updateState={updateState}
+                        onCheckForUpdates={onCheckForUpdates}
+                      />
+                    )}
                     {activeTab === 'how-to-use' && <TabHowToUse onShowWalkthrough={handleShowWalkthrough} />}
                     {activeTab === 'features' && <TabFeatures />}
                   </motion.div>
@@ -125,7 +134,33 @@ export default function AboutModal({ open, onClose, onShowWalkthrough }: AboutMo
 
 /* ── Tab Content ──────────────────────────────────────────────────── */
 
-function TabAbout({ openLink }: { openLink: (url: string) => void }) {
+function TabAbout({ openLink, updateState, onCheckForUpdates }: {
+  openLink: (url: string) => void;
+  updateState: UpdateState;
+  onCheckForUpdates: () => void;
+}) {
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  useEffect(() => {
+    window.electronAPI?.getAppVersion().then(setAppVersion).catch(() => {});
+  }, []);
+
+  const checkButtonLabel = () => {
+    switch (updateState.status) {
+      case 'checking':    return 'Checking…';
+      case 'up-to-date':  return 'You\'re up to date ✓';
+      case 'downloading': return `Downloading… ${updateState.percent > 0 ? updateState.percent + '%' : ''}`;
+      case 'ready':       return 'Update ready — see banner above';
+      case 'error':       return 'Check failed — try again';
+      default:            return 'Check for Updates';
+    }
+  };
+
+  const checkButtonDisabled =
+    updateState.status === 'checking' ||
+    updateState.status === 'downloading' ||
+    updateState.status === 'ready';
+
   return (
     <div className="space-y-5">
       <section>
@@ -148,8 +183,18 @@ function TabAbout({ openLink }: { openLink: (url: string) => void }) {
           All processing happens locally on your computer.
         </p>
       </section>
-      <section>
-        <p className="text-[10px] text-slate-400 uppercase tracking-widest">v0.1.0</p>
+      <section className="flex items-center justify-between">
+        <p className="text-[10px] text-slate-400 uppercase tracking-widest">
+          {appVersion ? `v${appVersion}` : 'v—'}
+        </p>
+        <button
+          onClick={onCheckForUpdates}
+          disabled={checkButtonDisabled}
+          className="flex items-center gap-1.5 text-xs text-primary-500 hover:text-primary-600 disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+        >
+          <RefreshCw size={11} className={updateState.status === 'checking' ? 'animate-spin' : ''} />
+          {checkButtonLabel()}
+        </button>
       </section>
     </div>
   );

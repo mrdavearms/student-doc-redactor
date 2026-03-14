@@ -5,6 +5,7 @@ import { useStore } from '../store';
 import { SCREENS, type Screen } from '../types';
 import AboutModal from './AboutModal';
 import Walkthrough from './Walkthrough';
+import type { UpdateState } from '../hooks/useUpdater';
 
 const WALKTHROUGH_STORAGE_KEY = 'walkthrough_dismissed';
 
@@ -16,11 +17,17 @@ const ICONS: Record<Screen, React.ReactNode> = {
   completion: <PartyPopper size={18} />,
 };
 
-export default function Sidebar() {
+interface SidebarProps {
+  updateState: UpdateState;
+  onCheckForUpdates: () => void;
+}
+
+export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps) {
   const currentScreen = useStore((s) => s.currentScreen);
   const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
 
   // First-run check: show walkthrough on initial mount only (Sidebar never remounts)
   useEffect(() => {
@@ -28,6 +35,7 @@ export default function Sidebar() {
     if (!dismissed) {
       setWalkthroughOpen(true);
     }
+    window.electronAPI?.getAppVersion().then(setAppVersion).catch(() => {});
   }, []);
 
   return (
@@ -109,7 +117,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="px-6 py-4 border-t border-slate-100 space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-[10px] text-slate-300 uppercase tracking-widest font-medium">v0.1.0</p>
+          <p className="text-[10px] text-slate-300 uppercase tracking-widest font-medium">{appVersion ? `v${appVersion}` : 'v—'}</p>
           <button
             onClick={() => setAboutOpen(true)}
             className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
@@ -141,6 +149,8 @@ export default function Sidebar() {
           setAboutOpen(false);
           setWalkthroughOpen(true);
         }}
+        updateState={updateState}
+        onCheckForUpdates={onCheckForUpdates}
       />
       {walkthroughOpen && (
         <Walkthrough forceOpen onClose={() => setWalkthroughOpen(false)} />
