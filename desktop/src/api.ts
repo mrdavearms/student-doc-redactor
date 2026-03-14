@@ -66,6 +66,12 @@ export const api = {
       ...options,
     }),
 
+  previewPage: (pdf_path: string, page_num: number) =>
+    request<import('./types').PreviewResponse>('/api/preview', {
+      method: 'POST',
+      body: JSON.stringify({ pdf_path, page_num }),
+    }),
+
   openFolder: (folder_path: string) =>
     request<{ status: string }>('/api/folder/open', {
       method: 'POST',

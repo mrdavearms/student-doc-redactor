@@ -67,6 +67,12 @@ export interface DocumentResult {
   error_message: string | null;
 }
 
+export interface PreviewResponse {
+  image_base64: string;
+  total_pages: number;
+  page_num: number;
+}
+
 export interface RedactionResults {
   redacted_folder: string;
   document_results: DocumentResult[];
