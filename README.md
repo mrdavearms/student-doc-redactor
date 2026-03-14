@@ -8,11 +8,11 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ## Downloads
 
-> **Mac DMG installer** is built and working. Not yet publicly distributed (pending code signing).
+> **Mac DMG installer is ready.** Download the latest version from [GitHub Releases](https://github.com/mrdavearms/student-doc-redactor/releases).
 >
-> In the meantime, follow the [Installation Guide](#-installation-guide) below to run from source, or see [Desktop App (Developer)](#desktop-app-developer) to build the DMG yourself.
+> If you prefer to run from source or build the app yourself, see [Installation Guide](#-installation-guide) or [Desktop App (Developer)](#desktop-app-developer) below.
 >
-> **Star or watch this repository** to be notified when the download is available:
+> **Follow this repository** to stay notified of updates:
 > - GitHub: [github.com/mrdavearms/student-doc-redactor](https://github.com/mrdavearms/student-doc-redactor)
 > - GitLab: [gitlab.com/davearmswork/bulk-redaction-tool](https://gitlab.com/davearmswork/bulk-redaction-tool)
 
