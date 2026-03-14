@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { SCREENS, type Screen } from '../types';
 import AboutModal from './AboutModal';
+import Walkthrough from './Walkthrough';
 
 const ICONS: Record<Screen, React.ReactNode> = {
   folder_selection: <FolderOpen size={18} />,
@@ -17,15 +18,18 @@ export default function Sidebar() {
   const currentScreen = useStore((s) => s.currentScreen);
   const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
 
   return (
     <aside className="w-64 min-h-full bg-white border-r border-slate-200 flex flex-col">
       {/* Logo / Title */}
       <div className="px-6 py-6 border-b border-slate-100">
-        <h1 className="text-lg font-semibold text-slate-800 tracking-tight">
-          Redaction Tool
+        <h1 className="text-lg tracking-tight">
+          <span className="font-bold text-primary-600">Redact</span>
+          <span className="text-slate-300 mx-1.5 font-light">|</span>
+          <span className="font-light text-slate-400">Tool</span>
         </h1>
-        <p className="text-xs text-slate-400 mt-0.5">PII Detection & Redaction</p>
+        <p className="text-[10px] text-slate-400 mt-1 tracking-widest uppercase">Protect student privacy</p>
       </div>
 
       {/* Steps */}
@@ -95,10 +99,10 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="px-6 py-4 border-t border-slate-100 space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-[10px] text-slate-300 uppercase tracking-widest">v0.1.0</p>
+          <p className="text-[10px] text-slate-300 uppercase tracking-widest font-medium">v0.1.0</p>
           <button
             onClick={() => setAboutOpen(true)}
-            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-primary-500 transition-colors"
+            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
           >
             <Info size={12} />
             About
@@ -106,14 +110,24 @@ export default function Sidebar() {
         </div>
         <button
           onClick={() => window.electronAPI?.openExternal('https://github.com/mrdavearms/student-doc-redactor')}
-          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors"
+          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
         >
           <ExternalLink size={10} />
           Report issues on GitHub
         </button>
       </div>
 
-      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <AboutModal
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        onShowWalkthrough={() => {
+          setAboutOpen(false);
+          setWalkthroughOpen(true);
+        }}
+      />
+      {walkthroughOpen && (
+        <Walkthrough forceOpen onClose={() => setWalkthroughOpen(false)} />
+      )}
     </aside>
   );
 }
