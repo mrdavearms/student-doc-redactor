@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, AlertTriangle, FolderOpen, Search } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, FolderOpen, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import HelpTip from '../components/HelpTip';

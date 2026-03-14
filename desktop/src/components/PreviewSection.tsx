@@ -17,8 +17,6 @@ export default function PreviewSection({ documents }: PreviewSectionProps) {
   const [redactedImg, setRedactedImg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const doc = documents[docIndex];
-
   const loadPage = useCallback(async (dIdx: number, pNum: number) => {
     const d = documents[dIdx];
     if (!d) return;
