@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { FolderOpen, User, Users, Building, ArrowRight, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import HelpTip from '../components/HelpTip';
 
 export default function FolderSelection() {
   const {
@@ -105,8 +106,9 @@ export default function FolderSelection() {
         </div>
 
         <div>
-          <label className="block text-sm text-slate-600 mb-1.5">
+          <label className="flex items-center gap-1.5 text-sm text-slate-600 mb-1.5">
             Student full name <span className="text-red-400">*</span>
+            <HelpTip text="Enter the student's full name as it appears in their documents. First and last name. The tool will also detect variations like first-name-only and surname-only." />
           </label>
           <input
             type="text"
@@ -120,9 +122,10 @@ export default function FolderSelection() {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-slate-600 mb-1.5">
-              <Users size={14} className="inline mr-1 text-slate-400" />
+            <label className="flex items-center gap-1.5 text-sm text-slate-600 mb-1.5">
+              <Users size={14} className="text-slate-400" />
               Parent/Guardian names
+              <HelpTip text="Include anyone whose name might appear in the documents — referral letters, consent forms, and reports often mention parents by name." />
             </label>
             <input
               type="text"

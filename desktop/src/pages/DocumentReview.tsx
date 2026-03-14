@@ -4,6 +4,7 @@ import {
   ArrowLeft, ArrowRight, CheckSquare, Square, FileText, CheckCircle2,
 } from 'lucide-react';
 import { useStore } from '../store';
+import HelpTip from '../components/HelpTip';
 
 export default function DocumentReview() {
   const {
