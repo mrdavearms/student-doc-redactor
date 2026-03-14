@@ -1,16 +1,62 @@
+import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, AlertTriangle, XCircle, FolderOpen, FileText, RotateCcw,
-  ChevronDown, ChevronUp, ArrowRight,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { useState } from 'react';
 import { useStore } from '../store';
 import { api } from '../api';
 import HelpTip from '../components/HelpTip';
+import DocumentCard from '../components/DocumentCard';
+import PreviewSection from '../components/PreviewSection';
 
 export default function Completion() {
-  const { redactionResults, reset } = useStore();
-  const [logExpanded, setLogExpanded] = useState(true);
+  const { redactionResults, detectionResults, userSelections, reset } = useStore();
+  const [logExpanded, setLogExpanded] = useState(false);
+
+  // Build per-document category counts from detection results
+  const docMeta = useMemo(() => {
+    if (!redactionResults || !detectionResults) return new Map<string, { counts: Record<string, number>; hasMedium: boolean }>();
+
+    const meta = new Map<string, { counts: Record<string, number>; hasMedium: boolean }>();
+
+    for (const doc of detectionResults.documents) {
+      const counts: Record<string, number> = {};
+      let hasMedium = false;
+      doc.matches.forEach((match, idx) => {
+        const key = `${doc.path}_${idx}`;
+        if (userSelections[key]) {
+          counts[match.category] = (counts[match.category] || 0) + 1;
+          if (match.confidence_label === 'medium' || match.confidence_label === 'low') {
+            hasMedium = true;
+          }
+        }
+      });
+      // Map by filename to match against document_results
+      const filename = doc.path.split('/').pop() || doc.path;
+      meta.set(filename, { counts, hasMedium });
+    }
+    return meta;
+  }, [redactionResults, detectionResults, userSelections]);
+
+  // Build preview document list
+  const previewDocs = useMemo(() => {
+    if (!redactionResults) return [];
+    return redactionResults.document_results
+      .filter((d) => d.success && d.output_path)
+      .map((d) => {
+        // Find original path from detection results
+        const origDoc = detectionResults?.documents.find(
+          (det) => det.filename === d.document_name || det.path.endsWith(d.document_name)
+        );
+        return {
+          originalPath: origDoc?.path || '',
+          redactedPath: d.output_path!,
+          filename: d.document_name,
+        };
+      })
+      .filter((d) => d.originalPath);
+  }, [redactionResults, detectionResults]);
 
   if (!redactionResults) {
     return (
@@ -87,7 +133,7 @@ export default function Completion() {
         >
           <div className="flex items-center gap-2 text-sm font-medium text-amber-700 mb-2">
             <AlertTriangle size={16} />
-            Items on scanned pages — manual review required
+            Items on scanned pages — manual review recommended
           </div>
           {r.ocr_warnings.map((w, i) => (
             <p key={i} className="text-xs text-amber-600 py-0.5">
@@ -97,11 +143,45 @@ export default function Completion() {
         </motion.div>
       )}
 
+      {/* Per-document summary cards */}
+      {r.document_results && r.document_results.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="space-y-2"
+        >
+          <h3 className="text-sm font-medium text-slate-600 mb-1">Document Summary</h3>
+          {r.document_results.map((d, i) => {
+            const meta = docMeta.get(d.document_name) || { counts: {}, hasMedium: false };
+            return (
+              <DocumentCard
+                key={i}
+                result={d}
+                categoryCounts={meta.counts}
+                hasMediumConfidence={meta.hasMedium}
+              />
+            );
+          })}
+        </motion.section>
+      )}
+
+      {/* Before/After Preview */}
+      {previewDocs.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <PreviewSection documents={previewDocs} />
+        </motion.div>
+      )}
+
       {/* Output folder */}
       <motion.section
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
+        transition={{ delay: 0.15 }}
         className="bg-white rounded-xl border border-slate-200 p-5"
       >
         <h3 className="text-sm font-medium text-slate-600 mb-2">Redacted Documents</h3>
@@ -118,37 +198,7 @@ export default function Completion() {
         </div>
       </motion.section>
 
-      {/* Filename audit */}
-      {r.document_results && r.document_results.length > 0 && (
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-xl border border-slate-200 p-5"
-        >
-          <h3 className="text-sm font-medium text-slate-600 mb-3">Filename Audit</h3>
-          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {r.document_results.map((d, i) => {
-              const inputName = d.document_name;
-              const outputName = d.output_path ? d.output_path.split('/').pop() : '—';
-              const renamed = inputName !== outputName;
-              return (
-                <div key={i} className="flex items-center gap-2 text-xs py-1">
-                  <span className="text-slate-500 truncate flex-1" title={inputName}>{inputName}</span>
-                  <ArrowRight size={10} className="text-slate-300 shrink-0" />
-                  <span className={`truncate flex-1 ${renamed ? 'text-primary-600 font-medium' : 'text-slate-400'}`} title={outputName || ''}>
-                    {outputName}
-                  </span>
-                  {!d.success && <XCircle size={12} className="text-red-400 shrink-0" />}
-                </div>
-              );
-            })}
-          </div>
-          <p className="text-[10px] text-slate-400 mt-2">Highlighted filenames had PII removed.</p>
-        </motion.section>
-      )}
-
-      {/* Redaction log */}
+      {/* Redaction log (collapsed by default) */}
       <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <button
           onClick={() => setLogExpanded(!logExpanded)}
