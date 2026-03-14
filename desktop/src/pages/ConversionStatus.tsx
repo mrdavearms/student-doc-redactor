@@ -107,7 +107,7 @@ export default function ConversionStatus() {
               >
                 libreoffice.org/download
               </button>
-              , download the installer, and run it. Then restart this app.
+              , download the installer, and run it. No need to restart this app.
             </p>
           </div>
         )}

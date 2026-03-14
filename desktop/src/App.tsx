@@ -27,8 +27,9 @@ function App() {
           navigateTo('setup');
         }
       })
-      .catch(() => {
+      .catch((err) => {
         // Backend not ready yet — don't redirect, let the app load normally
+        console.warn('Dep check failed (backend may still be starting):', err.message);
       })
       .finally(() => setDepsChecked(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
