@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-A local Mac app that redacts PII from student assessment PDFs and Word documents. Built for Australian teachers and school psychologists. All processing is local — no internet, no cloud services at runtime.
+A local Mac and Windows app that redacts PII from student assessment PDFs and Word documents. Built for Australian teachers and school psychologists. All processing is local — no internet, no cloud services at runtime.
 
 Two frontends exist:
 - **Desktop app** (primary): Electron + React + Vite + Tailwind v4, communicating with a FastAPI backend via HTTP. This is the user-facing product.
@@ -17,6 +17,7 @@ Two frontends exist:
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `source venv/bin/activate && pytest tests/ -v` (257 tests, ~4m30s)
 - **Build DMG**: `cd desktop && npm run dist:mac`
+- **Build Windows**: `cd desktop && npm run dist:win`
 - **Python**: 3.13+ (required for spaCy compatibility)
 
 ---
@@ -99,6 +100,14 @@ folder_selection → conversion_status → document_review → final_confirmatio
 In the desktop app, `App.tsx` switches on `currentScreen` from the Zustand store. Layout wraps children in `<AnimatePresence mode="wait">` with `key={currentScreen}` for animated transitions.
 
 In Streamlit, `app.py` routes based on `st.session_state.current_screen`.
+
+### CI/CD Release Workflow
+
+`.github/workflows/release.yml` builds both Mac DMG and Windows exe on GitHub Actions when a version tag is pushed. Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`. Both `electron-builder --publish always` jobs upload assets to a GitHub Release. Release is created as draft by electron-builder; must be published manually via `gh release edit <tag> --draft=false`.
+
+- **Do NOT push tags to trigger builds unless code is merged to `main` first**
+- CI installs Tesseract via `brew` (Mac) and `choco` (Windows) before running bundle scripts
+- `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed)
 
 ### Key Files
 
@@ -467,11 +476,13 @@ Run with output: `pytest tests/ -v -s`
 
 ## LibreOffice Path Discovery
 
-`document_converter.py` checks paths in order:
-1. `which soffice` (system PATH)
+`document_converter.py` and `binary_resolver.py` check paths in order:
+1. `which soffice` / `where soffice` (system PATH)
 2. `/opt/homebrew/bin/soffice` (Apple Silicon Homebrew)
 3. `/usr/local/bin/soffice` (Intel Mac Homebrew)
-4. `/Applications/LibreOffice.app/Contents/MacOS/soffice` (app bundle)
+4. `/Applications/LibreOffice.app/Contents/MacOS/soffice` (Mac app bundle)
+5. `C:\Program Files\LibreOffice\program\soffice.exe` (Windows default)
+6. `C:\Program Files (x86)\LibreOffice\program\soffice.exe` (Windows 32-bit)
 
 ---
 
@@ -479,7 +490,10 @@ Run with output: `pytest tests/ -v -s`
 
 - **Mac DMG**: Built via electron-builder (`cd desktop && npm run dist:mac`). Not code-signed yet (ad-hoc only). Works on Apple Silicon + Intel.
 - **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
-- **Windows/Linux (Phase 3)**: Not supported yet. Phase 3 roadmap includes Windows COM automation for Word conversion and bundled Tesseract.
+- **Windows**: SUPPORTED as of v1.1.0. NSIS installer built via CI. Bundled Python + Tesseract. LibreOffice prompted on first run via Setup screen.
+- **Linux**: Not supported yet. On the roadmap.
+- **Auto-update**: Implemented via `electron-updater`. Checks on launch + manual "Check for Updates" in About modal. Uses `latest.yml`/`latest-mac.yml` from GitHub Releases.
+- **Setup screen**: First-run LibreOffice detection (`desktop/src/pages/Setup.tsx`). Shows download link, "Check Again", and "Skip for now".
 - **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
 - **Batch processing** (multiple students at once): Not implemented.
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
