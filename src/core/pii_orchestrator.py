@@ -168,8 +168,13 @@ class PIIOrchestrator:
                 # Map Presidio entity type to our category
                 category = PRESIDIO_CATEGORY_MAP.get(result.entity_type, f"{result.entity_type} (NER)")
 
-                # Extract the matched text
-                matched_text = text[result.start:result.end]
+                # Extract the matched text.
+                # Presidio's NER model occasionally spans across a newline
+                # (e.g. "Jane Holmes\nClassroom"), producing a garbled match
+                # that looks broken on the review screen and prevents clean
+                # deduplication with other engines.  Real PII never spans lines,
+                # so truncate to the first line only.
+                matched_text = text[result.start:result.end].split("\n")[0].strip()
 
                 # Determine line number
                 char_count = 0
