@@ -510,10 +510,10 @@ The tool shows which documents were found and whether Word files were successful
 
 This is the most important screen. **You review every item the tool found** — nothing is redacted without your approval.
 
-- **Tick the checkbox** next to items you want redacted
-- **Leave items unticked** if they should stay (e.g. a teacher's name)
-- **Confidence badges**: High (green), Medium (amber), Low (rose) — helps you decide
-- **Accept All & Continue**: Skip to the summary if you trust all detections
+- **Tick the checkbox** next to items you want redacted — everything is ticked by default
+- **Leave items unticked** only if you are certain they should stay (e.g. a score label misread as a name)
+- **Confidence badges**: High (green), Medium (amber), Low (rose) — helps you decide on borderline items
+- **Accept All & Continue**: Accepts all ticked items and moves to the summary — recommended for most users
 - Documents with no PII are automatically skipped
 
 ---
