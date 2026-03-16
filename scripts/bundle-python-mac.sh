@@ -22,23 +22,48 @@ PBS_TAG="20260310"
 PBS_FILENAME="cpython-${PYTHON_VERSION}+${PBS_TAG}-aarch64-apple-darwin-install_only.tar.gz"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/${PBS_FILENAME}"
 
-echo "==> Bundling portable Python ${PYTHON_VERSION} (universal2)..."
+# ── Flags ─────────────────────────────────────────────────────────────
+PACKAGES_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --packages-only) PACKAGES_ONLY=true ;;
+  esac
+done
 
-if [ -d "$PYTHON_DEST" ]; then
-  echo "    $PYTHON_DEST already exists — remove it to re-bundle."
-  echo "    Skipping Python download."
+# ── Python interpreter ─────────────────────────────────────────────────
+if [ "$PACKAGES_ONLY" = true ]; then
+  if [ ! -d "$PYTHON_DEST" ]; then
+    echo "ERROR: --packages-only requires bundled-python to already exist."
+    exit 1
+  fi
+  echo "==> --packages-only: skipping Python download, rebuilding site-packages only."
 else
-  TMPFILE="$(mktemp /tmp/pbs-XXXX.tar.gz)"
-  echo "    Downloading $PBS_URL ..."
-  curl -fsSL --retry 3 -o "$TMPFILE" "$PBS_URL"
-  echo "    Extracting..."
-  tar -xzf "$TMPFILE" -C "$REPO_ROOT"
-  mv "$REPO_ROOT/python" "$PYTHON_DEST"
-  rm "$TMPFILE"
-  echo "    Python extracted to $PYTHON_DEST"
+  echo "==> Bundling portable Python ${PYTHON_VERSION}..."
+  if [ -d "$PYTHON_DEST" ]; then
+    echo "    $PYTHON_DEST already exists — remove it to re-bundle."
+    echo "    Skipping Python download."
+  else
+    TMPFILE="$(mktemp /tmp/pbs-XXXX.tar.gz)"
+    echo "    Downloading $PBS_URL ..."
+    curl -fsSL --retry 3 -o "$TMPFILE" "$PBS_URL"
+    echo "    Extracting..."
+    tar -xzf "$TMPFILE" -C "$REPO_ROOT"
+    mv "$REPO_ROOT/python" "$PYTHON_DEST"
+    rm "$TMPFILE"
+    echo "    Python extracted to $PYTHON_DEST"
+  fi
 fi
 
 PYTHON_BIN="$PYTHON_DEST/bin/python3"
+
+# ── Wipe site-packages before installing (ensures no stale deps) ───────
+SITE_PACKAGES="$PYTHON_DEST/lib/python3.13/site-packages"
+echo "==> Clearing site-packages..."
+rm -rf "$SITE_PACKAGES"
+mkdir -p "$SITE_PACKAGES"
+
+echo "==> Bootstrapping pip into clean site-packages..."
+"$PYTHON_BIN" -m ensurepip --upgrade
 
 echo "==> Installing pip dependencies into bundled Python..."
 "$PYTHON_BIN" -m pip install --upgrade pip --quiet
@@ -49,9 +74,32 @@ echo "==> Downloading spaCy model (en_core_web_lg)..."
 
 echo "==> Cleaning up site-packages (removing __pycache__, .dist-info, tests)..."
 find "$PYTHON_DEST/lib" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-find "$PYTHON_DEST/lib" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+# Note: .dist-info dirs are intentionally kept — packages like transformers and
+# spacy use importlib.metadata at import time to check dependency versions.
 find "$PYTHON_DEST/lib" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
 find "$PYTHON_DEST/lib" -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
+
+echo "==> Pruning unused stdlib modules..."
+STDLIB="$PYTHON_DEST/lib/python3.13"
+
+# GUI / IDE tools — not needed in a FastAPI headless process
+# Note: ensurepip is intentionally kept — it's needed to re-bootstrap pip
+# if --packages-only is run after a previous prune wiped site-packages.
+for module in tkinter idlelib turtle turtledemo pydoc_data; do
+  if [ -e "$STDLIB/$module" ]; then
+    rm -rf "$STDLIB/$module"
+    echo "    Removed stdlib: $module"
+  fi
+done
+
+# tcl/tk shared libraries (only needed by tkinter)
+LIB="$PYTHON_DEST/lib"
+for item in tcl9.0 tk9.0 itcl4.3.5 tcl9 thread3.0.4 libtcl9.0.dylib libtcl9tk9.0.dylib; do
+  if [ -e "$LIB/$item" ]; then
+    rm -rf "$LIB/$item"
+    echo "    Removed lib: $item"
+  fi
+done
 
 # ── Bundle Tesseract ──────────────────────────────────────────────────
 echo "==> Bundling Tesseract..."
