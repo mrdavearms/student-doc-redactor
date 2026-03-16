@@ -62,6 +62,9 @@ echo "==> Clearing site-packages..."
 rm -rf "$SITE_PACKAGES"
 mkdir -p "$SITE_PACKAGES"
 
+echo "==> Bootstrapping pip into clean site-packages..."
+"$PYTHON_BIN" -m ensurepip --upgrade
+
 echo "==> Installing pip dependencies into bundled Python..."
 "$PYTHON_BIN" -m pip install --upgrade pip --quiet
 "$PYTHON_BIN" -m pip install -r "$REPO_ROOT/requirements-desktop.txt" --quiet
@@ -71,7 +74,8 @@ echo "==> Downloading spaCy model (en_core_web_lg)..."
 
 echo "==> Cleaning up site-packages (removing __pycache__, .dist-info, tests)..."
 find "$PYTHON_DEST/lib" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-find "$PYTHON_DEST/lib" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+# Note: .dist-info dirs are intentionally kept — packages like transformers and
+# spacy use importlib.metadata at import time to check dependency versions.
 find "$PYTHON_DEST/lib" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
 find "$PYTHON_DEST/lib" -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
 
@@ -79,7 +83,9 @@ echo "==> Pruning unused stdlib modules..."
 STDLIB="$PYTHON_DEST/lib/python3.13"
 
 # GUI / IDE tools — not needed in a FastAPI headless process
-for module in tkinter idlelib turtle turtledemo pydoc_data ensurepip; do
+# Note: ensurepip is intentionally kept — it's needed to re-bootstrap pip
+# if --packages-only is run after a previous prune wiped site-packages.
+for module in tkinter idlelib turtle turtledemo pydoc_data; do
   if [ -e "$STDLIB/$module" ]; then
     rm -rf "$STDLIB/$module"
     echo "    Removed stdlib: $module"
