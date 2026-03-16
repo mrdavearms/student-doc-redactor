@@ -73,6 +73,7 @@ This matters most for a tool handling children's data.
 
 ```mermaid
 flowchart TD
+    S["0. First-Run Setup\nLibreOffice check — first launch only\nSkip if you only work with PDFs"] --> A
     A["1. Select Folder\nChoose a folder of student documents"] --> B
     B["2. Enter Student Details\nName, parent names (optional)"] --> C
     C["3. Convert Documents\nWord files to PDF automatically"] --> D
@@ -82,6 +83,7 @@ flowchart TD
     G["7. Apply Redactions\nPermanent, verified, metadata-stripped"] --> H
     H["8. Done\nRedacted files + audit log saved"]
 
+    style S fill:#94A3B8,color:#fff
     style A fill:#4A90D9,color:#fff
     style B fill:#4A90D9,color:#fff
     style C fill:#7B68EE,color:#fff
@@ -250,6 +252,8 @@ Every detected item is scored from **0.0** (uncertain) to **1.0** (certain). You
 
 The desktop app includes UX features designed for non-technical users:
 
+- **First-run setup screen** — automatically checks for LibreOffice on launch. If missing, a guided install prompt appears with a direct download link and a "Check Again" button. Auto-advances when LibreOffice is detected. Skip it if you only work with PDFs.
+- **Auto-update notifications** — the app silently checks for updates in the background. When a new version is ready, a banner appears with download progress and a one-click "Restart Now" to install.
 - **First-run walkthrough** — 4-step guided introduction that appears on first launch. Dismissible, with a "Quick Guide" button in the sidebar to re-open it any time.
 - **Contextual help tooltips** — `?` icons next to every input field explaining what it does and why, in plain English.
 - **Before/after preview** — Split-view comparison of original vs redacted pages on the completion screen. Images are fetched on-demand and never persisted to disk.
@@ -444,6 +448,16 @@ The output appears in `desktop/release/`.
 
 ## Using the App — Screen by Screen
 
+### Screen 0 — First-Run Setup (first launch only)
+
+If LibreOffice is not installed when the app first opens, you land here instead of the main workflow. The screen prompts you to download and install LibreOffice, then click **Check Again** — the app re-checks automatically and advances when LibreOffice is found.
+
+Click **Skip for now — I only have PDFs** to bypass this screen entirely if you don't need Word document support.
+
+This screen only appears once. On subsequent launches with LibreOffice present, the app goes straight to Screen 1.
+
+---
+
 ### Screen 1 — Select Folder & Enter Student Details
 
 - **Folder path**: Paste or type the full path to a folder containing the student's documents (PDFs and/or Word files), or click **Browse** to select it.
@@ -587,30 +601,31 @@ gantt
     title Bulk Redaction Tool — Development Status
     dateFormat  YYYY-MM
     section Core Engine
-    Regex PII detection           :done, 2025-02, 2025-03
-    3-engine AI detection         :done, 2025-03, 2026-02
-    Metadata stripping            :done, 2026-02, 2026-02
-    OCR verification              :done, 2026-02, 2026-02
-    Form widget redaction         :done, 2026-03, 2026-03
-    Filename PII redaction        :done, 2026-03, 2026-03
-    OCR redaction (scanned pages) :done, 2026-03, 2026-03
-    Signature detection           :done, 2026-03, 2026-03
-    Organisation name detection   :done, 2026-03, 2026-03
-    Header/footer zone blanking   :done, 2026-03, 2026-03
-    257-test suite                :done, 2026-03, 2026-03
-    section Desktop App
-    Electron + React + FastAPI    :done, 2026-03, 2026-03
-    Mac DMG build                 :done, 2026-03, 2026-03
-    Walkthrough + onboarding      :done, 2026-03, 2026-03
-    Contextual help tooltips      :done, 2026-03, 2026-03
-    Before/after preview          :done, 2026-03, 2026-03
-    Custom output path            :done, 2026-03, 2026-03
-    Witty progress comments       :done, 2026-03, 2026-03
-    Windows support + installer   :done, 2026-03, 2026-03
-    First-run setup screen        :done, 2026-03, 2026-03
-    Auto-update system            :done, 2026-03, 2026-03
+    Regex PII detection           :done, 2025-02, 2025-04
+    3-engine AI detection         :done, 2025-04, 2026-01
+    Metadata stripping            :done, 2026-01, 2026-02
+    OCR verification              :done, 2026-01, 2026-02
+    Form widget redaction         :done, 2026-02, 2026-03
+    Filename PII redaction        :done, 2026-02, 2026-03
+    OCR redaction (scanned pages) :done, 2026-02, 2026-03
+    Signature detection           :done, 2026-02, 2026-03
+    Organisation name detection   :done, 2026-02, 2026-03
+    Header/footer zone blanking   :done, 2026-02, 2026-03
+    257-test suite                :done, 2026-02, 2026-04
+    section Desktop App — v1.0
+    Electron + React + FastAPI    :done, 2026-02, 2026-03
+    Mac DMG build                 :done, 2026-02, 2026-03
+    Walkthrough + onboarding      :done, 2026-02, 2026-03
+    Contextual help tooltips      :done, 2026-02, 2026-03
+    Before/after preview          :done, 2026-02, 2026-03
+    Custom output path            :done, 2026-02, 2026-03
+    Witty progress comments       :done, 2026-02, 2026-03
+    section Desktop App — v1.1
+    Windows support + installer   :done, 2026-03, 2026-04
+    First-run setup screen        :done, 2026-03, 2026-04
+    Auto-update system            :done, 2026-03, 2026-04
     section Coming Soon
-    Mac code signing              :active, 2026-03, 2026-05
+    Mac code signing              :active, 2026-04, 2026-06
     section Future
     Linux support                 :2026-06, 2026-09
     Batch processing (multiple students) :2026-07, 2026-10
