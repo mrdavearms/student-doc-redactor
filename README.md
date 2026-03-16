@@ -52,6 +52,33 @@ Both use the same detection and redaction engines underneath.
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/screenshot-select-folder.png" alt="Select Folder screen — enter student name, parent names, organisation names and choose your input folder" width="480"><br>
+      <sub><b>Step 1 — Select Folder &amp; Student Details</b></sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/screenshot-document-conversion.png" alt="Document Conversion screen — shows LibreOffice and Tesseract status, file counts, converted documents" width="480"><br>
+      <sub><b>Step 2 — Document Conversion</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/screenshot-final-confirmation.png" alt="Final Confirmation screen — 1117 items to redact across 11 documents, breakdown by category" width="480"><br>
+      <sub><b>Step 4 — Final Confirmation</b></sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/screenshot-redacting-progress.png" alt="Redacting Documents screen — animated progress bar with witty teacher comment" width="480"><br>
+      <sub><b>Redaction in Progress</b></sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## Privacy & Safety Guarantees
 
 This matters most for a tool handling children's data.
