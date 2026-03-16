@@ -1,7 +1,7 @@
 {
   "name": "redaction-tool",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "PII Detection & Redaction Tool for Student Documents",
   "author": "Antigravity",
   "type": "module",
