@@ -78,7 +78,7 @@ React (Vite)
 ├── Layout.tsx        → sidebar + animated page transitions (AnimatePresence)
 ├── store.ts          → Zustand single store (mirrors Streamlit session_state)
 ├── api.ts            → fetch wrapper for all backend endpoints
-├── pages/            → 5 wizard pages
+├── pages/            → 6 wizard pages (setup + 5 workflow steps)
 └── components/       → reusable UI components
 
 FastAPI (backend/main.py)
@@ -91,23 +91,17 @@ FastAPI (backend/main.py)
 
 ### Screen Flow
 
-Both Streamlit and Desktop versions share the same 5-screen wizard flow:
+The desktop app has a 6-screen wizard flow (setup screen + 5 workflow steps):
 
 ```
-folder_selection → conversion_status → document_review → final_confirmation → completion
+setup → folder_selection → conversion_status → document_review → final_confirmation → completion
 ```
+
+The `setup` screen checks for LibreOffice and Tesseract on first launch, with install guidance and a "Check Again" button. It is skipped on subsequent launches when dependencies are present.
 
 In the desktop app, `App.tsx` switches on `currentScreen` from the Zustand store. Layout wraps children in `<AnimatePresence mode="wait">` with `key={currentScreen}` for animated transitions.
 
-In Streamlit, `app.py` routes based on `st.session_state.current_screen`.
-
-### CI/CD Release Workflow
-
-`.github/workflows/release.yml` builds both Mac DMG and Windows exe on GitHub Actions when a version tag is pushed. Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`. Both `electron-builder --publish always` jobs upload assets to a GitHub Release. Release is created as draft by electron-builder; must be published manually via `gh release edit <tag> --draft=false`.
-
-- **Do NOT push tags to trigger builds unless code is merged to `main` first**
-- CI installs Tesseract via `brew` (Mac) and `choco` (Windows) before running bundle scripts
-- `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed)
+Streamlit shares the same 5 workflow steps (no setup screen). `app.py` routes based on `st.session_state.current_screen`.
 
 ### Key Files
 
@@ -124,7 +118,7 @@ In Streamlit, `app.py` routes based on `st.session_state.current_screen`.
 | `src/core/binary_resolver.py` | Cross-platform Tesseract/LibreOffice path resolution |
 | `src/core/logger.py` | Audit log generation and save |
 | `src/core/session_state.py` | All `st.session_state` keys and `navigate_to()` |
-| `src/ui/screens.py` | All 5 Streamlit screens (largest file) |
+| `src/ui/screens.py` | All Streamlit screens (largest file) |
 | `src/services/conversion_service.py` | Framework-agnostic conversion business logic |
 | `src/services/detection_service.py` | Framework-agnostic PII detection business logic |
 | `src/services/redaction_service.py` | Framework-agnostic redaction orchestration + custom output path |
@@ -143,6 +137,9 @@ In Streamlit, `app.py` routes based on `st.session_state.current_screen`.
 | `desktop/src/components/PreviewSection.tsx` | Before/after PDF preview (split view, on-demand fetch) |
 | `desktop/src/components/DocumentCard.tsx` | Expandable per-document summary card for completion screen |
 | `desktop/src/components/RedactionProgress.tsx` | Animated progress bar + rotating witty teacher comments |
+| `desktop/src/components/UpdateBanner.tsx` | Auto-update notification banner |
+| `desktop/src/hooks/useUpdater.ts` | Custom hook for electron-updater integration |
+| `desktop/src/types.ts` | `Screen` type, `SCREENS` array, API response interfaces |
 
 ---
 
@@ -409,7 +406,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | Centrelink CRN | 0.65 | Medium — contextual guard, pattern is broad |
 | Family/parent (contextual) | 0.65 | Medium — inferred from keyword proximity |
 | Parent/family (user-provided) | 0.95 | High — user explicitly named them |
-| Organisation name | 0.90 | High — user-provided, word-level matching with generic word filter |
+| Organisation name | 0.95 | High — user-provided, word-level matching with generic word filter |
 
 ---
 
@@ -418,13 +415,13 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ```
 tests/                                # 257 tests total
 ├── test_pii_detector.py              # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
-├── test_pii_detector_names.py        # 54 tests: name variations, contextual detection, possessives, family
-├── test_pii_orchestrator.py          # 22 tests: orchestrator merge, dedup, multi-engine coordination
+├── test_pii_detector_names.py        # 61 tests: name variations, contextual detection, possessives, family
+├── test_pii_orchestrator.py          # 25 tests: orchestrator merge, dedup, multi-engine coordination
 ├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
 ├── test_gliner_provider.py           # 12 tests: GLiNER zero-shot NER wrapper
 ├── test_redactor.py                  # 11 tests: text-layer redaction routing, possessive+punctuation, core redact_pdf
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
-├── test_ocr_redaction.py             # 19 tests: image-only page detection, OCR redaction, word matching
+├── test_ocr_redaction.py             # 28 tests: image-only page detection, OCR redaction, word matching
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
 ├── test_widget_redaction.py          # 6 tests: AcroForm widget deletion
@@ -445,9 +442,10 @@ Run with output: `pytest tests/ -v -s`
 
 ## Dependencies
 
-### Python (requirements.txt)
-- `streamlit>=1.31.0` — UI framework (Streamlit version)
-- `fastapi>=0.109.0` + `uvicorn>=0.27.0` — API layer (Desktop version)
+### Python (two requirements files)
+
+**`requirements.txt`** (Streamlit app):
+- `streamlit>=1.31.0` — UI framework
 - `pymupdf>=1.23.0` — PDF redaction (`import fitz`)
 - `pytesseract>=0.3.10` — OCR
 - `Pillow>=10.2.0` — Image handling for OCR verification
@@ -456,12 +454,17 @@ Run with output: `pytest tests/ -v -s`
 - `spacy>=3.7.0` — NLP backend for Presidio
 - `gliner>=0.2.0` — Zero-shot NER
 
+**`requirements-desktop.txt`** (Desktop app — no Streamlit, adds FastAPI):
+- All of the above minus Streamlit, plus:
+- `fastapi>=0.110.0` + `uvicorn[standard]>=0.27.0` — API layer
+
 ### Desktop (package.json)
 - `react` + `react-dom` — UI framework
 - `zustand` — State management
 - `framer-motion` — Animations (page transitions, micro-interactions)
 - `lucide-react` — Icons
 - `electron` — Desktop shell
+- `electron-updater` — In-app auto-update system
 - `vite` + `@tailwindcss/vite` — Build tooling + Tailwind v4
 
 ### External (installed via Homebrew)
@@ -486,12 +489,31 @@ Run with output: `pytest tests/ -v -s`
 
 ---
 
+## CI/CD — GitHub Actions
+
+`.github/workflows/release.yml` — triggered by pushing a `v*` tag:
+
+1. **build-mac** (macos-latest): Bundles Python + Tesseract, builds `.dmg` via electron-builder
+2. **build-windows** (windows-latest): Bundles Python + Tesseract, builds `.exe` via electron-builder
+3. **release-notes** (runs after both builds): Auto-generates teacher-friendly release notes with download links, setup guidance, categorised changelog, and collapsed auto-updater files
+
+electron-builder uses `--publish always` to create a draft GitHub Release and upload assets. The release-notes job stamps the body. You still need to manually publish the draft.
+
+- **Do NOT push tags to trigger builds unless code is merged to `main` first.** Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed).
+
+### Auto-Update
+
+The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` hook + `UpdateBanner.tsx` component handle the UX. Update metadata (`.yml` and `.blockmap` files) are published alongside installers.
+
+---
+
 ## What's Next / Known Gaps
 
-- **Mac DMG**: Built via electron-builder (`cd desktop && npm run dist:mac`). Not code-signed yet (ad-hoc only). Works on Apple Silicon + Intel.
+- **Code signing**: Mac DMG uses ad-hoc signing (not notarised). Windows `.exe` is unsigned. Both work but show OS warnings on first launch.
 - **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
 - **Windows**: SUPPORTED as of v1.1.0. NSIS installer built via CI. Bundled Python + Tesseract. LibreOffice prompted on first run via Setup screen.
-- **Linux**: Not supported yet. On the roadmap.
+- **Linux**: Not supported. No current plans.
 - **Auto-update**: Implemented via `electron-updater`. Checks on launch + manual "Check for Updates" in About modal. Uses `latest.yml`/`latest-mac.yml` from GitHub Releases.
 - **Setup screen**: First-run LibreOffice detection (`desktop/src/pages/Setup.tsx`). Shows download link, "Check Again", and "Skip for now".
 - **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
@@ -504,4 +526,4 @@ Run with output: `pytest tests/ -v -s`
 
 ## Sample Data
 
-`sample/` contains real documents. This repo is private. Do not make it public until sample documents are removed or replaced with synthetic data. The `sample/redacted_2/` and `sample/redaction_log.txt` files are in `.gitignore` (output files — never commit these).
+`sample/` contains real documents. This repo is public. Ensure real student documents are never committed — keep sample data synthetic or anonymised. The `sample/redacted_2/` and `sample/redaction_log.txt` files are in `.gitignore` (output files — never commit these).
