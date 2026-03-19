@@ -74,3 +74,117 @@ jobs:
         run: |
           npm run build
           npx electron-builder --win --publish always
+
+  release-notes:
+    name: Add Release Notes
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+
+          CHANGELOG=""
+          if [ -n "$PREV_TAG" ]; then
+            FIXES=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -i '^fix' | sed 's/^fix: //' | sed 's/^fix(//' || true)
+            FEATURES=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -iE '^(feat|add)' | sed 's/^feat: //' | sed 's/^add: //' || true)
+            BUILDS=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -iE '^(build|chore|ci)' | sed 's/^build: //' | sed 's/^chore: //' | sed 's/^ci: //' || true)
+            DOCS=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -i '^docs' | sed 's/^docs: //' || true)
+
+            if [ -n "$FEATURES" ]; then
+              CHANGELOG="${CHANGELOG}### ✨ New Features"$'\n'
+              while IFS= read -r line; do
+                CHANGELOG="${CHANGELOG}- ${line}"$'\n'
+              done <<< "$FEATURES"
+              CHANGELOG="${CHANGELOG}"$'\n'
+            fi
+
+            if [ -n "$FIXES" ]; then
+              CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes"$'\n'
+              while IFS= read -r line; do
+                CHANGELOG="${CHANGELOG}- ${line}"$'\n'
+              done <<< "$FIXES"
+              CHANGELOG="${CHANGELOG}"$'\n'
+            fi
+
+            if [ -n "$BUILDS" ]; then
+              CHANGELOG="${CHANGELOG}### 📦 Build & Packaging"$'\n'
+              while IFS= read -r line; do
+                CHANGELOG="${CHANGELOG}- ${line}"$'\n'
+              done <<< "$BUILDS"
+              CHANGELOG="${CHANGELOG}"$'\n'
+            fi
+
+            if [ -n "$DOCS" ]; then
+              CHANGELOG="${CHANGELOG}### 📖 Documentation"$'\n'
+              while IFS= read -r line; do
+                CHANGELOG="${CHANGELOG}- ${line}"$'\n'
+              done <<< "$DOCS"
+              CHANGELOG="${CHANGELOG}"$'\n'
+            fi
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="### 🔧 Maintenance"$'\n'"- Minor improvements and fixes"$'\n'
+          fi
+
+          echo "$CHANGELOG" > /tmp/changelog.md
+
+      - name: Update release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          CHANGELOG=$(cat /tmp/changelog.md)
+
+          cat > /tmp/release-notes.md << 'NOTES_EOF'
+          ## Downloads
+
+          | Platform | Installer |
+          |----------|-----------|
+          | 🪟 **Windows** (64-bit) | [**Redaction-Tool-Setup-VERSION.exe**](https://github.com/REPO/releases/download/vVERSION/Redaction-Tool-Setup-VERSION.exe) |
+          | 🍎 **macOS** (Apple Silicon) | [**Redaction-Tool-VERSION-arm64.dmg**](https://github.com/REPO/releases/download/vVERSION/Redaction-Tool-VERSION-arm64.dmg) |
+
+          > **First time on Mac?** macOS may block the app — right-click → Open → Open to bypass Gatekeeper. You only need to do this once.
+
+          > **LibreOffice** (free) is needed to process Word documents. The app prompts you to install it on first launch. [Download LibreOffice](https://www.libreoffice.org/download/download-libreoffice/). If you only work with PDFs, LibreOffice is not needed.
+
+          Everything else — Python, Tesseract OCR, and AI models — is bundled in the installer. No setup required.
+
+          ---
+
+          ## What's New in vVERSION
+
+          CHANGELOG_PLACEHOLDER
+
+          ---
+
+          <details>
+          <summary>Other files (for auto-updater — you don't need these)</summary>
+
+          The `.yml` and `.blockmap` files are used by the app's built-in auto-update system. You don't need to download them — the app handles updates automatically after installation.
+
+          </details>
+          NOTES_EOF
+
+          # Strip heredoc indentation, then substitute placeholders
+          sed -i 's/^          //' /tmp/release-notes.md
+          sed -i "s|VERSION|${VERSION}|g" /tmp/release-notes.md
+          sed -i "s|REPO|${{ github.repository }}|g" /tmp/release-notes.md
+          sed -i "/CHANGELOG_PLACEHOLDER/{
+            r /tmp/changelog.md
+            d
+          }" /tmp/release-notes.md
+
+          gh release edit "v${VERSION}" --notes-file /tmp/release-notes.md
