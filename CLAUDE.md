@@ -16,7 +16,9 @@ Two frontends exist:
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `source venv/bin/activate && pytest tests/ -v` (257 tests, ~4m30s)
-- **Build DMG**: `cd desktop && npm run dist:mac`
+- **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
+- **Build installer (Windows)**: `cd desktop && npm run dist:win`
+- **Build + publish to GitHub**: `cd desktop && npm run dist:publish` (CI only — requires `GH_TOKEN`)
 - **Python**: 3.13+ (required for spaCy compatibility)
 
 ---
@@ -285,7 +287,7 @@ page.insert_image(page.rect, stream=img_bytes, overlay=True)
 
 ### 19. Organisation names generate word-level variations
 
-`PIIDetector._detect_organisation_names()` splits each org name into words and flags matches ≥3 chars. Common English words (`the`, `school`, `centre`, `clinic`, etc.) are excluded via `GENERIC_ORG_WORDS`. The full org name is matched first (longest match first, like student names). Category: `"Organisation name"`, confidence: `0.90`.
+`PIIDetector._detect_organisation_names()` splits each org name into words and flags matches ≥3 chars. Common English words (`the`, `school`, `centre`, `clinic`, etc.) are excluded via `GENERIC_ORG_WORDS`. The code also runs a secondary filter against `_CONTEXTUAL_NAME_EXCLUDE` (the same list shared with name detection). Both lists must be checked if modifying exclusion logic. The full org name is matched first (longest match first, like student names). Category: `"Organisation name"`, confidence: `0.95`.
 
 ### 20. Header/footer zone redaction ("Stage 0") blanks regions before PII redaction
 
