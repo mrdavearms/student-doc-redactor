@@ -22,6 +22,8 @@ export interface DependencyStatus {
   libreoffice_message: string;
   tesseract_ok: boolean;
   can_convert_word: boolean;
+  ner_ok?: boolean;
+  ner_message?: string;
 }
 
 export interface ConversionResults {

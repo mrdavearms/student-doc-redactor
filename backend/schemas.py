@@ -14,6 +14,8 @@ class DependencyStatusResponse(BaseModel):
     libreoffice_message: str
     tesseract_ok: bool
     can_convert_word: bool
+    ner_ok: bool = False
+    ner_message: str = ""
 
 
 # ── Folder Processing (Conversion) ────────────────────────────────────────

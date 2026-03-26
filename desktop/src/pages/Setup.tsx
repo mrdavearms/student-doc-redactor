@@ -16,7 +16,7 @@ export default function Setup() {
     try {
       const result = await api.checkDependencies();
       setDeps(result);
-      if (result.libreoffice_ok) {
+      if (result.libreoffice_ok && result.ner_ok !== false) {
         setAllReady(true);
         // Auto-advance after 2 seconds
         setTimeout(() => navigateTo('folder_selection'), 2000);
@@ -113,6 +113,17 @@ export default function Setup() {
             className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700"
           >
             LibreOffice was not detected. Make sure the installation is complete, then try again.
+          </motion.div>
+        )}
+        {deps && deps.ner_ok === false && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700"
+          >
+            Name detection engine failed to load. The app cannot redact safely without it.
+            {deps.ner_message && <span className="block mt-1 text-xs text-red-500">{deps.ner_message}</span>}
           </motion.div>
         )}
       </AnimatePresence>

@@ -72,11 +72,26 @@ def health_check():
 def check_dependencies():
     service = ConversionService()
     deps = service.check_dependencies()
+
+    # Check NER availability
+    ner_ok = False
+    ner_message = "Not available"
+    try:
+        from src.core.pii_orchestrator import PIIOrchestrator
+        test_orch = PIIOrchestrator("test", require_ner=True)
+        if test_orch.presidio_analyzer is not None:
+            ner_ok = True
+            ner_message = "spaCy + Presidio loaded"
+    except Exception as e:
+        ner_message = str(e)
+
     return DependencyStatusResponse(
         libreoffice_ok=deps.libreoffice_ok,
         libreoffice_message=deps.libreoffice_message,
         tesseract_ok=deps.tesseract_ok,
         can_convert_word=deps.can_convert_word,
+        ner_ok=ner_ok,
+        ner_message=ner_message,
     )
 
 
@@ -119,6 +134,7 @@ def detect_pii(req: DetectPIIRequest):
         parent_names=req.parent_names,
         family_names=req.family_names,
         organisation_names=req.organisation_names,
+        require_ner=True,
     )
 
     results = service.detect_all(pdf_paths)
