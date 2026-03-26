@@ -51,6 +51,30 @@ _CONTEXTUAL_NAME_EXCLUDE = {
 }
 
 
+def generate_name_variations(name: str, preserve_short_name: str = None) -> list:
+    """Generate name variations for detection. Standalone version for use by orchestrator."""
+    name = name.strip()
+    if not name:
+        return []
+    parts = name.split()
+    variations = [name]
+    if len(parts) >= 2:
+        first, last = parts[0], parts[-1]
+        variations.append(first)
+        variations.append(last)
+        variations.append(f"{first[0]}. {last}")
+        variations.append(f"{first} {last[0]}.")
+        variations.append(f"{first[0]}.{last[0]}.")
+        # Full initials string (e.g. "JS" for "Jane Smith")
+        initials = ''.join(p[0] for p in parts)
+        if len(initials) >= 3:
+            variations.append(initials)
+    # Filter: min 3 chars, but always preserve the original name
+    preserve = preserve_short_name or name
+    variations = [v for v in variations if len(v) >= 3 or v == preserve]
+    return list(dict.fromkeys(v.strip() for v in variations if v.strip()))
+
+
 class PIIDetector:
     """Detects PII in text using pattern matching and contextual analysis"""
 
@@ -140,30 +164,7 @@ class PIIDetector:
 
     def _generate_name_variations(self) -> List[str]:
         """Generate variations of the student name (first, last, initials, etc.)"""
-        variations = [self.student_name]
-
-        name_parts = self.student_name.split()
-        if len(name_parts) >= 2:
-            # First name only
-            variations.append(name_parts[0])
-            # Last name only
-            variations.append(name_parts[-1])
-            # First initial + last name (e.g., J. Smith)
-            variations.append(f"{name_parts[0][0]}. {name_parts[-1]}")
-            # First name + last initial (e.g., John S.)
-            variations.append(f"{name_parts[0]} {name_parts[-1][0]}.")
-            # Initials (e.g., J.S., JS)
-            initials = ''.join([part[0] for part in name_parts])
-            variations.append(f"{initials[0]}.{initials[1]}.")
-            variations.append(initials)
-
-        # Add fuzzy variations (common misspellings/variations)
-        # For now, just exact matches - fuzzy logic can be added later
-
-        # Filter out variations too short to be reliable (min 3 chars)
-        # Always preserve the student's full name regardless of length
-        variations = [v for v in variations if len(v) >= 3 or v == self.student_name]
-        return variations
+        return generate_name_variations(self.student_name, preserve_short_name=self.student_name)
 
     def detect_pii_in_text(self, text: str, page_num: int) -> List[PIIMatch]:
         """
