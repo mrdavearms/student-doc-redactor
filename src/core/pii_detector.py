@@ -6,6 +6,7 @@ Detects personally identifiable information using regex patterns and contextual 
 import re
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
+from nickname_map import NICKNAME_MAP, REVERSE_NICKNAME_MAP
 
 @dataclass
 class PIIMatch:
@@ -48,14 +49,24 @@ _CONTEXTUAL_NAME_EXCLUDE = {
     'have', 'has', 'had', 'do', 'does', 'did',
     'will', 'would', 'should', 'can', 'could',
     'may', 'might', 'must', 'shall',
+    # Common English words that are also nicknames (false positive risk)
+    'art', 'max', 'don', 'pat', 'ray', 'ted', 'rob', 'bob',
+    'rick', 'dick', 'rich', 'bill', 'sue', 'reg', 'ron', 'len',
+    'belle', 'penny', 'cam', 'con', 'cal', 'gen', 'dom',
 }
 
 
-def generate_name_variations(name: str, preserve_short_name: str = None) -> list:
-    """Generate name variations for detection. Standalone version for use by orchestrator."""
+def generate_name_variations(name: str, preserve_short_name: str = None,
+                             include_nicknames: bool = False) -> tuple:
+    """Generate name variations for detection. Standalone version for use by orchestrator.
+
+    Returns:
+        Tuple of (variations_list, nickname_list). nickname_list is empty unless
+        include_nicknames=True.
+    """
     name = name.strip()
     if not name:
-        return []
+        return [], []
     parts = name.split()
     variations = [name]
     if len(parts) >= 2:
@@ -69,10 +80,30 @@ def generate_name_variations(name: str, preserve_short_name: str = None) -> list
         initials = ''.join(p[0] for p in parts)
         if len(initials) >= 3:
             variations.append(initials)
-    # Filter: min 3 chars, but always preserve the original name
+
+    # Nickname expansion
+    nickname_vars = []
+    if include_nicknames:
+        for part in parts:
+            part_lower = part.lower()
+            # Formal -> nicknames
+            if part_lower in NICKNAME_MAP:
+                nickname_vars.extend(NICKNAME_MAP[part_lower])
+            # Nickname -> formal names
+            if part_lower in REVERSE_NICKNAME_MAP:
+                nickname_vars.extend(REVERSE_NICKNAME_MAP[part_lower])
+
+    # Filter main variations
     preserve = preserve_short_name or name
     variations = [v for v in variations if len(v) >= 3 or v == preserve]
-    return list(dict.fromkeys(v.strip() for v in variations if v.strip()))
+    variations = list(dict.fromkeys(v.strip() for v in variations if v.strip()))
+
+    # Filter nicknames: min 3 chars and not a common word
+    filtered_nicks = []
+    if include_nicknames and nickname_vars:
+        filtered_nicks = [n for n in set(nickname_vars)
+                          if len(n) >= 3 and n.lower() not in _CONTEXTUAL_NAME_EXCLUDE]
+    return variations, filtered_nicks
 
 
 class PIIDetector:
@@ -176,7 +207,12 @@ class PIIDetector:
 
     def _generate_name_variations(self) -> List[str]:
         """Generate variations of the student name (first, last, initials, etc.)"""
-        return generate_name_variations(self.student_name, preserve_short_name=self.student_name)
+        main_vars, self._nickname_variations = generate_name_variations(
+            self.student_name,
+            preserve_short_name=self.student_name,
+            include_nicknames=True
+        )
+        return main_vars
 
     @staticmethod
     def _peek_next_line(lines: list, line_idx: int) -> str:
@@ -252,6 +288,16 @@ class PIIDetector:
                     page_num=page_num,
                     line_num=line_num,
                     context=context
+                ))
+
+        # Nickname variations at lower confidence
+        for nick in getattr(self, '_nickname_variations', []):
+            pattern = re.compile(r'\b' + re.escape(nick) + r'\b', re.IGNORECASE)
+            for m in pattern.finditer(line):
+                matches.append(PIIMatch(
+                    text=m.group(), category="Student name (nickname)", confidence=0.75,
+                    page_num=page_num, line_num=line_num,
+                    context=self._get_context(line, m.start(), m.end())
                 ))
         return matches
 
