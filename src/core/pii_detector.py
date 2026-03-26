@@ -178,6 +178,13 @@ class PIIDetector:
         """Generate variations of the student name (first, last, initials, etc.)"""
         return generate_name_variations(self.student_name, preserve_short_name=self.student_name)
 
+    @staticmethod
+    def _peek_next_line(lines: list, line_idx: int) -> str:
+        """Return the next line if it exists, else empty string."""
+        if line_idx + 1 < len(lines):
+            return lines[line_idx + 1]
+        return ""
+
     def detect_pii_in_text(self, text: str, page_num: int) -> List[PIIMatch]:
         """
         Detect all PII in the given text
@@ -192,7 +199,8 @@ class PIIDetector:
         matches = []
 
         lines = text.split('\n')
-        for line_num, line in enumerate(lines, 1):
+        for line_idx, line in enumerate(lines):
+            line_num = line_idx + 1
             # Detect student name and variations
             matches.extend(self._detect_names(line, page_num, line_num))
 
@@ -203,22 +211,22 @@ class PIIDetector:
             matches.extend(self._detect_emails(line, page_num, line_num))
 
             # Detect addresses
-            matches.extend(self._detect_addresses(line, page_num, line_num))
+            matches.extend(self._detect_addresses(line, page_num, line_num, lines, line_idx))
 
             # Detect Medicare numbers
-            matches.extend(self._detect_medicare(line, page_num, line_num))
+            matches.extend(self._detect_medicare(line, page_num, line_num, lines, line_idx))
 
             # Detect CRN
-            matches.extend(self._detect_crn(line, page_num, line_num))
+            matches.extend(self._detect_crn(line, page_num, line_num, lines, line_idx))
 
             # Detect student IDs
             matches.extend(self._detect_student_id(line, page_num, line_num))
 
             # Detect DOB (context-sensitive)
-            matches.extend(self._detect_dob(line, page_num, line_num))
+            matches.extend(self._detect_dob(line, page_num, line_num, lines, line_idx))
 
             # Detect contextual family names
-            matches.extend(self._detect_contextual_names(line, page_num, line_num))
+            matches.extend(self._detect_contextual_names(line, page_num, line_num, lines, line_idx))
 
             # Detect organisation names
             matches.extend(self._detect_organisation_names(line, page_num, line_num))
@@ -280,7 +288,7 @@ class PIIDetector:
             ))
         return matches
 
-    def _detect_addresses(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+    def _detect_addresses(self, line: str, page_num: int, line_num: int, lines=None, line_idx=None) -> List[PIIMatch]:
         """Detect Australian addresses"""
         matches = []
         pattern = re.compile(self.ADDRESS_PATTERN, re.IGNORECASE)
@@ -296,7 +304,7 @@ class PIIDetector:
             ))
         return matches
 
-    def _detect_medicare(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+    def _detect_medicare(self, line: str, page_num: int, line_num: int, lines=None, line_idx=None) -> List[PIIMatch]:
         """Detect Medicare numbers"""
         matches = []
         if 'medicare' not in line.lower():
@@ -312,15 +320,25 @@ class PIIDetector:
                 line_num=line_num,
                 context=context
             ))
+        # Cross-line: keyword found but no number on this line
+        if not matches and lines is not None and line_idx is not None:
+            next_line = self._peek_next_line(lines, line_idx)
+            if next_line:
+                for m in re.finditer(self.MEDICARE_PATTERN, next_line):
+                    matches.append(PIIMatch(
+                        text=m.group(), category="Medicare number", confidence=0.90,
+                        page_num=page_num, line_num=line_num + 1,
+                        context=self._get_context(next_line, m.start(), m.end())
+                    ))
         return matches
 
-    def _detect_crn(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+    def _detect_crn(self, line: str, page_num: int, line_num: int, lines=None, line_idx=None) -> List[PIIMatch]:
         """Detect Centrelink CRN"""
         matches = []
-        pattern = re.compile(self.CRN_PATTERN)
-        for match in pattern.finditer(line):
-            # Check if it looks like a CRN (not just any 9 alphanumeric string)
-            if 'CRN' in line.upper():
+        has_keyword = 'CRN' in line.upper()
+        if has_keyword:
+            pattern = re.compile(self.CRN_PATTERN)
+            for match in pattern.finditer(line):
                 context = self._get_context(line, match.start(), match.end())
                 matches.append(PIIMatch(
                     text=match.group(),
@@ -330,6 +348,16 @@ class PIIDetector:
                     line_num=line_num,
                     context=context
                 ))
+            # Cross-line: keyword found but no CRN token on this line
+            if not matches and lines is not None and line_idx is not None:
+                next_line = self._peek_next_line(lines, line_idx)
+                if next_line:
+                    for m in re.finditer(self.CRN_PATTERN, next_line):
+                        matches.append(PIIMatch(
+                            text=m.group(), category="Centrelink CRN", confidence=0.60,
+                            page_num=page_num, line_num=line_num + 1,
+                            context=self._get_context(next_line, m.start(), m.end())
+                        ))
         return matches
 
     def _detect_student_id(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
@@ -353,7 +381,7 @@ class PIIDetector:
             ))
         return matches
 
-    def _detect_dob(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+    def _detect_dob(self, line: str, page_num: int, line_num: int, lines=None, line_idx=None) -> List[PIIMatch]:
         """Detect date of birth (only when preceded by label)"""
         matches = []
 
@@ -374,6 +402,18 @@ class PIIDetector:
                         line_num=line_num,
                         context=context
                     ))
+
+            # Cross-line: label found but no date on this line — peek at next line
+            if not matches and lines is not None and line_idx is not None:
+                next_line = self._peek_next_line(lines, line_idx)
+                if next_line:
+                    for date_pattern in self.DATE_PATTERNS:
+                        for m in re.finditer(date_pattern, next_line):
+                            matches.append(PIIMatch(
+                                text=m.group(), category="Date of birth", confidence=0.90,
+                                page_num=page_num, line_num=line_num + 1,
+                                context=self._get_context(next_line, m.start(), m.end())
+                            ))
         return matches
 
     def _detect_ndis(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
@@ -409,7 +449,7 @@ class PIIDetector:
             ))
         return matches
 
-    def _detect_contextual_names(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+    def _detect_contextual_names(self, line: str, page_num: int, line_num: int, lines=None, line_idx=None) -> List[PIIMatch]:
         """Detect names appearing after contextual keywords"""
         matches = []
 
@@ -430,11 +470,13 @@ class PIIDetector:
                 re.compile(r'\b' + keyword + r',\s+' + _name_pat, re.IGNORECASE),
             ]
 
+            found_name = False
             for pattern in patterns:
                 for match in pattern.finditer(line):
                     name = match.group(1)
                     # Skip common words, articles, prepositions, and professional titles
                     if name.lower() not in _CONTEXTUAL_NAME_EXCLUDE:
+                        found_name = True
                         context = self._get_context(line, match.start(1), match.end(1))
                         matches.append(PIIMatch(
                             text=name,
@@ -444,6 +486,22 @@ class PIIDetector:
                             line_num=line_num,
                             context=context
                         ))
+
+            # Cross-line: keyword matched but no name captured on this line
+            if not found_name and lines is not None and line_idx is not None:
+                keyword_pat = re.compile(r'\b' + keyword + r'\b', re.IGNORECASE)
+                if keyword_pat.search(line):
+                    next_line = self._peek_next_line(lines, line_idx)
+                    if next_line:
+                        name_only = re.compile(r'^' + _name_pat)
+                        m = name_only.match(next_line.strip())
+                        if m and m.group(1).lower() not in _CONTEXTUAL_NAME_EXCLUDE:
+                            matches.append(PIIMatch(
+                                text=m.group(1), category=category,
+                                confidence=0.60, page_num=page_num,
+                                line_num=line_num + 1,
+                                context=next_line.strip()[:80]
+                            ))
 
         # Also check user-provided parent/family names
         for parent_name in self.parent_names:

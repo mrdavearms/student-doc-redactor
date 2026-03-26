@@ -287,6 +287,27 @@ class TestABNDetection:
         assert len(matches) == 0
 
 
+class TestCrossLineDetection:
+    def setup_method(self):
+        self.detector = PIIDetector("Jane Smith")
+
+    def test_dob_label_on_previous_line(self):
+        text = "Date of Birth:\n15/03/2015"
+        matches = [m for m in self.detector.detect_pii_in_text(text, 1) if m.category == "Date of birth"]
+        assert len(matches) >= 1
+
+    def test_medicare_keyword_on_previous_line(self):
+        text = "Medicare Number:\n2345 67890 1"
+        matches = [m for m in self.detector.detect_pii_in_text(text, 1) if m.category == "Medicare number"]
+        assert len(matches) >= 1
+
+    def test_mother_name_on_next_line(self):
+        text = "Mother:\nSarah Williams"
+        matches = [m for m in self.detector.detect_pii_in_text(text, 1)
+                   if m.category in ("Parent/Guardian", "Family member")]
+        assert len(matches) >= 1
+
+
 class TestIntegration:
     def test_multi_pii_paragraph_all_detected(self):
         detector = PIIDetector("Alice Brown")
