@@ -43,6 +43,10 @@ class TestPhoneDetection:
         matches = self._phone_matches("Reference number: 1234567890")
         assert len(matches) == 0
 
+    def test_mobile_with_dashes_detected(self):
+        matches = self._phone_matches("Call 0412-345-678 for pickup")
+        assert len(matches) >= 1
+
 
 class TestEmailDetection:
     def setup_method(self):
@@ -91,6 +95,14 @@ class TestAddressDetection:
     def test_text_without_state_not_matched(self):
         matches = self._address_matches("123 Some Place without any proper suburb here")
         assert len(matches) == 0
+
+    def test_address_close_detected(self):
+        matches = self._address_matches("Lives at 5 Rosemary Close, Richmond VIC 3121")
+        assert len(matches) >= 1
+
+    def test_address_circuit_detected(self):
+        matches = self._address_matches("Address: 12 Sunset Circuit, Cairns QLD 4870")
+        assert len(matches) >= 1
 
 
 class TestMedicareDetection:

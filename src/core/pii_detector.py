@@ -80,10 +80,10 @@ class PIIDetector:
 
     # Australian phone number patterns
     PHONE_PATTERNS = [
-        r'\+61\s*[2-478]\s*\d{4}\s*\d{4}',  # +61 2 1234 5678
-        r'0[2-478]\s*\d{4}\s*\d{4}',  # 02 1234 5678
-        r'\(0[2-478]\)\s*\d{4}\s*\d{4}',  # (02) 1234 5678
-        r'04\d{2}\s*\d{3}\s*\d{3}',  # 0412 345 678
+        r'\+61[\s\-]*[2-478][\s\-]*\d{4}[\s\-]*\d{4}',  # +61 2 1234 5678
+        r'0[2-478][\s\-]*\d{4}[\s\-]*\d{4}',  # 02 1234 5678
+        r'\(0[2-478]\)[\s\-]*\d{4}[\s\-]*\d{4}',  # (02) 1234 5678
+        r'04\d{2}[\s\-]*\d{3}[\s\-]*\d{3}',  # 0412 345 678 or 0412-345-678
         r'04\d{8}',  # 0412345678
     ]
 
@@ -91,7 +91,7 @@ class PIIDetector:
     EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 
     # Australian address pattern
-    ADDRESS_PATTERN = r'\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory)\s+\d{4}'
+    ADDRESS_PATTERN = r'\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory)\s+\d{4}'
 
     # Medicare number pattern
     MEDICARE_PATTERN = r'\b\d{4}\s?\d{5}\s?\d\b'
@@ -150,7 +150,10 @@ class PIIDetector:
         r'Family member',
         r'Lives with',
         r'Referred by parent',
-        r'Parent/Guardian signature'
+        r'Parent/Guardian signature',
+        r'Stepmother', r'Stepfather', r'Foster\s+parent', r'Foster\s+carer',
+        r'Legal\s+guardian', r'Primary\s+carer', r'Kinship\s+carer',
+        r'Aunt', r'Uncle', r'Grandparent', r'Grandmother', r'Grandfather',
     ]
 
     def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None, organisation_names: List[str] = None):
@@ -414,8 +417,8 @@ class PIIDetector:
         for keyword in self.FAMILY_KEYWORDS:
             category = 'Parent/Guardian' if any(k in keyword.lower() for k in ['mother', 'father', 'parent', 'mum', 'dad', 'guardian', 'carer', 'partner']) else 'Family member'
 
-            # Name capture pattern: 1-2 capitalised words
-            _name_pat = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'
+            # Name capture pattern: 1-2 capitalised words (or ALL-CAPS words)
+            _name_pat = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?|[A-Z]{2,}(?:\s+[A-Z]{2,})?)'
 
             # Three syntactic patterns for how documents reference family members:
             #   1. "Father: Nick" or "Father Nick"  (colon/space)
