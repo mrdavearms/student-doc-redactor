@@ -518,3 +518,31 @@ class TestOrganisationNameDetection:
         matches = detector.detect_pii_in_text("Riverside Clinic report", 1)
         org_matches = [m for m in matches if m.category == 'Organisation name']
         assert all(m.source == 'regex' for m in org_matches)
+
+
+class TestNicknameExpansion:
+    def test_christopher_expands_to_chris(self):
+        detector = PIIDetector("Christopher Brown")
+        text = "Chris was late to class"
+        matches = detector.detect_pii_in_text(text, 1)
+        assert any(m.text.lower() == "chris" for m in matches)
+
+    def test_chris_expands_to_christopher(self):
+        detector = PIIDetector("Chris Brown")
+        text = "Christopher was late to class"
+        matches = detector.detect_pii_in_text(text, 1)
+        assert any("christopher" in m.text.lower() for m in matches)
+
+    def test_nickname_confidence_is_075(self):
+        detector = PIIDetector("Christopher Brown")
+        text = "Chris was late"
+        matches = [m for m in detector.detect_pii_in_text(text, 1) if m.text.lower() == "chris"]
+        assert len(matches) >= 1
+        assert matches[0].confidence == 0.75
+
+    def test_short_nickname_excluded_if_in_contextual_exclude(self):
+        # "Art" is a common word — should be excluded
+        detector = PIIDetector("Arthur Jones")
+        text = "The Art program runs weekly"
+        matches = [m for m in detector.detect_pii_in_text(text, 1) if m.text.lower() == "art"]
+        assert len(matches) == 0

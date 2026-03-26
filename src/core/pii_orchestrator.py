@@ -1,11 +1,15 @@
 """
 PII Orchestrator
-Merges results from regex (PIIDetector), Presidio NER, and (optionally) GLiNER
+Merges results from regex (PIIDetector) and Presidio NER (spaCy)
 into a single deduplicated list of PIIMatch objects.
+
+Architecture: NER-primary — Presidio discovers names, then regex
+catches structured PII and user-provided names.
 """
 
+import re
 from typing import List, Optional
-from pii_detector import PIIDetector, PIIMatch
+from pii_detector import PIIDetector, PIIMatch, generate_name_variations
 
 
 # Presidio entity types that are too broad for this use case.
@@ -36,14 +40,17 @@ class PIIOrchestrator:
     Runs multiple PII detection backends and merges results.
 
     Always runs: PIIDetector (regex)
-    Optionally runs: Presidio (if installed), GLiNER (if installed)
+    Optionally runs: Presidio/spaCy (NER-primary name discovery)
     """
 
-    def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None, organisation_names: List[str] = None):
+    def __init__(self, student_name: str, parent_names: List[str] = None,
+                 family_names: List[str] = None, organisation_names: List[str] = None,
+                 require_ner: bool = False):
         self.student_name = student_name.strip()
         self.parent_names = parent_names or []
         self.family_names = family_names or []
         self.organisation_names = organisation_names or []
+        self.require_ner = require_ner
 
         # Always create the regex detector
         self.regex_detector = PIIDetector(
@@ -56,18 +63,6 @@ class PIIOrchestrator:
         # Try to initialise Presidio
         self.presidio_analyzer = None
         self._init_presidio()
-
-        # Try to initialise GLiNER
-        self.gliner_detector = None
-        self._init_gliner()
-
-    def _init_gliner(self):
-        """Initialise GLiNER zero-shot NER detector."""
-        try:
-            from gliner_provider import GLiNERDetector
-            self.gliner_detector = GLiNERDetector()
-        except Exception:
-            self.gliner_detector = None
 
     def _init_presidio(self):
         """Initialise Presidio analyzer with spaCy NER and custom AU recognizers."""
@@ -107,7 +102,9 @@ class PIIOrchestrator:
                 StudentNameRecognizer(name_variations=self.regex_detector.name_variations)
             )
 
-        except Exception:
+        except Exception as e:
+            if self.require_ner:
+                raise RuntimeError(f"NER engine (spaCy/Presidio) failed to load: {e}") from e
             # Graceful degradation — Presidio is optional
             self.presidio_analyzer = None
 
@@ -129,20 +126,33 @@ class PIIOrchestrator:
         """
         all_matches: List[PIIMatch] = []
 
-        # 1. Regex detector (always runs)
+        # 1. Regex detector (always runs) — user-entered names, structured PII
         regex_matches = self.regex_detector.detect_pii_in_text(text, page_num)
         all_matches.extend(regex_matches)
 
-        # 2. Presidio (if available) — filter results shorter than 3 chars to
-        #    prevent single-character matches from erasing partial words during redaction
+        # 2. Presidio/spaCy NER (primary name discovery engine)
         if self.presidio_analyzer:
-            presidio_matches = self._run_presidio(text, page_num)
-            all_matches.extend(m for m in presidio_matches if len(m.text) >= 3)
+            ner_matches = self._run_presidio(text, page_num)
+            # Filter very short NER hits
+            ner_matches = [m for m in ner_matches if len(m.text) >= 3]
 
-        # 3. GLiNER (if available) — same length guard
-        if self.gliner_detector:
-            gliner_matches = self.gliner_detector.detect(text, page_num)
-            all_matches.extend(m for m in gliner_matches if len(m.text) >= 3)
+            # For each PERSON entity, generate name variations
+            for m in ner_matches:
+                if 'name' in m.category.lower() or m.category == 'Person':
+                    m.confidence = max(m.confidence, 0.90)
+                    # Generate variations for NER-discovered names
+                    variations, _ = generate_name_variations(m.text, include_nicknames=False)
+                    for var in variations:
+                        if var.lower() != m.text.lower() and len(var) >= 3:
+                            for match in re.finditer(re.escape(var), text, re.IGNORECASE):
+                                line_num = text[:match.start()].count('\n') + 1
+                                all_matches.append(PIIMatch(
+                                    text=match.group(), category="Person name (NER variation)",
+                                    confidence=0.85, page_num=page_num, line_num=line_num,
+                                    context=text[max(0, match.start()-25):match.end()+25],
+                                    source='presidio'
+                                ))
+            all_matches.extend(ner_matches)
 
         # Deduplicate and return
         return self._deduplicate(all_matches)
