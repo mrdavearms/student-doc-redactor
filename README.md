@@ -1,5 +1,9 @@
 # Bulk Redaction Tool
 
+[![latest release](https://img.shields.io/github/v/release/mrdavearms/student-doc-redactor?label=latest&color=brightgreen)](https://github.com/mrdavearms/student-doc-redactor/releases)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](https://github.com/mrdavearms/student-doc-redactor/releases)
+[![python](https://img.shields.io/badge/python-3.13%2B-yellow?logo=python&logoColor=white)](https://www.python.org/downloads/)
+
 **A free, private tool for removing student personal information from assessment documents — before you share them with anyone.**
 
 Built for Australian teachers, psychologists, and support staff who handle sensitive student records. Everything runs on your own computer — Mac or Windows. No accounts. No subscriptions. No data ever leaves your machine.

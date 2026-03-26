@@ -56,7 +56,8 @@
     "publish": {
       "provider": "github",
       "owner": "mrdavearms",
-      "repo": "student-doc-redactor"
+      "repo": "student-doc-redactor",
+      "releaseType": "release"
     },
     "files": [
       "dist/**/*",
