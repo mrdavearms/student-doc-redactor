@@ -71,7 +71,7 @@ class TestOrchestratorBasic:
         )
         orch._run_presidio = lambda text, page_num: [short_match]
         orch.presidio_analyzer = object()  # non-None to trigger presidio path
-        orch.gliner_detector = None  # isolate: only test the length filter
+        # GLiNER removed — only regex + presidio
         matches = orch.detect_pii_in_text("Jo Li lives here.", page_num=1)
         short_ner = [m for m in matches if m.source == "presidio" and len(m.text) < 3]
         assert len(short_ner) == 0, f"Short NER result slipped through: {short_ner}"
@@ -85,7 +85,7 @@ class TestOrchestratorBasic:
         )
         orch._run_presidio = lambda text, page_num: [three_char]
         orch.presidio_analyzer = object()
-        orch.gliner_detector = None  # isolate: prevent GLiNER from deduplicating the match
+        # GLiNER removed — only regex + presidio
         matches = orch.detect_pii_in_text("Ann called the school.", page_num=1)
         ner_ann = [m for m in matches if m.source == "presidio" and m.text == "Ann"]
         assert len(ner_ann) == 1
@@ -179,7 +179,7 @@ class TestPresidioIntegration:
         assert "regex" in sources
 
     def test_graceful_degradation_without_presidio(self):
-        """If Presidio is disabled, orchestrator still works with regex + GLiNER."""
+        """If Presidio is disabled, orchestrator still works with regex only."""
         orch = PIIOrchestrator("Jane Smith")
         orch.presidio_analyzer = None
         matches = orch.detect_pii_in_text("Jane Smith is here.", page_num=1)

@@ -26,7 +26,7 @@ class PIIMatch:
     page_num: int
     line_num: int
     context: str  # Surrounding text for display
-    source: str = 'regex'  # Detection source: 'regex', 'presidio', 'gliner'
+    source: str = 'regex'  # Detection source: 'regex', 'presidio'
     bbox: Tuple[float, float, float, float] = None  # Bounding box coordinates (x0, y0, x1, y1)
 
     @property
