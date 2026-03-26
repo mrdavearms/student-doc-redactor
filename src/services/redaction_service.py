@@ -44,6 +44,7 @@ class DocumentResult:
     verification_failures: List[str] = field(default_factory=list)
     ocr_warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
+    quarantine_path: Optional[Path] = None
 
 
 @dataclass
@@ -279,6 +280,14 @@ class RedactionService:
                         )
                     result.verification_failures = ocr_failures
                     result.success = False
+                    # Quarantine the suspect file
+                    try:
+                        quarantine_path = output_path.with_suffix('.UNVERIFIED.pdf')
+                        output_path.rename(quarantine_path)
+                        result.quarantine_path = quarantine_path
+                        result.output_path = None
+                    except Exception:
+                        pass  # If rename fails, leave the file but still mark as failed
         else:
             logger.add_flagged_file(doc.name, f"Redaction failed: {message}")
             result.error_message = message
