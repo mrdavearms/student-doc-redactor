@@ -102,6 +102,15 @@ class PIIDetector:
     # Student ID pattern (3 uppercase letters + digits)
     STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d{3,}\b'
 
+    # NDIS participant number (9 digits, requires keyword)
+    NDIS_PATTERN = r'(?i)(?:ndis|participant)\s*(?:number|no\.?|#)?\s*:?\s*(\d{9})\b'
+
+    # Australian Business Number (11 digits, requires keyword)
+    ABN_PATTERN = r'(?i)abn\s*:?\s*(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b'
+
+    # Passport number (requires keyword)
+    PASSPORT_PATTERN = r'(?i)passport\s*(?:number|no\.?|#)?\s*:?\s*([A-Z]\d{7})\b'
+
     # DOB label patterns (must precede date)
     DOB_LABELS = [
         r'DOB',
@@ -210,6 +219,11 @@ class PIIDetector:
 
             # Detect organisation names
             matches.extend(self._detect_organisation_names(line, page_num, line_num))
+
+            # Detect NDIS, ABN, passport numbers
+            matches.extend(self._detect_ndis(line, page_num, line_num))
+            matches.extend(self._detect_abn(line, page_num, line_num))
+            matches.extend(self._detect_passport(line, page_num, line_num))
 
         return matches
 
@@ -357,6 +371,39 @@ class PIIDetector:
                         line_num=line_num,
                         context=context
                     ))
+        return matches
+
+    def _detect_ndis(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect NDIS participant numbers (9 digits with keyword)."""
+        matches = []
+        for m in re.finditer(self.NDIS_PATTERN, line):
+            matches.append(PIIMatch(
+                text=m.group(1), category="NDIS number", confidence=0.90,
+                page_num=page_num, line_num=line_num,
+                context=self._get_context(line, m.start(), m.end())
+            ))
+        return matches
+
+    def _detect_abn(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect Australian Business Numbers (11 digits with keyword)."""
+        matches = []
+        for m in re.finditer(self.ABN_PATTERN, line):
+            matches.append(PIIMatch(
+                text=m.group(1), category="ABN", confidence=0.90,
+                page_num=page_num, line_num=line_num,
+                context=self._get_context(line, m.start(), m.end())
+            ))
+        return matches
+
+    def _detect_passport(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect passport numbers (letter + 7 digits with keyword)."""
+        matches = []
+        for m in re.finditer(self.PASSPORT_PATTERN, line):
+            matches.append(PIIMatch(
+                text=m.group(1), category="Passport number", confidence=0.65,
+                page_num=page_num, line_num=line_num,
+                context=self._get_context(line, m.start(), m.end())
+            ))
         return matches
 
     def _detect_contextual_names(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
