@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `source venv/bin/activate && pytest tests/ -v` (257 tests, ~4m30s)
+- **Test**: `source venv/bin/activate && pytest tests/ -v` (272 tests, ~4m30s)
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
 - **Build + publish to GitHub**: `cd desktop && npm run dist:publish` (CI only — requires `GH_TOKEN`)
@@ -31,16 +31,17 @@ The entry point for all PII detection is `PIIOrchestrator`, not `PIIDetector` di
 
 ```
 PIIOrchestrator
-├── PIIDetector          (regex — always runs)
-├── Presidio + spaCy     (NER — runs if installed, graceful degradation if not)
-└── GLiNERDetector       (zero-shot NER — runs if installed, graceful degradation if not)
-      ↓
+├── PIIDetector          (regex — always runs, user-entered names + structured PII)
+├── Presidio + spaCy     (NER-primary — discovers names, generates variations)
+│     ↓
+│   For each PERSON entity → generate_name_variations() → search text
+│     ↓
   _deduplicate()         (same text + page + line → keep highest confidence)
       ↓
   List[PIIMatch]         (sorted by confidence desc)
 ```
 
-All three engines produce `PIIMatch` objects. The orchestrator merges and deduplicates by `(text.lower(), page_num, line_num)`.
+Both engines produce `PIIMatch` objects. The orchestrator merges and deduplicates by `(text.lower(), page_num, line_num)`. NER is the primary name discovery engine — when it finds a name like "Sarah Williams", it generates variations ("Sarah", "Williams", "S. Williams") and searches for those too.
 
 ### Redaction Pipeline
 
@@ -112,7 +113,7 @@ Streamlit shares the same 5 workflow steps (no setup screen). `app.py` routes ba
 | `src/core/pii_orchestrator.py` | **Main detection entry point** — merges all engines |
 | `src/core/pii_detector.py` | Regex engine + `PIIMatch` dataclass definition |
 | `src/core/presidio_recognizers.py` | 6 custom Australian Presidio recognizers |
-| `src/core/gliner_provider.py` | GLiNER zero-shot NER wrapper |
+| `src/core/nickname_map.py` | Curated ~100-entry Australian nickname dictionary with reverse lookup |
 | `src/core/redactor.py` | **Dual-path redaction** (text-layer + OCR image), widget deletion, metadata stripping |
 | `src/core/text_extractor.py` | Text + OCR extraction from PDFs |
 | `src/core/document_converter.py` | LibreOffice Word → PDF conversion |
@@ -197,9 +198,9 @@ variations = [v for v in variations if len(v) >= 3 or v == self.student_name]
 
 The `or v == self.student_name` guard is important for students with short names (e.g. "Jo"). Don't remove it.
 
-### 8. Presidio and GLiNER are optional dependencies
+### 8. Presidio is an optional dependency (but required in bundled app)
 
-Both `_init_presidio()` and `_init_gliner()` catch all exceptions and set the detector to `None`. The app degrades gracefully to regex-only detection. This is by design — don't add hard failures.
+`_init_presidio()` catches all exceptions and sets the analyzer to `None` unless `require_ner=True`. The Streamlit app degrades gracefully to regex-only detection. The bundled desktop app passes `require_ner=True` — if Presidio/spaCy fails to load, it raises `RuntimeError` and the Setup screen shows a blocking error.
 
 ### 9. There are two redaction verification methods
 
@@ -408,18 +409,25 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | Family/parent (contextual) | 0.65 | Medium — inferred from keyword proximity |
 | Parent/family (user-provided) | 0.95 | High — user explicitly named them |
 | Organisation name | 0.95 | High — user-provided, word-level matching with generic word filter |
+| NDIS number | 0.90 | High — 9-digit with keyword guard |
+| ABN | 0.90 | High — 11-digit with keyword guard |
+| Passport number | 0.65 | Medium — letter+7 digits, keyword guard |
+| Student name (nickname) | 0.75 | Medium — bidirectional nickname map |
+| Person name (NER) | 0.90 | High — spaCy PERSON entity |
+| Person name (NER variation) | 0.85 | High — variation of NER-discovered name |
+| Cross-line DOB/Medicare | 0.90 | High — label on previous line |
+| Cross-line contextual name | 0.60 | Medium — family keyword on previous line |
 
 ---
 
 ## Test Structure
 
 ```
-tests/                                # 257 tests total
-├── test_pii_detector.py              # 39 tests: phone, email, address, Medicare, CRN, Student ID, DOB
-├── test_pii_detector_names.py        # 61 tests: name variations, contextual detection, possessives, family
-├── test_pii_orchestrator.py          # 25 tests: orchestrator merge, dedup, multi-engine coordination
+tests/                                # 272 tests total
+├── test_pii_detector.py              # 52 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
+├── test_pii_detector_names.py        # 65 tests: name variations, contextual detection, possessives, family, nicknames
+├── test_pii_orchestrator.py          # 25 tests: orchestrator merge, dedup, NER-primary coordination
 ├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
-├── test_gliner_provider.py           # 12 tests: GLiNER zero-shot NER wrapper
 ├── test_redactor.py                  # 11 tests: text-layer redaction routing, possessive+punctuation, core redact_pdf
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
 ├── test_ocr_redaction.py             # 28 tests: image-only page detection, OCR redaction, word matching
@@ -429,7 +437,10 @@ tests/                                # 257 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_session_state.py             # 2 tests: session state key initialisation
-└── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
+├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
+├── test_integration.py               # 10 tests: end-to-end redaction pipeline (links, bookmarks, structure)
+├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
+└── test_false_positives.py           # 4 tests: false-positive regression tests
 ```
 
 Tests use `sys.path.insert` to locate `src/core/` modules — this is required because the test runner runs from the repo root, not from within `src/`.
@@ -453,7 +464,6 @@ Run with output: `pytest tests/ -v -s`
 - `python-docx>=1.1.0` — Word file handling
 - `presidio-analyzer>=2.2.0` — Microsoft NER framework
 - `spacy>=3.7.0` — NLP backend for Presidio
-- `gliner>=0.2.0` — Zero-shot NER
 
 **`requirements-desktop.txt`** (Desktop app — no Streamlit, adds FastAPI):
 - All of the above minus Streamlit, plus:
@@ -474,7 +484,6 @@ Run with output: `pytest tests/ -v -s`
 
 ### Models (downloaded separately)
 - `en_core_web_lg` — spaCy large English model (`python -m spacy download en_core_web_lg`)
-- `urchade/gliner_multi_pii-v1` — GLiNER model (auto-downloaded on first run, ~10–20s)
 
 ---
 
@@ -510,7 +519,8 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 - **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
 - **Windows support**: COMPLETED (v1.1.0). Installer, bundled Tesseract, platform-aware paths.
 - **Linux**: Not supported. No current plans.
-- **Fuzzy name matching**: Comment in `pii_detector.py` notes this as a future feature.
+- **Fuzzy name matching**: Nickname matching is now implemented via `nickname_map.py`. True fuzzy/edit-distance matching remains a future feature.
+- **GLiNER removed** (March 2026): GLiNER and PyTorch removed for bundle simplification. Two-engine architecture: regex + Presidio/spaCy.
 - **Batch processing** (multiple students at once): Not implemented.
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
 - **`docs/legacy/`**: Contains 6 legacy markdown files moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
