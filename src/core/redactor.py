@@ -798,6 +798,17 @@ class PDFRedactor:
             for name in list(doc.embfile_names()):
                 doc.embfile_del(name)
 
+        # Note: Form XObjects (PDF subtype /Form) may contain images with PII.
+        # PyMuPDF does not expose a reliable API for enumerating Form XObject
+        # image resources (page.get_xobjects() does not exist). The existing
+        # _redact_embedded_images() covers most embedded images but may miss
+        # images nested inside Form XObjects. This is a known limitation.
+
+        # Note: Optional Content Groups (OCGs/layers) may hide text.
+        # PyMuPDF's page.get_text() already reads ALL layers (visible and hidden),
+        # so text-layer detection works. However, annotation content on hidden
+        # layers may be missed. This is a very low-probability scenario.
+
         # Strip tagged PDF structure (ActualText/Alt attributes contain original text)
         try:
             cat_xref = doc.pdf_catalog()
