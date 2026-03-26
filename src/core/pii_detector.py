@@ -51,15 +51,39 @@ _CONTEXTUAL_NAME_EXCLUDE = {
 }
 
 
+def generate_name_variations(name: str, preserve_short_name: str = None) -> list:
+    """Generate name variations for detection. Standalone version for use by orchestrator."""
+    name = name.strip()
+    if not name:
+        return []
+    parts = name.split()
+    variations = [name]
+    if len(parts) >= 2:
+        first, last = parts[0], parts[-1]
+        variations.append(first)
+        variations.append(last)
+        variations.append(f"{first[0]}. {last}")
+        variations.append(f"{first} {last[0]}.")
+        variations.append(f"{first[0]}.{last[0]}.")
+        # Full initials string (e.g. "JS" for "Jane Smith")
+        initials = ''.join(p[0] for p in parts)
+        if len(initials) >= 3:
+            variations.append(initials)
+    # Filter: min 3 chars, but always preserve the original name
+    preserve = preserve_short_name or name
+    variations = [v for v in variations if len(v) >= 3 or v == preserve]
+    return list(dict.fromkeys(v.strip() for v in variations if v.strip()))
+
+
 class PIIDetector:
     """Detects PII in text using pattern matching and contextual analysis"""
 
     # Australian phone number patterns
     PHONE_PATTERNS = [
-        r'\+61\s*[2-478]\s*\d{4}\s*\d{4}',  # +61 2 1234 5678
-        r'0[2-478]\s*\d{4}\s*\d{4}',  # 02 1234 5678
-        r'\(0[2-478]\)\s*\d{4}\s*\d{4}',  # (02) 1234 5678
-        r'04\d{2}\s*\d{3}\s*\d{3}',  # 0412 345 678
+        r'\+61[\s\-]*[2-478][\s\-]*\d{4}[\s\-]*\d{4}',  # +61 2 1234 5678
+        r'0[2-478][\s\-]*\d{4}[\s\-]*\d{4}',  # 02 1234 5678
+        r'\(0[2-478]\)[\s\-]*\d{4}[\s\-]*\d{4}',  # (02) 1234 5678
+        r'04\d{2}[\s\-]*\d{3}[\s\-]*\d{3}',  # 0412 345 678 or 0412-345-678
         r'04\d{8}',  # 0412345678
     ]
 
@@ -67,7 +91,7 @@ class PIIDetector:
     EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 
     # Australian address pattern
-    ADDRESS_PATTERN = r'\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory)\s+\d{4}'
+    ADDRESS_PATTERN = r'\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory)\s+\d{4}'
 
     # Medicare number pattern
     MEDICARE_PATTERN = r'\b\d{4}\s?\d{5}\s?\d\b'
@@ -77,6 +101,15 @@ class PIIDetector:
 
     # Student ID pattern (3 uppercase letters + digits)
     STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d{3,}\b'
+
+    # NDIS participant number (9 digits, requires keyword)
+    NDIS_PATTERN = r'(?i)(?:ndis|participant)\s*(?:number|no\.?|#)?\s*:?\s*(\d{9})\b'
+
+    # Australian Business Number (11 digits, requires keyword)
+    ABN_PATTERN = r'(?i)abn\s*:?\s*(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b'
+
+    # Passport number (requires keyword)
+    PASSPORT_PATTERN = r'(?i)passport\s*(?:number|no\.?|#)?\s*:?\s*([A-Z]\d{7})\b'
 
     # DOB label patterns (must precede date)
     DOB_LABELS = [
@@ -117,7 +150,10 @@ class PIIDetector:
         r'Family member',
         r'Lives with',
         r'Referred by parent',
-        r'Parent/Guardian signature'
+        r'Parent/Guardian signature',
+        r'Stepmother', r'Stepfather', r'Foster\s+parent', r'Foster\s+carer',
+        r'Legal\s+guardian', r'Primary\s+carer', r'Kinship\s+carer',
+        r'Aunt', r'Uncle', r'Grandparent', r'Grandmother', r'Grandfather',
     ]
 
     def __init__(self, student_name: str, parent_names: List[str] = None, family_names: List[str] = None, organisation_names: List[str] = None):
@@ -140,30 +176,7 @@ class PIIDetector:
 
     def _generate_name_variations(self) -> List[str]:
         """Generate variations of the student name (first, last, initials, etc.)"""
-        variations = [self.student_name]
-
-        name_parts = self.student_name.split()
-        if len(name_parts) >= 2:
-            # First name only
-            variations.append(name_parts[0])
-            # Last name only
-            variations.append(name_parts[-1])
-            # First initial + last name (e.g., J. Smith)
-            variations.append(f"{name_parts[0][0]}. {name_parts[-1]}")
-            # First name + last initial (e.g., John S.)
-            variations.append(f"{name_parts[0]} {name_parts[-1][0]}.")
-            # Initials (e.g., J.S., JS)
-            initials = ''.join([part[0] for part in name_parts])
-            variations.append(f"{initials[0]}.{initials[1]}.")
-            variations.append(initials)
-
-        # Add fuzzy variations (common misspellings/variations)
-        # For now, just exact matches - fuzzy logic can be added later
-
-        # Filter out variations too short to be reliable (min 3 chars)
-        # Always preserve the student's full name regardless of length
-        variations = [v for v in variations if len(v) >= 3 or v == self.student_name]
-        return variations
+        return generate_name_variations(self.student_name, preserve_short_name=self.student_name)
 
     def detect_pii_in_text(self, text: str, page_num: int) -> List[PIIMatch]:
         """
@@ -209,6 +222,11 @@ class PIIDetector:
 
             # Detect organisation names
             matches.extend(self._detect_organisation_names(line, page_num, line_num))
+
+            # Detect NDIS, ABN, passport numbers
+            matches.extend(self._detect_ndis(line, page_num, line_num))
+            matches.extend(self._detect_abn(line, page_num, line_num))
+            matches.extend(self._detect_passport(line, page_num, line_num))
 
         return matches
 
@@ -358,6 +376,39 @@ class PIIDetector:
                     ))
         return matches
 
+    def _detect_ndis(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect NDIS participant numbers (9 digits with keyword)."""
+        matches = []
+        for m in re.finditer(self.NDIS_PATTERN, line):
+            matches.append(PIIMatch(
+                text=m.group(1), category="NDIS number", confidence=0.90,
+                page_num=page_num, line_num=line_num,
+                context=self._get_context(line, m.start(), m.end())
+            ))
+        return matches
+
+    def _detect_abn(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect Australian Business Numbers (11 digits with keyword)."""
+        matches = []
+        for m in re.finditer(self.ABN_PATTERN, line):
+            matches.append(PIIMatch(
+                text=m.group(1), category="ABN", confidence=0.90,
+                page_num=page_num, line_num=line_num,
+                context=self._get_context(line, m.start(), m.end())
+            ))
+        return matches
+
+    def _detect_passport(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
+        """Detect passport numbers (letter + 7 digits with keyword)."""
+        matches = []
+        for m in re.finditer(self.PASSPORT_PATTERN, line):
+            matches.append(PIIMatch(
+                text=m.group(1), category="Passport number", confidence=0.65,
+                page_num=page_num, line_num=line_num,
+                context=self._get_context(line, m.start(), m.end())
+            ))
+        return matches
+
     def _detect_contextual_names(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
         """Detect names appearing after contextual keywords"""
         matches = []
@@ -366,8 +417,8 @@ class PIIDetector:
         for keyword in self.FAMILY_KEYWORDS:
             category = 'Parent/Guardian' if any(k in keyword.lower() for k in ['mother', 'father', 'parent', 'mum', 'dad', 'guardian', 'carer', 'partner']) else 'Family member'
 
-            # Name capture pattern: 1-2 capitalised words
-            _name_pat = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'
+            # Name capture pattern: 1-2 capitalised words (or ALL-CAPS words)
+            _name_pat = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?|[A-Z]{2,}(?:\s+[A-Z]{2,})?)'
 
             # Three syntactic patterns for how documents reference family members:
             #   1. "Father: Nick" or "Father Nick"  (colon/space)

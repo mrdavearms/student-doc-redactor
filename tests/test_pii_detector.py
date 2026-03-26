@@ -43,6 +43,10 @@ class TestPhoneDetection:
         matches = self._phone_matches("Reference number: 1234567890")
         assert len(matches) == 0
 
+    def test_mobile_with_dashes_detected(self):
+        matches = self._phone_matches("Call 0412-345-678 for pickup")
+        assert len(matches) >= 1
+
 
 class TestEmailDetection:
     def setup_method(self):
@@ -91,6 +95,14 @@ class TestAddressDetection:
     def test_text_without_state_not_matched(self):
         matches = self._address_matches("123 Some Place without any proper suburb here")
         assert len(matches) == 0
+
+    def test_address_close_detected(self):
+        matches = self._address_matches("Lives at 5 Rosemary Close, Richmond VIC 3121")
+        assert len(matches) >= 1
+
+    def test_address_circuit_detected(self):
+        matches = self._address_matches("Address: 12 Sunset Circuit, Cairns QLD 4870")
+        assert len(matches) >= 1
 
 
 class TestMedicareDetection:
@@ -228,6 +240,51 @@ class TestDOBDetection:
         matches = self._dob_matches("Date of birth: 15 Jan 2010")
         assert len(matches) == 1
         assert matches[0].category == 'Date of birth'
+
+
+class TestNDISDetection:
+    def setup_method(self):
+        self.detector = PIIDetector("Jane Smith")
+
+    def _ndis_matches(self, line):
+        return [m for m in self.detector.detect_pii_in_text(line, 1) if m.category == "NDIS number"]
+
+    def test_ndis_with_keyword_detected(self):
+        matches = self._ndis_matches("NDIS number: 123456789")
+        assert len(matches) == 1
+        assert matches[0].text == "123456789"
+
+    def test_ndis_participant_keyword_detected(self):
+        matches = self._ndis_matches("Participant No. 987654321")
+        assert len(matches) == 1
+
+    def test_nine_digits_alone_not_detected(self):
+        matches = self._ndis_matches("Reference 123456789 received")
+        assert len(matches) == 0
+
+    def test_eight_digits_with_keyword_not_detected(self):
+        matches = self._ndis_matches("NDIS number: 12345678")
+        assert len(matches) == 0
+
+
+class TestABNDetection:
+    def setup_method(self):
+        self.detector = PIIDetector("Jane Smith")
+
+    def _abn_matches(self, line):
+        return [m for m in self.detector.detect_pii_in_text(line, 1) if m.category == "ABN"]
+
+    def test_abn_with_keyword_detected(self):
+        matches = self._abn_matches("ABN: 51 824 753 556")
+        assert len(matches) == 1
+
+    def test_abn_no_spaces_detected(self):
+        matches = self._abn_matches("ABN: 51824753556")
+        assert len(matches) == 1
+
+    def test_eleven_digits_without_keyword_not_detected(self):
+        matches = self._abn_matches("Number 51824753556 here")
+        assert len(matches) == 0
 
 
 class TestIntegration:
