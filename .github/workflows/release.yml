@@ -187,4 +187,4 @@ jobs:
             d
           }" /tmp/release-notes.md
 
-          gh release edit "v${VERSION}" --notes-file /tmp/release-notes.md
+          gh release edit "v${VERSION}" --notes-file /tmp/release-notes.md --draft=false
