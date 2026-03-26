@@ -121,6 +121,7 @@ class PDFRedactor:
             # Apply redactions page by page
             ocr_redacted_count = 0
             image_redacted_count = 0
+            all_redacted_texts = set()
             for page_num, items in redactions_by_page.items():
                 page = doc[page_num - 1]  # Convert to 0-indexed
 
@@ -144,26 +145,28 @@ class PDFRedactor:
 
                 # Stage 2: Scan every embedded image on this page for PII.
                 # Runs on ALL pages — text-layer, image-only, and hybrid.
-                # This catches PII in embedded screenshots, email printouts,
-                # logos with names, etc. that text-layer redaction cannot reach.
                 image_redacted_count += self._redact_embedded_images(page, items)
 
-                # Stage 3: Delete form widgets whose values contain redacted PII.
-                # apply_redactions() only removes content-stream text; AcroForm
-                # widget field values live in annotation dictionaries and survive
-                # redaction.  Deleting the widget is the only reliable way to
-                # remove the data.
-                redacted_texts = [item.text.lower() for item in items]
-                self._delete_pii_widgets(page, redacted_texts)
+                # Collect all redacted texts for cross-page cleanup
+                all_redacted_texts.update(item.text for item in items)
 
             # ── Stage 4: Signature image detection ──
             # Runs on EVERY page, not just pages with detected PII.
-            # Handwritten signatures are PII that can't be detected by text/NER —
-            # they're embedded images with distinctive visual characteristics
-            # (wide aspect ratio, sparse ink, small physical size).
             signature_count = 0
             for page in doc:
                 signature_count += self._redact_signature_images(page)
+
+            # ── Stage 5: Cleanup ALL pages — widgets, links, and annotations ──
+            # Runs on EVERY page to catch PII in form fields, link URIs,
+            # and annotation text on pages without detected PII items.
+            all_texts_list = list(all_redacted_texts)
+            for page in doc:
+                self._delete_pii_widgets(page, [t.lower() for t in all_texts_list])
+                self._delete_pii_links(page, all_texts_list)
+                self._delete_pii_annotations(page, all_texts_list)
+
+            # ── Stage 6: Bookmarks ──
+            self._redact_bookmarks(doc, all_texts_list)
 
             # Strip metadata before saving
             self._strip_metadata(doc)
@@ -685,6 +688,56 @@ class PDFRedactor:
             except Exception:
                 pass  # Widget already removed or page changed
 
+    def _delete_pii_links(self, page: fitz.Page, redacted_texts: list):
+        """Remove link annotations whose URIs contain PII."""
+        links = page.get_links()
+        for link in links:
+            uri = link.get("uri", "")
+            if uri:
+                uri_lower = uri.lower()
+                for pii_text in redacted_texts:
+                    if pii_text.lower() in uri_lower:
+                        page.delete_link(link)
+                        break
+
+    def _delete_pii_annotations(self, page: fitz.Page, redacted_texts: list):
+        """Remove non-widget annotations whose text fields contain PII."""
+        annots = list(page.annots()) if page.annots() else []
+        for annot in annots:
+            if annot.type[0] == fitz.PDF_ANNOT_WIDGET:
+                continue
+            info = annot.info
+            text_fields = [
+                info.get("content", ""),
+                info.get("title", ""),
+            ]
+            for field_text in text_fields:
+                if field_text:
+                    field_lower = field_text.lower()
+                    for pii_text in redacted_texts:
+                        if pii_text.lower() in field_lower:
+                            page.delete_annot(annot)
+                            break
+                    else:
+                        continue
+                    break
+
+    def _redact_bookmarks(self, doc: fitz.Document, redacted_texts: list):
+        """Replace PII in bookmark/outline titles with [REDACTED]."""
+        toc = doc.get_toc(simple=False)
+        if not toc:
+            return
+        modified = False
+        for entry in toc:
+            title = entry[1]
+            for pii_text in redacted_texts:
+                if pii_text.lower() in title.lower():
+                    pattern = re.compile(re.escape(pii_text), re.IGNORECASE)
+                    entry[1] = pattern.sub("[REDACTED]", entry[1])
+                    modified = True
+        if modified:
+            doc.set_toc(toc)
+
     def verify_redaction(self, pdf_path: Path, original_text: str) -> Tuple[bool, str]:
         """
         Verify that text has been successfully redacted
@@ -744,6 +797,24 @@ class PDFRedactor:
         if hasattr(doc, 'embfile_count') and doc.embfile_count() > 0:
             for name in list(doc.embfile_names()):
                 doc.embfile_del(name)
+
+        # Strip tagged PDF structure (ActualText/Alt attributes contain original text)
+        try:
+            cat_xref = doc.pdf_catalog()
+            doc.xref_set_key(cat_xref, "MarkInfo", "null")
+            doc.xref_set_key(cat_xref, "StructTreeRoot", "null")
+        except Exception:
+            pass  # Some PDFs may not have a catalog
+
+        # Strip Names dictionary (contains JavaScript, named destinations)
+        # Safe for redacted copies — the output doesn't need JS or named dests
+        try:
+            cat_xref = doc.pdf_catalog()
+            names_type, _ = doc.xref_get_key(cat_xref, "Names")
+            if names_type != "null":
+                doc.xref_set_key(cat_xref, "Names", "null")
+        except Exception:
+            pass
 
     def verify_redaction_ocr(self, pdf_path: Path, redacted_texts: List[str]) -> Tuple[bool, List[str]]:
         """
