@@ -4,6 +4,7 @@ Extracts text from PDFs using native text layer and OCR fallback.
 """
 
 import os
+import unicodedata
 
 import fitz  # PyMuPDF
 from pathlib import Path
@@ -11,6 +12,14 @@ from typing import Dict, List, Tuple
 import pytesseract
 from PIL import Image
 import io
+
+def _normalise_text(text: str) -> str:
+    """NFKC normalise and replace smart quotes with ASCII equivalents."""
+    text = unicodedata.normalize('NFKC', text)
+    text = text.replace('\u2018', "'").replace('\u2019', "'")
+    text = text.replace('\u201C', '"').replace('\u201D', '"')
+    return text
+
 
 class TextExtractor:
     """Extracts text from PDF documents with OCR support"""
@@ -92,7 +101,7 @@ class TextExtractor:
             Dictionary with page text and metadata
         """
         # Try native text extraction first
-        text = page.get_text()
+        text = _normalise_text(page.get_text())
         blocks = page.get_text("dict")["blocks"]
 
         # Extract form widget values (AcroForm fields live outside the content stream)
@@ -166,18 +175,28 @@ class TextExtractor:
             # Run OCR
             ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
 
-            # Extract text and calculate average confidence
-            text_parts = []
+            # Extract text with line structure preserved
             confidences = []
-
+            current_line_key = None
+            lines_out = []
+            current_words = []
             for i, word in enumerate(ocr_data['text']):
-                if word.strip():
-                    text_parts.append(word)
-                    conf = int(ocr_data['conf'][i])
-                    if conf > 0:
-                        confidences.append(conf)
-
-            text = ' '.join(text_parts)
+                if int(ocr_data['conf'][i]) < 0 or not str(word).strip():
+                    continue
+                conf = int(ocr_data['conf'][i])
+                if conf > 0:
+                    confidences.append(conf)
+                line_key = (ocr_data['block_num'][i], ocr_data['line_num'][i])
+                if line_key != current_line_key:
+                    if current_words:
+                        lines_out.append(' '.join(current_words))
+                    current_words = [str(word)]
+                    current_line_key = line_key
+                else:
+                    current_words.append(str(word))
+            if current_words:
+                lines_out.append(' '.join(current_words))
+            text = _normalise_text('\n'.join(lines_out))
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0
             confidence = avg_confidence / 100.0  # Convert to 0-1 scale
 
