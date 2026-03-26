@@ -4,9 +4,18 @@ Detects personally identifiable information using regex patterns and contextual 
 """
 
 import re
+import unicodedata
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 from nickname_map import NICKNAME_MAP, REVERSE_NICKNAME_MAP
+
+
+def _normalise_text(text: str) -> str:
+    """NFKC normalise and replace smart quotes with ASCII equivalents."""
+    text = unicodedata.normalize('NFKC', text)
+    text = text.replace('\u2018', "'").replace('\u2019', "'")
+    text = text.replace('\u201C', '"').replace('\u201D', '"')
+    return text
 
 @dataclass
 class PIIMatch:
@@ -233,6 +242,9 @@ class PIIDetector:
             List of PIIMatch objects
         """
         matches = []
+
+        # Normalise input text (handles smart quotes, ligatures, NFKC decomposition)
+        text = _normalise_text(text)
 
         lines = text.split('\n')
         for line_idx, line in enumerate(lines):
