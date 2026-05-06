@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import { friendlyError } from '../lib/errorMessage';
 import type { DependencyStatus } from '../types';
 
 export default function ConversionStatus() {
@@ -23,7 +24,7 @@ export default function ConversionStatus() {
 
   // Check dependencies on mount
   useEffect(() => {
-    api.checkDependencies().then(setDeps).catch((e) => setError(e.message));
+    api.checkDependencies().then(setDeps).catch((e) => setError(friendlyError(e)));
   }, [setError]);
 
   // Process folder on mount (if not already done)
@@ -35,7 +36,7 @@ export default function ConversionStatus() {
     api.processFolder(folderPath, { signal: ctrl.signal })
       .then((r) => setConversionResults(r))
       .catch((e) => {
-        if (e.name !== 'AbortError') setError(e.message);
+        if (e.name !== 'AbortError') setError(friendlyError(e));
       })
       .finally(() => setProcessing(false));
     return () => ctrl.abort();
@@ -64,7 +65,7 @@ export default function ConversionStatus() {
       setDetectionResults(detection);
       navigateTo('document_review');
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setLoading(false);
     }

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, ShieldCheck, FolderOpen, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
 
@@ -86,7 +87,7 @@ export default function FinalConfirmation() {
       setRedactionResults(results);
       navigateTo('completion');
     } catch (e: any) {
-      if (e.name !== 'AbortError') setError(e.message);
+      if (e.name !== 'AbortError') setError(friendlyError(e));
     } finally {
       setRedacting(false);
     }
