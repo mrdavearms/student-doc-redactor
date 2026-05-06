@@ -11,6 +11,8 @@
     "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview",
     "dist:mac": "npm run build && electron-builder --mac --arm64",
     "dist:win": "npm run build && electron-builder --win --x64",
@@ -44,6 +46,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1",
+    "vitest": "^2.1.9",
     "wait-on": "^9.0.4"
   },
   "build": {
@@ -67,12 +70,16 @@
       {
         "from": "../backend",
         "to": "app/backend",
-        "filter": ["**/*.py"]
+        "filter": [
+          "**/*.py"
+        ]
       },
       {
         "from": "../src",
         "to": "app/src",
-        "filter": ["**/*.py"]
+        "filter": [
+          "**/*.py"
+        ]
       },
       {
         "from": "../bundled-python",
@@ -87,7 +94,12 @@
       "icon": "assets/icon.icns",
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
@@ -95,16 +107,28 @@
     },
     "dmg": {
       "title": "Redaction Tool ${version}",
-
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
