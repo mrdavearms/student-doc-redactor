@@ -216,8 +216,12 @@ useEffect(() => {
     })
     .catch((err) => {
       if (err instanceof BackendUnreachableError) {
+        // Backend isn't responding — banner will appear via store flag,
+        // health-poll effect picks up recovery.
         setBackendReachable(false);
       } else {
+        // Unknown error from a successful HTTP response — likely a backend
+        // bug or schema mismatch. Log and continue; don't block the user.
         console.warn('Dep check failed:', err.message);
       }
     })
@@ -644,6 +648,16 @@ describe('friendlyError', () => {
     expect(friendlyError(null)).toMatch(/something went wrong/i);
     expect(friendlyError(undefined)).toMatch(/something went wrong/i);
   });
+
+  it('does not confuse "Folder not found" with the file-not-found pattern', () => {
+    // Both patterns are case-insensitive substring matches; this guards
+    // against a refactor that accidentally widens "file not found" to
+    // also catch "folder not found".
+    expect(friendlyError(new Error('Folder not found: /tmp/x')))
+      .toMatch(/folder couldn't be found/i);
+    expect(friendlyError(new Error('Folder not found: /tmp/x')))
+      .not.toMatch(/files couldn't be opened/i);
+  });
 });
 ```
 
@@ -694,7 +708,7 @@ export function friendlyError(err: unknown): string {
 cd desktop && npm test
 ```
 
-Expected: all 8 test cases PASS.
+Expected: all 9 test cases PASS.
 
 ### Task 3.3: Replace `setError(e.message)` call sites with `friendlyError`
 
@@ -1015,28 +1029,40 @@ In the `create<AppState>` body, after `setRedactionResults`, add:
 
 - [ ] **Step 1: Add the post-cancel state and imports**
 
-Add to existing imports at the top:
+Edit the existing `lucide-react` import line (line 3 of `FinalConfirmation.tsx`):
 
 ```tsx
-import { Trash2, FolderOpen as FolderOpenIcon } from 'lucide-react';
+// Before:
+import { ArrowLeft, ShieldCheck, FolderOpen, Search } from 'lucide-react';
+// After:
+import { ArrowLeft, ShieldCheck, FolderOpen, Search, Trash2 } from 'lucide-react';
 ```
 
-(`FolderOpen` is already imported — alias the second one.)
+(Do NOT add a second `lucide-react` import line — duplicate-import lint warning. Use `FolderOpen` directly without aliasing.)
 
 Inside the `FinalConfirmation` function, alongside the existing `useState` calls, add:
 
 ```tsx
 const [cancelled, setCancelled] = useState(false);
-const [partialFiles, setPartialFiles] = useState<string[]>([]);
+const [partialFiles, setPartialFiles] = useState<string[] | null>(null);
 const [cleaningUp, setCleaningUp] = useState(false);
 const [cleanupDone, setCleanupDone] = useState(false);
 ```
 
-Pull `setLastOutputPath` and `lastOutputPath` from the store (alongside the existing destructured fields):
+(`partialFiles === null` means we haven't loaded the list yet; `[]` means loaded and none found; `[...]` means loaded with files. This three-state model lets us show a "Checking what was written..." spinner during the 1500ms backend-finish-up wait.)
+
+Extend the existing destructuring at the top of the function (currently lines 10–14: `const { detectionResults, userSelections, folderPath, studentName, parentNames, familyNames, organisationNames, redactHeaderFooter, navigateTo, setRedactionResults, setError, } = useStore();`) by adding `lastOutputPath` and `setLastOutputPath` to the field list:
 
 ```tsx
-const { /* existing fields */, lastOutputPath, setLastOutputPath } = useStore();
+const {
+  detectionResults, userSelections, folderPath, studentName,
+  parentNames, familyNames, organisationNames, redactHeaderFooter,
+  navigateTo, setRedactionResults, setError,
+  lastOutputPath, setLastOutputPath,
+} = useStore();
 ```
+
+Verify `setError` is still in the list — the cleanup handler in Step 4 needs it.
 
 - [ ] **Step 2: Persist the resolved output path before redaction starts**
 
@@ -1060,15 +1086,20 @@ onClick={async () => {
   }
   abortRef.current?.abort();
   setRedacting(false);
+  setCancelled(true);
 
-  // Surface what's already on disk
+  // The backend continues running the current document synchronously after
+  // the HTTP abort — wait briefly so it can finish writing before we list.
+  // Otherwise the user might see N files listed and then an N+1th appears
+  // moments later.
+  await new Promise((r) => setTimeout(r, 1500));
+
   try {
     const list = await api.cleanupList(lastOutputPath);
     setPartialFiles(list.files);
   } catch {
     setPartialFiles([]);
   }
-  setCancelled(true);
 }}
 ```
 
@@ -1078,19 +1109,22 @@ Inside the `FinalConfirmation` function body, immediately before the existing `i
 
 ```tsx
 if (cancelled) {
-  const fileCount = partialFiles.length;
+  const isLoading = partialFiles === null;
+  const fileCount = partialFiles?.length ?? 0;
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Cancelled</h2>
         <p className="text-sm text-slate-400 mt-1">
-          {fileCount === 0
+          {isLoading
+            ? "Checking what was written..."
+            : fileCount === 0
             ? "Redaction was cancelled before any files were written."
             : `${fileCount} file${fileCount === 1 ? '' : 's'} ${fileCount === 1 ? 'was' : 'were'} redacted before stopping.`}
         </p>
       </div>
 
-      {fileCount > 0 && (
+      {!isLoading && fileCount > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-2">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Partial output</p>
           <ul className="text-xs text-slate-500 space-y-0.5 max-h-48 overflow-y-auto">
@@ -1341,13 +1375,51 @@ cd desktop && npm run build
 
 Expected: no errors.
 
-### Task 5.5: Commit Phase 5
+### Task 5.5: Handle the new screen in Sidebar's step indicator
+
+**Files:**
+- Modify: `desktop/src/components/Sidebar.tsx`
+
+`Sidebar.tsx` line 28 does `const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);`. With `currentScreen === 'no_pii_found'` this returns `-1`, which breaks the active/completed indicator (no item highlighted, nothing marked completed). Map the terminal screen to the same step as `document_review` for indicator purposes.
+
+- [ ] **Step 1: Map `no_pii_found` to `document_review` for indicator lookup**
+
+In `desktop/src/components/Sidebar.tsx`, find the line:
+
+```tsx
+const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);
+```
+
+Replace with:
+
+```tsx
+// Treat the no-PII terminal state as part of step 3 (document review)
+// for indicator purposes — it's a clean terminal, not a wizard step.
+const indicatorScreen = currentScreen === 'no_pii_found' ? 'document_review' : currentScreen;
+const currentIdx = SCREENS.findIndex((s) => s.key === indicatorScreen);
+```
+
+Then update the `isActive` check (around line 58) to use `indicatorScreen`:
+
+```tsx
+const isActive = screen.key === indicatorScreen;
+```
+
+- [ ] **Step 2: Verify build**
+
+```bash
+cd desktop && npm run build
+```
+
+Expected: no errors. The Sidebar now treats `no_pii_found` as visually equivalent to `document_review` (step 3 highlighted, steps 1–2 completed).
+
+### Task 5.6: Commit Phase 5
 
 - [ ] **Step 1: Commit**
 
 ```bash
 cd "/Users/davidarmstrong/Antigravity/redaction tool"
-git add desktop/src/types.ts desktop/src/pages/NoPiiFound.tsx desktop/src/App.tsx desktop/src/pages/ConversionStatus.tsx
+git add desktop/src/types.ts desktop/src/pages/NoPiiFound.tsx desktop/src/App.tsx desktop/src/pages/ConversionStatus.tsx desktop/src/components/Sidebar.tsx
 git commit -m "feat(desktop): clean terminal state when no PII is detected
 
 When detection returns zero matches across every document, route to a
@@ -1390,7 +1462,7 @@ On a fresh launch where the backend is killed, click Check Again on the setup sc
 
 - [ ] **Step 4: Error message mapping (Fix 4)**
 
-Trigger one mapped error: in the wizard, after detection, manually delete one of the source PDFs from disk, then click "Create Redacted Documents". The toast should show the friendly "files couldn't be opened" text, NOT a raw "File not found: ..." string. Run `cd desktop && npm test` to confirm all 8 mapper test cases still pass.
+Trigger one mapped error: in the wizard, after detection, manually delete one of the source PDFs from disk, then click "Create Redacted Documents". The toast should show the friendly "files couldn't be opened" text, NOT a raw "File not found: ..." string. Run `cd desktop && npm test` to confirm all 9 mapper test cases still pass.
 
 - [ ] **Step 5: Cancel cleanup (Fix 5)**
 
