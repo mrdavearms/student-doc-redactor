@@ -59,6 +59,10 @@ interface AppState {
   error: string | null;
   setError: (error: string | null) => void;
 
+  // Backend reachability (false ⇒ show banner, start polling)
+  backendReachable: boolean;
+  setBackendReachable: (reachable: boolean) => void;
+
   // Reset
   reset: () => void;
 }
@@ -80,6 +84,7 @@ const initialState = {
   loading: false,
   loadingMessage: '',
   error: null,
+  backendReachable: true,
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -137,6 +142,8 @@ export const useStore = create<AppState>((set) => ({
   setLoading: (loading, message = '') => set({ loading, loadingMessage: message }),
 
   setError: (error) => set({ error }),
+
+  setBackendReachable: (reachable) => set({ backendReachable: reachable }),
 
   reset: () => set(initialState),
 }));

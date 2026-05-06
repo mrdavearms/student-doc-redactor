@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { FolderOpen, User, Users, Building, ArrowRight, Search } from 'lucide-react';
 import { useStore } from '../store';
-import { api } from '../api';
+import { api, BackendUnreachableError } from '../api';
 import HelpTip from '../components/HelpTip';
 
 export default function FolderSelection() {
@@ -25,8 +25,13 @@ export default function FolderSelection() {
     try {
       const res = await api.validateFolder(path.trim());
       setFolderValid(res.exists && res.is_directory);
-    } catch {
-      setFolderValid(false);
+    } catch (e) {
+      if (e instanceof BackendUnreachableError) {
+        useStore.getState().setBackendReachable(false);
+        // Leave folderValid as-is so the false-negative message doesn't render.
+      } else {
+        setFolderValid(false);
+      }
     } finally {
       setValidating(false);
     }

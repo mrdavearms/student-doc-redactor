@@ -4,11 +4,24 @@
 
 const BASE = 'http://127.0.0.1:8765';
 
+export class BackendUnreachableError extends Error {
+  constructor() {
+    super('Backend not reachable');
+    this.name = 'BackendUnreachableError';
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    throw new BackendUnreachableError();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(body.detail || `HTTP ${res.status}`);

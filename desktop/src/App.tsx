@@ -3,7 +3,7 @@ import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
 import { useStore } from './store';
 import { useUpdater } from './hooks/useUpdater';
-import { api } from './api';
+import { api, BackendUnreachableError } from './api';
 import Setup from './pages/Setup';
 import FolderSelection from './pages/FolderSelection';
 import ConversionStatus from './pages/ConversionStatus';
@@ -18,6 +18,8 @@ function App() {
   const setError = useStore((s) => s.setError);
   const { updateState, checkForUpdates, restartAndInstall, dismiss } = useUpdater();
   const [depsChecked, setDepsChecked] = useState(false);
+  const backendReachable = useStore((s) => s.backendReachable);
+  const setBackendReachable = useStore((s) => s.setBackendReachable);
 
   // On mount: check dependencies and redirect to setup if LibreOffice is missing
   useEffect(() => {
@@ -28,11 +30,28 @@ function App() {
         }
       })
       .catch((err) => {
-        // Backend not ready yet — don't redirect, let the app load normally
-        console.warn('Dep check failed (backend may still be starting):', err.message);
+        if (err instanceof BackendUnreachableError) {
+          setBackendReachable(false);
+        } else {
+          console.warn('Dep check failed:', err.message);
+        }
       })
       .finally(() => setDepsChecked(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll /api/health every 5s while the backend is unreachable; clear flag on recovery.
+  useEffect(() => {
+    if (backendReachable) return;
+    const interval = setInterval(async () => {
+      try {
+        await api.health();
+        setBackendReachable(true);
+      } catch {
+        // Still down; keep polling
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [backendReachable, setBackendReachable]);
 
   const renderScreen = () => {
     switch (currentScreen) {
@@ -55,6 +74,14 @@ function App() {
         onRestart={restartAndInstall}
         onDismiss={dismiss}
       />
+
+      {!backendReachable && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+          <p className="text-sm text-amber-800">
+            The redaction engine isn&apos;t responding. Please wait a moment, or restart the app if this persists.
+          </p>
+        </div>
+      )}
 
       {/* Global error toast */}
       {error && (
