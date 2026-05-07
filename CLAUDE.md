@@ -15,7 +15,8 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `source venv/bin/activate && pytest tests/ -v` (272 tests, ~4m30s)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (292 tests, ~4m30s)
+  Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
 - **Build + publish to GitHub**: `cd desktop && npm run dist:publish` (CI only — requires `GH_TOKEN`)
@@ -459,8 +460,9 @@ Tests use `sys.path.insert` to locate `src/core/` modules — this is required b
 
 **OCR redaction tests** (`test_ocr_redaction.py`) mock `pytesseract.image_to_data` to return controlled word bounding boxes, avoiding a hard dependency on Tesseract being installed in the test environment. They test the matching logic (cleaned vs exact, possessives, email/URL handling) and the page-type routing (text-layer vs OCR path).
 
-Run a single test file: `pytest tests/test_pii_detector.py -v`
-Run with output: `pytest tests/ -v -s`
+Run a single test file: `venv/bin/python3.13 -m pytest tests/test_pii_detector.py -v`
+Run with output: `venv/bin/python3.13 -m pytest tests/ -v -s`
+Backend API tests use FastAPI's TestClient: `from fastapi.testclient import TestClient` — available in the existing venv, no extra install needed.
 
 ---
 
@@ -519,14 +521,17 @@ Run with output: `pytest tests/ -v -s`
 2. **build-windows** (windows-latest): Bundles Python + Tesseract, builds `.exe` via electron-builder
 3. **release-notes** (runs after both builds): Auto-generates teacher-friendly release notes with download links, setup guidance, categorised changelog, and collapsed auto-updater files
 
-electron-builder uses `--publish always` to create a draft GitHub Release and upload assets. The release-notes job stamps the body. You still need to manually publish the draft.
+electron-builder uses `--publish always` to create a draft GitHub Release and upload assets. The `release-notes` job stamps the body and then runs `gh release edit --draft=false`, so the release **publishes automatically** — no manual step required.
 
 - **Do NOT push tags to trigger builds unless code is merged to `main` first.** Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- **Pushing a `v*` tag via Bash requires bypass permissions** — the tool's classifier blocks tag pushes that trigger public releases.
 - `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed).
 
 ### Auto-Update
 
 The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` hook + `UpdateBanner.tsx` component handle the UX. Update metadata (`.yml` and `.blockmap` files) are published alongside installers.
+
+**ESLint baseline:** The project has 7 pre-existing ESLint errors in `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, and `Walkthrough.tsx`. New code should not increase this count, but these errors are not your responsibility to fix unless you're already touching those files.
 
 ---
 
