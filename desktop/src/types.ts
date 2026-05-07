@@ -4,6 +4,7 @@ export type Screen =
   | 'folder_selection'
   | 'conversion_status'
   | 'document_review'
+  | 'no_pii_found'
   | 'final_confirmation'
   | 'completion';
 

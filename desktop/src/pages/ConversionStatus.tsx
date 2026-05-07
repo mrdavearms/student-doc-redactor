@@ -63,7 +63,12 @@ export default function ConversionStatus() {
       });
 
       setDetectionResults(detection);
-      navigateTo('document_review');
+      const totalMatches = detection.documents.reduce((sum, d) => sum + d.matches.length, 0);
+      if (totalMatches === 0) {
+        navigateTo('no_pii_found');
+      } else {
+        navigateTo('document_review');
+      }
     } catch (e: any) {
       setError(friendlyError(e));
     } finally {

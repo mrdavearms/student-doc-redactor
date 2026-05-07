@@ -10,6 +10,7 @@ import ConversionStatus from './pages/ConversionStatus';
 import DocumentReview from './pages/DocumentReview';
 import FinalConfirmation from './pages/FinalConfirmation';
 import Completion from './pages/Completion';
+import NoPiiFound from './pages/NoPiiFound';
 
 function App() {
   const currentScreen = useStore((s) => s.currentScreen);
@@ -59,6 +60,7 @@ function App() {
       case 'folder_selection':   return <FolderSelection />;
       case 'conversion_status':  return <ConversionStatus />;
       case 'document_review':    return <DocumentReview />;
+      case 'no_pii_found':       return <NoPiiFound />;
       case 'final_confirmation': return <FinalConfirmation />;
       case 'completion':         return <Completion />;
     }
