@@ -14,6 +14,7 @@ const ICONS: Record<Screen, React.ReactNode> = {
   folder_selection: <FolderOpen size={18} />,
   conversion_status: <RefreshCw size={18} />,
   document_review: <Search size={18} />,
+  no_pii_found: <Search size={18} />,
   final_confirmation: <ShieldCheck size={18} />,
   completion: <PartyPopper size={18} />,
 };
@@ -25,7 +26,8 @@ interface SidebarProps {
 
 export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps) {
   const currentScreen = useStore((s) => s.currentScreen);
-  const currentIdx = SCREENS.findIndex((s) => s.key === currentScreen);
+  const effectiveScreen: Screen = currentScreen === 'no_pii_found' ? 'document_review' : currentScreen;
+  const currentIdx = SCREENS.findIndex((s) => s.key === effectiveScreen);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -55,7 +57,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
       <nav className="flex-1 px-4 py-6">
         <ul className="space-y-1">
           {SCREENS.map((screen, idx) => {
-            const isActive = screen.key === currentScreen;
+            const isActive = screen.key === effectiveScreen;
             const isCompleted = idx < currentIdx;
             const isFuture = idx > currentIdx;
 

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, FolderOpen, Search } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, FolderOpen, Search, Trash2 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
 
@@ -11,12 +12,17 @@ export default function FinalConfirmation() {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
     navigateTo, setRedactionResults, setError,
+    lastOutputPath, setLastOutputPath,
   } = useStore();
 
   const [outputMode, setOutputMode] = useState<'default' | 'custom'>('default');
   const [customPath, setCustomPath] = useState('');
   const [redacting, setRedacting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const [cancelled, setCancelled] = useState(false);
+  const [partialFiles, setPartialFiles] = useState<string[] | null>(null);
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [cleanupDone, setCleanupDone] = useState(false);
 
   // Clear any stale errors when this screen mounts
   useEffect(() => {
@@ -52,6 +58,10 @@ export default function FinalConfirmation() {
 
   const handleRedact = async () => {
     setRedacting(true);
+    const resolvedOutputPath = outputMode === 'custom' && customPath
+      ? customPath
+      : `${folderPath}/redacted`;
+    setLastOutputPath(resolvedOutputPath);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
@@ -86,11 +96,86 @@ export default function FinalConfirmation() {
       setRedactionResults(results);
       navigateTo('completion');
     } catch (e: any) {
-      if (e.name !== 'AbortError') setError(e.message);
+      if (e.name !== 'AbortError') setError(friendlyError(e));
     } finally {
       setRedacting(false);
     }
   };
+
+  if (cancelled) {
+    const isLoading = partialFiles === null;
+    const fileCount = partialFiles?.length ?? 0;
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Cancelled</h2>
+          <p className="text-sm text-slate-400 mt-1">
+            {isLoading
+              ? "Checking what was written..."
+              : fileCount === 0
+              ? "Redaction was cancelled before any files were written."
+              : `${fileCount} file${fileCount === 1 ? '' : 's'} ${fileCount === 1 ? 'was' : 'were'} redacted before stopping.`}
+          </p>
+        </div>
+
+        {!isLoading && fileCount > 0 && (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-2">
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Partial output</p>
+            <ul className="text-xs text-slate-500 space-y-0.5 max-h-48 overflow-y-auto">
+              {partialFiles.map((f) => <li key={f}>{f.split('/').pop()}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {cleanupDone && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5 text-sm text-emerald-700">
+            Partial output deleted.
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-2">
+          <button
+            onClick={() => api.openFolder(lastOutputPath)}
+            disabled={fileCount === 0}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors btn-press"
+          >
+            <FolderOpen size={14} /> Open output folder
+          </button>
+
+          <button
+            onClick={async () => {
+              setCleaningUp(true);
+              try {
+                await api.cleanup(lastOutputPath, partialFiles!);
+                setPartialFiles([]);
+                setCleanupDone(true);
+              } catch (e: any) {
+                setError(friendlyError(e));
+              } finally {
+                setCleaningUp(false);
+              }
+            }}
+            disabled={fileCount === 0 || cleaningUp}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors btn-press"
+          >
+            <Trash2 size={14} /> {cleaningUp ? 'Deleting...' : 'Delete partial output'}
+          </button>
+
+          <button
+            onClick={() => {
+              setCancelled(false);
+              setPartialFiles(null);
+              setCleanupDone(false);
+              navigateTo('document_review');
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors btn-press ml-auto"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Show dedicated redaction progress screen with witty comments
   if (redacting) {
@@ -99,9 +184,23 @@ export default function FinalConfirmation() {
         <RedactionProgress totalDocuments={detectionResults.documents.length} />
         <div className="mt-8">
           <button
-            onClick={() => {
-              if (confirm('Cancel redaction? Progress will be lost.')) {
-                abortRef.current?.abort();
+            onClick={async () => {
+              if (!confirm("This will stop further documents from being processed. Files already redacted will remain in the output folder. Continue cancelling?")) {
+                return;
+              }
+              abortRef.current?.abort();
+              setRedacting(false);
+              setCancelled(true);
+
+              // Wait briefly so the backend can finish writing the current document
+              // before we list what's on disk — prevents the list from being stale.
+              await new Promise((r) => setTimeout(r, 1500));
+
+              try {
+                const list = await api.cleanupList(lastOutputPath);
+                setPartialFiles(list.files);
+              } catch {
+                setPartialFiles([]);
               }
             }}
             className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors btn-press"

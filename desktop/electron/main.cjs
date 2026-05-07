@@ -201,6 +201,18 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
+ipcMain.handle('log-error', async (_event, payload) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(app.getPath('userData'), 'error.log');
+    const line = JSON.stringify({ ...payload, recordedAt: new Date().toISOString() }) + '\n';
+    fs.appendFileSync(logPath, line, 'utf8');
+  } catch (err) {
+    console.error('Failed to write error log:', err);
+  }
+});
+
 // ── App lifecycle ─────────────────────────────────────────────────────
 
 app.on('ready', async () => {

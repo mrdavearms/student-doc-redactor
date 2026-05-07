@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Download, RefreshCw, CheckCircle, ArrowRight, FileText } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import { friendlyError } from '../lib/errorMessage';
 import type { DependencyStatus } from '../types';
 
 export default function Setup() {
@@ -10,19 +11,20 @@ export default function Setup() {
   const [checking, setChecking] = useState(false);
   const [deps, setDeps] = useState<DependencyStatus | null>(null);
   const [allReady, setAllReady] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
   const handleCheckAgain = async () => {
     setChecking(true);
+    setCheckError(null);
     try {
       const result = await api.checkDependencies();
       setDeps(result);
       if (result.libreoffice_ok && result.ner_ok !== false) {
         setAllReady(true);
-        // Auto-advance after 2 seconds
         setTimeout(() => navigateTo('folder_selection'), 2000);
       }
-    } catch {
-      // Silently fail — the Check Again button stays available
+    } catch (e) {
+      setCheckError(friendlyError(e));
     } finally {
       setChecking(false);
     }
@@ -127,6 +129,12 @@ export default function Setup() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {checkError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {checkError}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex items-center justify-between pt-2">

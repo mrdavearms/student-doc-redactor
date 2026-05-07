@@ -17,6 +17,12 @@ declare global {
       restartAndInstall: () => Promise<void>;
       checkForUpdates: () => Promise<void>;
       getAppVersion: () => Promise<string>;
+      logError: (payload: {
+        message: string;
+        stack?: string;
+        componentStack?: string;
+        timestamp: string;
+      }) => Promise<void>;
     };
   }
 }

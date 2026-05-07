@@ -4,11 +4,24 @@
 
 const BASE = 'http://127.0.0.1:8765';
 
+export class BackendUnreachableError extends Error {
+  constructor() {
+    super('Backend not reachable');
+    this.name = 'BackendUnreachableError';
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') throw e;
+    throw new BackendUnreachableError();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(body.detail || `HTTP ${res.status}`);
@@ -77,5 +90,17 @@ export const api = {
     request<{ status: string }>('/api/folder/open', {
       method: 'POST',
       body: JSON.stringify({ folder_path }),
+    }),
+
+  cleanupList: (output_path: string) =>
+    request<{ files: string[] }>('/api/cleanup/list', {
+      method: 'POST',
+      body: JSON.stringify({ output_path }),
+    }),
+
+  cleanup: (output_folder: string, file_paths: string[]) =>
+    request<{ deleted: string[]; failed: { path: string; reason: string }[] }>('/api/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ output_folder, file_paths }),
     }),
 };

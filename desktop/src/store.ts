@@ -49,6 +49,8 @@ interface AppState {
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
   setRedactionResults: (results: RedactionResults) => void;
+  lastOutputPath: string;
+  setLastOutputPath: (path: string) => void;
 
   // Loading state
   loading: boolean;
@@ -58,6 +60,10 @@ interface AppState {
   // Error state
   error: string | null;
   setError: (error: string | null) => void;
+
+  // Backend reachability (false ⇒ show banner, start polling)
+  backendReachable: boolean;
+  setBackendReachable: (reachable: boolean) => void;
 
   // Reset
   reset: () => void;
@@ -77,9 +83,11 @@ const initialState = {
   currentDocIndex: 0,
   userSelections: {} as Record<string, boolean>,
   redactionResults: null,
+  lastOutputPath: '',
   loading: false,
   loadingMessage: '',
   error: null,
+  backendReachable: true,
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -134,9 +142,13 @@ export const useStore = create<AppState>((set) => ({
 
   setRedactionResults: (results) => set({ redactionResults: results }),
 
+  setLastOutputPath: (path) => set({ lastOutputPath: path }),
+
   setLoading: (loading, message = '') => set({ loading, loadingMessage: message }),
 
   setError: (error) => set({ error }),
+
+  setBackendReachable: (reachable) => set({ backendReachable: reachable }),
 
   reset: () => set(initialState),
 }));
