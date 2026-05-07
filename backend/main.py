@@ -39,6 +39,11 @@ from backend.schemas import (
     ProcessFolderRequest,
     RedactRequest,
     RedactionResultsResponse,
+    CleanupListRequest,
+    CleanupListResponse,
+    CleanupRequest,
+    CleanupResponse,
+    CleanupFailure,
 )
 
 app = FastAPI(title="Redaction Tool API", version="2.0.0")
@@ -341,3 +346,43 @@ def validate_folder(req: ProcessFolderRequest):
     exists = folder.exists()
     is_dir = folder.is_dir() if exists else False
     return {"exists": exists, "is_directory": is_dir, "path": req.folder_path}
+
+
+# ── Cleanup ──────────────────────────────────────────────────────────────
+
+@app.post("/api/cleanup/list", response_model=CleanupListResponse)
+def cleanup_list(req: CleanupListRequest):
+    folder = Path(req.output_path)
+    if not folder.exists() or not folder.is_dir():
+        return CleanupListResponse(files=[])
+    files = [str(p) for p in folder.glob("*_redacted.pdf")]
+    files += [str(p) for p in folder.glob("*.UNVERIFIED.pdf")]
+    return CleanupListResponse(files=sorted(files))
+
+
+@app.post("/api/cleanup", response_model=CleanupResponse)
+def cleanup(req: CleanupRequest):
+    folder = Path(req.output_folder).resolve()
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Folder not found: {req.output_folder}")
+
+    deleted: list[str] = []
+    failed: list[CleanupFailure] = []
+
+    for p in req.file_paths:
+        path = Path(p).resolve()
+        if not path.is_relative_to(folder):
+            failed.append(CleanupFailure(path=p, reason="outside output folder"))
+            continue
+        if path.suffix != ".pdf":
+            failed.append(CleanupFailure(path=p, reason="not a PDF"))
+            continue
+        if not path.exists():
+            continue  # Already gone — treat as no-op success
+        try:
+            path.unlink()
+            deleted.append(str(path))
+        except OSError as e:
+            failed.append(CleanupFailure(path=p, reason=str(e)))
+
+    return CleanupResponse(deleted=deleted, failed=failed)

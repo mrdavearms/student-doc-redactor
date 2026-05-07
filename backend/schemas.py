@@ -133,3 +133,28 @@ class OpenFolderRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
+
+
+# ── Cleanup ──────────────────────────────────────────────────────────────
+
+class CleanupListRequest(BaseModel):
+    output_path: str
+
+
+class CleanupListResponse(BaseModel):
+    files: List[str]
+
+
+class CleanupRequest(BaseModel):
+    output_folder: str
+    file_paths: List[str]
+
+
+class CleanupFailure(BaseModel):
+    path: str
+    reason: str
+
+
+class CleanupResponse(BaseModel):
+    deleted: List[str]
+    failed: List[CleanupFailure]

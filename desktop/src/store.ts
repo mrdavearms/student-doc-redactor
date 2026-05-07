@@ -49,6 +49,8 @@ interface AppState {
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
   setRedactionResults: (results: RedactionResults) => void;
+  lastOutputPath: string;
+  setLastOutputPath: (path: string) => void;
 
   // Loading state
   loading: boolean;
@@ -81,6 +83,7 @@ const initialState = {
   currentDocIndex: 0,
   userSelections: {} as Record<string, boolean>,
   redactionResults: null,
+  lastOutputPath: '',
   loading: false,
   loadingMessage: '',
   error: null,
@@ -138,6 +141,8 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setRedactionResults: (results) => set({ redactionResults: results }),
+
+  setLastOutputPath: (path) => set({ lastOutputPath: path }),
 
   setLoading: (loading, message = '') => set({ loading, loadingMessage: message }),
 

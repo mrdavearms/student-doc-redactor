@@ -91,4 +91,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ folder_path }),
     }),
+
+  cleanupList: (output_path: string) =>
+    request<{ files: string[] }>('/api/cleanup/list', {
+      method: 'POST',
+      body: JSON.stringify({ output_path }),
+    }),
+
+  cleanup: (output_folder: string, file_paths: string[]) =>
+    request<{ deleted: string[]; failed: { path: string; reason: string }[] }>('/api/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ output_folder, file_paths }),
+    }),
 };
