@@ -25,6 +25,19 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
+## What's New in v1.3.0
+
+This release focuses on reliability and clearer communication when things don't go to plan.
+
+- **Plain-English error messages** — If a file is missing, the engine is starting up, or something fails, you'll see a helpful explanation rather than a technical error code.
+- **Engine startup banner** — If the redaction engine takes a moment to start, the app now shows a clear amber banner instead of the confusing "Folder not found" error some users were seeing.
+- **Recovery screen** — If something unexpected crashes inside the app, you'll see a "Something went wrong" screen with a one-click "Start over" button rather than a blank white window.
+- **Setup screen error reporting** — "Check Again" on the setup screen now shows what went wrong if it can't reach the engine, rather than staying silent.
+- **Cancel and clean up** — Cancelling a redaction mid-run now shows exactly which files were already written, with a "Delete partial output" button to remove them if you want to start fresh.
+- **Nothing to redact screen** — If no personal information is found in your documents, you'll now see a clear confirmation screen instead of an empty review page.
+
+---
+
 ## What Is This?
 
 When sharing student assessment reports — with other schools, services, or agencies — Australian privacy law and professional ethics require that identifying information be removed. Doing this manually is slow, error-prone, and stressful.
@@ -292,6 +305,10 @@ The desktop app includes UX features designed for non-technical users:
 - **Witty progress comments** — During the redaction step (which can take a minute for large batches), rotating teacher-themed comments keep you entertained. Shuffled randomly each time.
 - **Custom output location** — Save redacted files to the default subfolder or browse to any location on your computer.
 - **About modal** — Three tabs (About, How to Use, Features & Detection) accessible from the sidebar. Includes the full walkthrough content plus detection engine explanations.
+- **Cancel and clean up** — Cancelling mid-redaction shows which files were already written and lets you delete them with one click.
+- **Nothing to redact screen** — If detection finds nothing, the app tells you clearly and lets you go back to adjust names or try another folder.
+- **Engine startup banner** — If the backend takes a moment to start, an amber banner explains what's happening instead of showing a misleading folder error.
+- **Recovery screen** — Unexpected crashes show a "Something went wrong" fallback with a one-click restart rather than a blank window.
 
 ---
 
@@ -655,10 +672,19 @@ gantt
     Windows support + installer   :done, 2026-03, 2026-04
     First-run setup screen        :done, 2026-03, 2026-04
     Auto-update system            :done, 2026-03, 2026-04
+    section Desktop App — v1.2
+    292-test suite                :done, 2026-04, 2026-05
+    Audit security fixes          :done, 2026-04, 2026-05
+    section Desktop App — v1.3
+    Plain-English error messages  :done, 2026-05, 2026-05
+    Engine startup banner         :done, 2026-05, 2026-05
+    React error boundary          :done, 2026-05, 2026-05
+    Cancel + partial output cleanup :done, 2026-05, 2026-05
+    Nothing-to-redact screen      :done, 2026-05, 2026-05
     section Coming Soon
-    Mac code signing              :active, 2026-04, 2026-06
+    Mac code signing              :active, 2026-05, 2026-07
     section Future
-    Linux support                 :2026-06, 2026-09
+    Linux support                 :2026-07, 2026-10
     Batch processing (multiple students) :2026-07, 2026-10
 ```
 
