@@ -712,10 +712,10 @@ student-doc-redactor/
 │
 ├── src/
 │   ├── core/
-│   │   ├── pii_orchestrator.py     # 3-engine orchestrator (main detection entry point)
+│   │   ├── pii_orchestrator.py     # 2-engine orchestrator (main detection entry point)
 │   │   ├── pii_detector.py         # Regex detection engine + PIIMatch dataclass
 │   │   ├── presidio_recognizers.py # 6 custom Australian Presidio recognizers
-│   │   ├── gliner_provider.py      # GLiNER zero-shot NER wrapper
+│   │   ├── nickname_map.py         # ~100-entry Australian nickname dictionary
 │   │   ├── redactor.py             # Multi-path redaction + metadata strip + signature detection
 │   │   ├── text_extractor.py       # Text + OCR extraction from PDFs
 │   │   ├── document_converter.py   # LibreOffice Word to PDF conversion
@@ -747,56 +747,67 @@ student-doc-redactor/
 │   │   ├── electron.d.ts           # Electron IPC type declarations
 │   │   ├── hooks/
 │   │   │   └── useUpdater.ts           # Auto-update state machine
+│   │   ├── lib/
+│   │   │   └── errorMessage.ts         # User-friendly error message formatter
 │   │   ├── pages/
 │   │   │   ├── FolderSelection.tsx     # Step 1: folder + student details
 │   │   │   ├── ConversionStatus.tsx    # Step 2: Word to PDF conversion
 │   │   │   ├── DocumentReview.tsx      # Step 3: review detected PII
+│   │   │   ├── NoPiiFound.tsx          # Terminal: nothing to redact
 │   │   │   ├── FinalConfirmation.tsx   # Step 4: confirm + output options
 │   │   │   ├── Completion.tsx          # Step 5: results + preview
-│   │   │   └── Setup.tsx                # First-run: LibreOffice check
+│   │   │   └── Setup.tsx               # First-run: LibreOffice check
 │   │   └── components/
 │   │       ├── Layout.tsx              # Main layout, animated transitions
 │   │       ├── Sidebar.tsx             # Step indicator, logo, walkthrough
 │   │       ├── Walkthrough.tsx         # 4-step first-run onboarding
+│   │       ├── ErrorBoundary.tsx       # React error boundary wrapper
+│   │       ├── ErrorFallback.tsx       # Error boundary fallback UI
 │   │       ├── HelpTip.tsx             # Contextual ? tooltip popover
 │   │       ├── AboutModal.tsx          # 3-tab About dialog
 │   │       ├── PreviewSection.tsx      # Before/after PDF preview
 │   │       ├── DocumentCard.tsx        # Per-document summary card
 │   │       ├── RedactionProgress.tsx   # Progress bar + witty comments
-│   │       └── UpdateBanner.tsx         # Auto-update notification bar
+│   │       └── UpdateBanner.tsx        # Auto-update notification bar
+│   ├── tests/
+│   │   ├── errorMessage.test.ts        # friendlyError unit tests
+│   │   └── routing.test.ts             # Post-detection routing tests
 │   ├── package.json
-│   └── vite.config.ts
+│   ├── vite.config.ts
+│   └── vitest.config.ts
 │
 ├── docs/
 │   ├── plans/                      # Implementation plans (reference only)
 │   └── legacy/                     # Outdated docs moved from root
 │
 └── tests/
-    ├── test_pii_detector.py         # 39 tests
-    ├── test_pii_detector_names.py   # 54 tests
-    ├── test_pii_orchestrator.py     # 22 tests
+    ├── test_pii_detector.py         # 52 tests
+    ├── test_pii_detector_names.py   # 65 tests
+    ├── test_pii_orchestrator.py     # 25 tests
     ├── test_presidio_recognizers.py # 18 tests
-    ├── test_gliner_provider.py      # 12 tests
     ├── test_redactor.py             # 11 tests
     ├── test_signature_detection.py  # 16 tests
-    ├── test_ocr_redaction.py        # 19 tests
+    ├── test_ocr_redaction.py        # 28 tests
     ├── test_ocr_verification.py     # 7 tests
     ├── test_metadata_stripping.py   # 8 tests
     ├── test_widget_redaction.py     # 6 tests
     ├── test_filename_redaction.py   # 13 tests
     ├── test_zone_redaction.py       # 5 tests
     ├── test_session_state.py        # 2 tests
-    └── test_binary_resolver.py      # 6 tests
+    ├── test_binary_resolver.py      # 6 tests
+    ├── test_integration.py          # 10 tests
+    ├── test_adversarial.py          # 7 tests
+    ├── test_false_positives.py      # 4 tests
+    └── test_cleanup_api.py          # 13 tests
 ```
 
 ### Running Tests
 
 ```bash
-source venv/bin/activate
-pytest tests/ -v
+venv/bin/python3.13 -m pytest tests/ -v
 ```
 
-All 257 tests should pass in under 5 minutes.
+All 292 tests should pass in under 5 minutes.
 
 ### Tech Stack
 
@@ -809,10 +820,9 @@ All 257 tests should pass in under 5 minutes.
 | PDF processing | PyMuPDF (fitz) |
 | Image redaction | Pillow (PIL) ImageDraw |
 | AI / NER | Microsoft Presidio + spaCy `en_core_web_lg` |
-| Zero-shot NER | GLiNER |
 | OCR | Tesseract + pytesseract |
 | Word conversion | LibreOffice headless |
-| Tests | pytest (257 tests) |
+| Tests | pytest (292 tests) + Vitest |
 | Language | Python 3.13+ / TypeScript |
 
 ---
