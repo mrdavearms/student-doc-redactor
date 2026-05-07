@@ -338,6 +338,18 @@ The before/after PDF preview (`PreviewSection.tsx`) fetches page images as base6
 
 The desktop app uses `@tailwindcss/vite` plugin with `@import "tailwindcss"` and a `@theme` block in `index.css`. There is no `tailwind.config.js` file. Custom colours (e.g. `--color-primary-*`) are defined in the `@theme` block. The `.btn-press` utility class (active scale effect) is defined in `index.css`.
 
+### 28. Backend-down detection lives in `api.ts` + `App.tsx`
+
+`api.ts` distinguishes network errors from HTTP errors via `BackendUnreachableError`. The Zustand `backendReachable` flag drives a top-of-app banner in `App.tsx`; a 5-second polling effect on `/api/health` only runs while the flag is `false`. `FolderSelection.validateFolder` deliberately leaves `folderValid` untouched on `BackendUnreachableError` so the false-negative "Folder not found" message doesn't render.
+
+### 29. Error message text comes from `lib/errorMessage.ts`, not raw backend strings
+
+All `setError` call sites use `friendlyError(e)` from `desktop/src/lib/errorMessage.ts`. The mapper covers every `HTTPException(detail=...)` pattern in `backend/main.py` plus a fallback. Tests live at `desktop/tests/errorMessage.test.ts`. If you add a new backend error string, add a pattern to the mapper and a test case.
+
+### 30. Cleanup endpoints are restricted to the user-selected output folder
+
+`/api/cleanup` and `/api/cleanup/list` only operate on `*_redacted.pdf` and `*.UNVERIFIED.pdf` files inside the resolved `output_folder` (verified via `Path.is_relative_to`). Do not relax these checks — they prevent path-traversal deletion of files outside the output area.
+
 ---
 
 ## Session State Keys (Streamlit)
