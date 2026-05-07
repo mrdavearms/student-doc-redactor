@@ -18,8 +18,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       headers: { 'Content-Type': 'application/json' },
       ...options,
     });
-  } catch (e: any) {
-    if (e?.name === 'AbortError') throw e;
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') throw e;
     throw new BackendUnreachableError();
   }
   if (!res.ok) {

@@ -69,7 +69,7 @@ export default function ConversionStatus() {
       } else {
         navigateTo('document_review');
       }
-    } catch (e: any) {
+    } catch (e) {
       setError(friendlyError(e));
     } finally {
       setLoading(false);
