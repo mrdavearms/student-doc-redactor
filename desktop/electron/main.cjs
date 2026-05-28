@@ -13,8 +13,12 @@ const BACKEND_PORT = 8765;
 const DEV_SERVER = `http://localhost:5173`;
 const isDev = !app.isPackaged;
 
+// How often to re-check for updates while the app stays open (24 hours).
+const DAILY_UPDATE_CHECK_MS = 24 * 60 * 60 * 1000;
+
 let backendProcess = null;
 let mainWindow = null;
+let updateCheckInterval = null;
 
 /** Wait for the backend to respond on its port (30-second wall-clock timeout). */
 function waitForBackend(port, timeoutMs = 30000) {
@@ -168,8 +172,15 @@ function setupAutoUpdater() {
 
   // NOTE: For updates to work, the GitHub repo must be public, or GH_TOKEN must be
   // set in the environment. See package.json "publish" config for repo details.
-  // Check for updates after a short delay to avoid blocking startup
+  // Check for updates after a short delay to avoid blocking startup...
   setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10000);
+
+  // ...then re-check once a day so a teacher who leaves the app open for days
+  // still picks up new releases without restarting.
+  updateCheckInterval = setInterval(
+    () => autoUpdater.checkForUpdates().catch(() => {}),
+    DAILY_UPDATE_CHECK_MS
+  );
 }
 
 // ── IPC handlers ─────────────────────────────────────────────────────
@@ -243,6 +254,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (updateCheckInterval) {
+    clearInterval(updateCheckInterval);
+    updateCheckInterval = null;
+  }
   if (backendProcess) {
     backendProcess.kill();
     backendProcess = null;

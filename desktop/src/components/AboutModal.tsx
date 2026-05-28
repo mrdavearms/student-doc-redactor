@@ -285,10 +285,10 @@ function TabFeatures() {
           Detection Engines
         </h3>
         <p className="text-sm text-slate-500 leading-relaxed">
-          This tool uses three detection methods working together — pattern matching for
-          structured data like phone numbers and emails, named entity recognition for names
-          and addresses, and zero-shot AI detection for unusual PII formats. Each item is
-          checked by multiple engines for reliability.
+          This tool uses two detection methods working together — pattern matching for
+          structured data like phone numbers, emails, and Medicare numbers, and named entity
+          recognition (AI) that finds names and addresses anywhere in the document. Their
+          results are merged and cross-checked for reliability.
         </p>
       </section>
 
