@@ -691,7 +691,9 @@ class PDFRedactor:
             if not val:
                 continue
             for pii in redacted_texts:
-                if pii in val:
+                # Word-boundary match, not raw substring: a short name like
+                # "Joe" must not delete a widget containing "Joelle" or "major".
+                if pii and re.search(r"\b" + re.escape(pii) + r"\b", val):
                     names_to_delete.append(w.field_name)
                     break
 

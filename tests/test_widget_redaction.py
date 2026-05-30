@@ -175,3 +175,28 @@ class TestWidgetRedaction:
             items = [RedactionItem(page_num=1, text="Hello")]
             success, msg = redactor.redact_pdf(src, out, items)
             assert success, msg
+
+
+def test_short_name_does_not_substring_delete_widget():
+    """Redacting the 3-char name 'Joe' must use word-boundary matching: it must
+    delete a widget valued exactly 'Joe' but NOT one containing 'Joelle'."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "input.pdf"
+        out = Path(tmp) / "output.pdf"
+        _create_pdf_with_widgets(src, {
+            "Sibling": "Joelle attends the same school",
+            "Student": "Joe",
+        })
+
+        redactor = PDFRedactor()
+        items = [RedactionItem(page_num=1, text="Joe")]
+        success, msg = redactor.redact_pdf(src, out, items)
+
+        assert success, msg
+        doc = fitz.open(str(out))
+        page = doc[0]
+        remaining = {w.field_name: w.field_value for w in page.widgets()}
+        assert "Sibling" in remaining, "'Joelle' widget must NOT be deleted by 'Joe'"
+        assert remaining["Sibling"] == "Joelle attends the same school"
+        assert "Student" not in remaining, "widget valued exactly 'Joe' must be deleted"
+        doc.close()
