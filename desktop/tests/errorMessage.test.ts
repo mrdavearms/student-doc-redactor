@@ -50,4 +50,17 @@ describe('friendlyError', () => {
     expect(friendlyError(new Error('Folder not found: /tmp/x')))
       .not.toMatch(/files couldn't be opened/i);
   });
+
+  it('maps "Detection failed" to a friendly retry message', () => {
+    expect(friendlyError(new Error('Detection failed: spaCy exploded')))
+      .toMatch(/detecting/i);
+  });
+  it('maps "Folder processing failed" to a friendly retry message', () => {
+    expect(friendlyError(new Error('Folder processing failed: disk error')))
+      .toMatch(/folder/i);
+  });
+  it('maps "Redaction failed" to a friendly retry message', () => {
+    expect(friendlyError(new Error('Redaction failed: boom')))
+      .toMatch(/redact/i);
+  });
 });

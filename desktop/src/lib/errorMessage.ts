@@ -6,6 +6,9 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/no cached detection data/i, "The detection step needs to run again. Please go back one step and try again."],
   [/cannot open pdf/i, "One of the PDFs couldn't be read. It may be corrupted or password-protected."],
   [/page \d+ out of range/i, "Couldn't load that page from the PDF."],
+  [/detection failed/i, "Something went wrong while detecting personal information. Please try that step again."],
+  [/folder processing failed/i, "Something went wrong while processing that folder. Please try again."],
+  [/redaction failed/i, "Something went wrong while redacting the documents. Please try again."],
 ];
 
 const FALLBACK = "Something went wrong. Please try again, or restart the app if this keeps happening.";

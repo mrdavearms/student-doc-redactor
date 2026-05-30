@@ -108,8 +108,13 @@ def process_folder(req: ProcessFolderRequest):
     if not folder.exists():
         raise HTTPException(status_code=400, detail=f"Folder not found: {req.folder_path}")
 
-    service = ConversionService()
-    results = service.process_folder(folder)
+    try:
+        service = ConversionService()
+        results = service.process_folder(folder)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Folder processing failed: {e}") from e
 
     return ConversionResultsResponse(
         pdf_files=[str(p) for p in results.pdf_files],
@@ -134,15 +139,20 @@ def detect_pii(req: DetectPIIRequest):
         if not p.exists():
             raise HTTPException(status_code=400, detail=f"File not found: {p}")
 
-    service = DetectionService(
-        student_name=req.student_name,
-        parent_names=req.parent_names,
-        family_names=req.family_names,
-        organisation_names=req.organisation_names,
-        require_ner=True,
-    )
+    try:
+        service = DetectionService(
+            student_name=req.student_name,
+            parent_names=req.parent_names,
+            family_names=req.family_names,
+            organisation_names=req.organisation_names,
+            require_ner=True,
+        )
 
-    results = service.detect_all(pdf_paths)
+        results = service.detect_all(pdf_paths)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Detection failed: {e}") from e
 
     # Build response and cache results for redaction step
     doc_responses = []
@@ -227,48 +237,53 @@ def redact_documents(req: RedactRequest):
             frontend_key = f"{doc_path_str}_{idx}"
             user_selections[key] = frontend_key in req.selected_keys
 
-    service = RedactionService()
-    request = RedactionRequest(
-        folder_path=folder_path,
-        student_name=req.student_name,
-        documents=documents,
-        detected_pii=detected_pii,
-        user_selections=user_selections,
-        folder_action=req.folder_action,
-        custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
-        parent_names=req.parent_names,
-        family_names=req.family_names,
-        organisation_names=req.organisation_names,
-        redact_header_footer=req.redact_header_footer,
-    )
+    try:
+        service = RedactionService()
+        request = RedactionRequest(
+            folder_path=folder_path,
+            student_name=req.student_name,
+            documents=documents,
+            detected_pii=detected_pii,
+            user_selections=user_selections,
+            folder_action=req.folder_action,
+            custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
+            parent_names=req.parent_names,
+            family_names=req.family_names,
+            organisation_names=req.organisation_names,
+            redact_header_footer=req.redact_header_footer,
+        )
 
-    results = service.execute(request)
+        results = service.execute(request)
 
-    return RedactionResultsResponse(
-        redacted_folder=str(results.redacted_folder),
-        document_results=[
-            DocumentResultResponse(
-                document_name=r.document_name,
-                output_path=str(r.output_path) if r.output_path else None,
-                success=r.success,
-                items_redacted=r.items_redacted,
-                verification_failures=r.verification_failures,
-                ocr_warnings=r.ocr_warnings,
-                error_message=r.error_message,
-            )
-            for r in results.document_results
-        ],
-        log_content=results.log_content,
-        log_path=str(results.log_path) if results.log_path else None,
-        total_documents=results.total_documents,
-        successfully_redacted=results.successfully_redacted,
-        verification_failures=[
-            {"filename": f, "message": m} for f, m in results.verification_failures
-        ],
-        ocr_warnings=[
-            {"filename": f, "count": c} for f, c in results.ocr_warnings
-        ],
-    )
+        return RedactionResultsResponse(
+            redacted_folder=str(results.redacted_folder),
+            document_results=[
+                DocumentResultResponse(
+                    document_name=r.document_name,
+                    output_path=str(r.output_path) if r.output_path else None,
+                    success=r.success,
+                    items_redacted=r.items_redacted,
+                    verification_failures=r.verification_failures,
+                    ocr_warnings=r.ocr_warnings,
+                    error_message=r.error_message,
+                )
+                for r in results.document_results
+            ],
+            log_content=results.log_content,
+            log_path=str(results.log_path) if results.log_path else None,
+            total_documents=results.total_documents,
+            successfully_redacted=results.successfully_redacted,
+            verification_failures=[
+                {"filename": f, "message": m} for f, m in results.verification_failures
+            ],
+            ocr_warnings=[
+                {"filename": f, "count": c} for f, c in results.ocr_warnings
+            ],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redaction failed: {e}") from e
 
 
 # ── Preview ──────────────────────────────────────────────────────────────
