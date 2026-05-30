@@ -28,10 +28,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       signal,
     });
   } catch (e) {
-    // An external cancel (the caller's own signal) must stay an AbortError so
-    // callers can suppress the error toast. A timeout or network failure means
-    // the backend is unreachable.
-    if (options?.signal?.aborted) throw e;
+    // Only a genuine external cancel (the caller's own signal, NOT our internal
+    // timeout) stays an AbortError so callers can suppress the error toast. If
+    // our timeout fired — even alongside an external abort in the same tick — it
+    // means the backend is unreachable.
+    if (options?.signal?.aborted && !timeoutController.signal.aborted) throw e;
     throw new BackendUnreachableError();
   } finally {
     clearTimeout(timeoutId);

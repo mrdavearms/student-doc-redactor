@@ -119,6 +119,7 @@ function startBackend() {
     // The process could not be spawned at all (bad path, permissions, etc.).
     console.error('Failed to spawn backend:', err);
     if (!app.isQuitting) {
+      backendProcess = null;
       dialog.showErrorBox(
         'Failed to Start',
         `The redaction engine could not be started.\n\n${err.message}\n\nPlease reinstall the application.`,
