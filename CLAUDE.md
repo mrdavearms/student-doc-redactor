@@ -17,6 +17,8 @@ Two frontends exist:
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (292 tests, ~4m30s)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
+- **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
 - **Build + publish to GitHub**: `cd desktop && npm run dist:publish` (CI only — requires `GH_TOKEN`)
@@ -464,6 +466,8 @@ Run a single test file: `venv/bin/python3.13 -m pytest tests/test_pii_detector.p
 Run with output: `venv/bin/python3.13 -m pytest tests/ -v -s`
 Backend API tests use FastAPI's TestClient: `from fastapi.testclient import TestClient` — available in the existing venv, no extra install needed.
 
+**Mocking PyMuPDF in tests:** patch `<module>.fitz.open` (e.g. `redactor.fitz.open`, `text_extractor.fitz.open`). The `/api/preview` endpoint uses a function-scoped `import fitz`, so patch the real `fitz` module — not `backend.main.fitz` (which doesn't exist until the function runs). `fitz.Document.is_closed` is handy for asserting handles are released.
+
 ---
 
 ## Dependencies
@@ -525,13 +529,16 @@ electron-builder uses `--publish always` to create a draft GitHub Release and up
 
 - **Do NOT push tags to trigger builds unless code is merged to `main` first.** Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - **Pushing a `v*` tag via Bash requires bypass permissions** — the tool's classifier blocks tag pushes that trigger public releases.
+- **Branch pushes trigger NO CI** — only `v*` tags run a workflow. Pushing `test`/`main` is free; only release tags consume GitHub Actions minutes (no Cloud Build exists for this repo).
+- **Version-sync before tagging:** bump `desktop/package.json` AND both `version` fields in `desktop/package-lock.json` to match the tag. electron-builder names/publishes artifacts from the `package.json` version while `release-notes` derives the version from the tag — a mismatch puts artifacts on the wrong release and breaks the download links. Validate with `cd desktop && npm ci`.
+- **Changelog auto-generates from commit subjects** since the previous tag — use conventional-commit style (`fix(scope): subject`) so release notes read cleanly.
 - `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed).
 
 ### Auto-Update
 
 The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` hook + `UpdateBanner.tsx` component handle the UX. Update metadata (`.yml` and `.blockmap` files) are published alongside installers.
 
-**ESLint baseline:** The project has 7 pre-existing ESLint errors in `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, and `Walkthrough.tsx`. New code should not increase this count, but these errors are not your responsibility to fix unless you're already touching those files.
+**ESLint baseline:** `cd desktop && npm run lint` reports **7 errors + 2 warnings** across `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, `Walkthrough.tsx`, and `FinalConfirmation.tsx`. New code must not increase the count, but these aren't yours to fix unless you're already touching those files.
 
 ---
 
