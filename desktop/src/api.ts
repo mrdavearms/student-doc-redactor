@@ -11,17 +11,32 @@ export class BackendUnreachableError extends Error {
   }
 }
 
+const DEFAULT_TIMEOUT_MS = 60_000;
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_TIMEOUT_MS);
+  const signal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutController.signal])
+    : timeoutController.signal;
+
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
       headers: { 'Content-Type': 'application/json' },
       ...options,
+      signal,
     });
   } catch (e) {
-    if ((e as { name?: string })?.name === 'AbortError') throw e;
+    // An external cancel (the caller's own signal) must stay an AbortError so
+    // callers can suppress the error toast. A timeout or network failure means
+    // the backend is unreachable.
+    if (options?.signal?.aborted) throw e;
     throw new BackendUnreachableError();
+  } finally {
+    clearTimeout(timeoutId);
   }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(body.detail || `HTTP ${res.status}`);
