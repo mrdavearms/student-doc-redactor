@@ -47,6 +47,8 @@ export default function ConversionStatus() {
 
   const handleContinue = async () => {
     if (!results) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLoading(true, 'Extracting text and detecting PII...');
     try {
       const allPdfs = [...results.pdf_files, ...results.converted_files];
@@ -60,7 +62,10 @@ export default function ConversionStatus() {
         parent_names: parentList,
         family_names: familyList,
         organisation_names: orgList,
-      });
+      }, { signal: ctrl.signal });
+
+      // If the user navigated away (Back) mid-request, do not force-navigate.
+      if (ctrl.signal.aborted) return;
 
       setDetectionResults(detection);
       const totalMatches = detection.documents.reduce((sum, d) => sum + d.matches.length, 0);
@@ -70,9 +75,9 @@ export default function ConversionStatus() {
         navigateTo('document_review');
       }
     } catch (e) {
-      setError(friendlyError(e));
+      if ((e as { name?: string })?.name !== 'AbortError') setError(friendlyError(e));
     } finally {
-      setLoading(false);
+      if (!ctrl.signal.aborted) setLoading(false);
     }
   };
 
@@ -220,7 +225,7 @@ export default function ConversionStatus() {
       {/* Navigation */}
       <div className="flex justify-between pt-2">
         <button
-          onClick={() => navigateTo('folder_selection')}
+          onClick={() => { abortRef.current?.abort(); setLoading(false); navigateTo('folder_selection'); }}
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
         >
           <ArrowLeft size={16} /> Back
