@@ -25,16 +25,19 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
-## What's New in v1.3.0
+## What's New in v1.3.1
 
-This release focuses on reliability and clearer communication when things don't go to plan.
+This release is all about **reliability and safety** — making the app harder to trip up, and clearer when something needs your attention. The way you use it is exactly the same. Most important for a tool that handles students' personal information: **when redaction can't be done properly, the app now tells you, instead of quietly handing you a file that might still contain personal details.**
 
-- **Plain-English error messages** — If a file is missing, the engine is starting up, or something fails, you'll see a helpful explanation rather than a technical error code.
-- **Engine startup banner** — If the redaction engine takes a moment to start, the app now shows a clear amber banner instead of the confusing "Folder not found" error some users were seeing.
-- **Recovery screen** — If something unexpected crashes inside the app, you'll see a "Something went wrong" screen with a one-click "Start over" button rather than a blank white window.
-- **Setup screen error reporting** — "Check Again" on the setup screen now shows what went wrong if it can't reach the engine, rather than staying silent.
-- **Cancel and clean up** — Cancelling a redaction mid-run now shows exactly which files were already written, with a "Delete partial output" button to remove them if you want to start fresh.
-- **Nothing to redact screen** — If no personal information is found in your documents, you'll now see a clear confirmation screen instead of an empty review page.
+- **Safer redaction** — If a document can't be fully redacted, it's now clearly reported as failed rather than saved as a file that looks finished but might still contain personal information.
+- **Scanned pages protected** — If a page is an image-only scan and the text-reader (OCR) isn't available, the app stops and tells you instead of skipping that page silently.
+- **No half-finished files** — If something fails partway through, the incomplete file is cleaned up automatically, so it can't be mistaken for a finished one.
+- **More accurate name matching** — Short names (like "Joe") no longer accidentally remove unrelated words (like "Joelle") in PDF form fields.
+- **No more endless spinning** — If the engine ever stops responding, the app times out and lets you try again instead of hanging forever.
+- **Recovers from engine hiccups** — If the background engine stops unexpectedly, the app notices and prompts you to reopen it.
+- **Friendlier messages** and a **daily check for updates** while the app is open.
+
+> Earlier reliability work from v1.3.0 — plain-English error messages, the engine startup banner, the "Something went wrong" recovery screen, cancel-and-clean-up, and the nothing-to-redact screen — is all still here.
 
 ---
 
@@ -121,7 +124,7 @@ flowchart TD
     A["1. Select Folder\nChoose a folder of student documents"] --> B
     B["2. Enter Student Details\nName, parent names (optional)"] --> C
     C["3. Convert Documents\nWord files to PDF automatically"] --> D
-    D["4. Detect PII\n3 detection engines run in parallel"] --> E
+    D["4. Detect PII\n2 detection engines run in parallel"] --> E
     E["5. You Review Each Item\nApprove or reject every finding"] --> F
     F["6. Confirm\nSummary of what will be redacted"] --> G
     G["7. Apply Redactions\nPermanent, verified, metadata-stripped"] --> H
@@ -140,36 +143,31 @@ flowchart TD
 
 ### How PII Is Detected
 
-The tool uses **three detection engines simultaneously**, then merges and deduplicates the results. This multi-engine approach catches far more than any single method:
+The tool uses **two detection engines simultaneously**, then merges and deduplicates the results. This dual approach catches far more than either method alone:
 
 ```mermaid
 graph TD
     DOC["Document Text"] --> RE
     DOC --> PR
-    DOC --> GL
 
-    RE["Regex Engine\nAustralian phone, Medicare,\naddress, DOB patterns"]
-    PR["Presidio + spaCy NER\nMicrosoft's AI recogniser\n+ 6 custom AU patterns"]
-    GL["GLiNER Zero-Shot NER\nCatches names in informal\nor unexpected contexts"]
+    RE["Regex Engine\nAustralian phone, Medicare,\naddress, DOB patterns\n+ names you enter"]
+    PR["Presidio + spaCy NER\nMicrosoft's AI recogniser\n+ 6 custom AU patterns\n+ automatic name variations"]
 
     RE --> MRG
     PR --> MRG
-    GL --> MRG
 
     MRG["Merge and Deduplicate\nHighest confidence wins\nwhen engines overlap"]
     MRG --> OUT["PII Matches\nRanked by confidence (0.0 - 1.0)\nReady for your review"]
 
     style RE fill:#4A90D9,color:#fff
     style PR fill:#7B68EE,color:#fff
-    style GL fill:#E8A838,color:#fff
     style MRG fill:#888,color:#fff
     style OUT fill:#5BAD6F,color:#fff
 ```
 
-**Why three engines?**
-- **Regex** is fast and precise for structured data (phone numbers, Medicare numbers)
-- **Presidio + spaCy** uses machine learning to recognise names and locations even when they appear in unexpected formats
-- **GLiNER** is a zero-shot model — it can identify names it has never seen before, catching informal mentions that structured patterns miss
+**Why two engines?**
+- **Regex** is fast and precise for structured data (phone numbers, Medicare numbers, addresses) and for the names you enter
+- **Presidio + spaCy** uses machine learning to recognise names and locations even when they appear in unexpected formats. When it finds a name, it automatically generates variations — first name, last name, initials — and searches for those too, so informal mentions aren't missed
 
 ---
 
@@ -179,9 +177,9 @@ All detection is tuned for **Australian** documents and naming conventions.
 
 | Category | Examples | Engine |
 |----------|----------|--------|
-| Student name (all variations) | Full name, first name, last name, initials | Regex + Presidio + GLiNER |
-| Parent / guardian names | Names provided by you, or found near keywords like "Mother:", "Father:" | Regex + GLiNER |
-| Family member names | Siblings, carers, emergency contacts | Regex + GLiNER |
+| Student name (all variations) | Full name, first name, last name, initials | Regex + Presidio |
+| Parent / guardian names | Names provided by you, or found near keywords like "Mother:", "Father:" | Regex + Presidio |
+| Family member names | Siblings, carers, emergency contacts | Regex + Presidio |
 | Organisation names | Schools, clinics, hospitals — user-provided, word-level matching | Regex |
 | Phone numbers | Mobile (04xx), landline, +61 format | Regex + Presidio |
 | Email addresses | Any format | Regex |
@@ -190,7 +188,7 @@ All detection is tuned for **Australian** documents and naming conventions.
 | Medicare number | 10-digit format, only when "Medicare" appears nearby | Regex + Presidio |
 | Centrelink CRN | 9-character reference, only when labelled | Regex |
 | Student ID | 3-letter prefix + 3 or more digits | Regex |
-| Person names (unlabelled) | AI-detected names in free text | Presidio + GLiNER |
+| Person names (unlabelled) | AI-detected names in free text | Presidio |
 | Location mentions | Suburb and location references | Presidio |
 
 ### Name Detection — In Depth
@@ -334,7 +332,7 @@ The desktop app bundles Python, Tesseract, and all AI models. You only need to i
 | **Python** | Version 3.13 or later |
 | **LibreOffice** | Required for Word to PDF conversion |
 | **Tesseract OCR** | Required for scanned/image-only PDFs |
-| **Disk space** | ~2 GB (for AI models: spaCy + GLiNER) |
+| **Disk space** | ~2 GB (for the spaCy AI model) |
 
 > **Linux** is not currently supported but is on the roadmap.
 
@@ -650,7 +648,7 @@ gantt
     dateFormat  YYYY-MM
     section Core Engine
     Regex PII detection           :done, 2025-02, 2025-04
-    3-engine AI detection         :done, 2025-04, 2026-01
+    2-engine AI detection         :done, 2025-04, 2026-01
     Metadata stripping            :done, 2026-01, 2026-02
     OCR verification              :done, 2026-01, 2026-02
     Form widget redaction         :done, 2026-02, 2026-03
@@ -681,6 +679,9 @@ gantt
     React error boundary          :done, 2026-05, 2026-05
     Cancel + partial output cleanup :done, 2026-05, 2026-05
     Nothing-to-redact screen      :done, 2026-05, 2026-05
+    section Desktop App — v1.3.1
+    Redaction safety hardening    :done, 2026-05, 2026-05
+    Request timeouts + crash recovery :done, 2026-05, 2026-05
     section Coming Soon
     Mac code signing              :active, 2026-05, 2026-07
     section Future

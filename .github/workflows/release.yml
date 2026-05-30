@@ -100,10 +100,12 @@ jobs:
             # Filter out internal-only commits (CLAUDE.md, .planning/, etc.)
             INTERNAL_FILTER='grep -vi -e "CLAUDE\.md" -e "\.planning" -e "\.claude"'
 
-            FIXES=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -i '^fix' | eval "$INTERNAL_FILTER" | sed 's/^fix: //' | sed 's/^fix(//' || true)
-            FEATURES=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -iE '^(feat|add)' | eval "$INTERNAL_FILTER" | sed 's/^feat: //' | sed 's/^add: //' || true)
-            BUILDS=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -iE '^(build|chore|ci)' | eval "$INTERNAL_FILTER" | sed 's/^build: //' | sed 's/^chore: //' | sed 's/^ci: //' || true)
-            DOCS=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -i '^docs' | eval "$INTERNAL_FILTER" | sed 's/^docs: //' || true)
+            # Strip the conventional-commit prefix (type, optional scope, optional !)
+            # so "fix(desktop): message" becomes "message" in the changelog.
+            FIXES=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -i '^fix' | eval "$INTERNAL_FILTER" | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' || true)
+            FEATURES=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -iE '^(feat|add)' | eval "$INTERNAL_FILTER" | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' || true)
+            BUILDS=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -iE '^(build|chore|ci)' | eval "$INTERNAL_FILTER" | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' || true)
+            DOCS=$(git log "$PREV_TAG"..HEAD --no-merges --pretty=format:"%s" | grep -i '^docs' | eval "$INTERNAL_FILTER" | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' || true)
 
             if [ -n "$FEATURES" ]; then
               CHANGELOG="${CHANGELOG}### ✨ New Features"$'\n'
