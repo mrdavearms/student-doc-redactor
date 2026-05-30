@@ -208,8 +208,13 @@ class PIIOrchestrator:
                     source="presidio",
                 ))
 
-        except Exception:
-            pass  # Graceful degradation
+        except Exception as e:
+            # When NER is required (bundled desktop app), a runtime failure
+            # means names may have gone undetected — surface it instead of
+            # silently falling back to regex-only results.
+            if self.require_ner:
+                raise RuntimeError(f"NER analysis failed: {e}") from e
+            # Optional NER (Streamlit) degrades gracefully to regex-only.
 
         return matches
 

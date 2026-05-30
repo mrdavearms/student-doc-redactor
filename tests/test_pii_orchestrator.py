@@ -2,6 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'core'))
 
 import pytest
+from unittest.mock import patch, MagicMock
 from pii_orchestrator import PIIOrchestrator
 from pii_detector import PIIMatch
 
@@ -247,3 +248,29 @@ class TestOrganisationNamePassthrough:
     def test_org_names_default_to_empty(self):
         orch = PIIOrchestrator("Jane Smith")
         assert orch.regex_detector.organisation_names == []
+
+
+# ---------------------------------------------------------------------------
+# NER Runtime Failure Tests
+# ---------------------------------------------------------------------------
+
+def _orchestrator(require_ner):
+    # Skip the heavy spaCy load — inject a mock analyzer instead.
+    with patch.object(PIIOrchestrator, "_init_presidio", lambda self: None):
+        return PIIOrchestrator("Joe Bloggs", require_ner=require_ner)
+
+
+def test_run_presidio_reraises_when_ner_required():
+    o = _orchestrator(require_ner=True)
+    o.presidio_analyzer = MagicMock()
+    o.presidio_analyzer.analyze.side_effect = RuntimeError("spaCy crashed")
+    with pytest.raises(RuntimeError):
+        o._run_presidio("Some document text", 1)
+
+
+def test_run_presidio_degrades_when_ner_optional():
+    o = _orchestrator(require_ner=False)
+    o.presidio_analyzer = MagicMock()
+    o.presidio_analyzer.analyze.side_effect = RuntimeError("spaCy crashed")
+    result = o._run_presidio("Some document text", 1)
+    assert result == []
