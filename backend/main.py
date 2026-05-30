@@ -216,20 +216,8 @@ def redact_documents(req: RedactRequest):
                 detail=f"No cached detection data for {doc_path_str}. Run detection first.",
             )
 
-    # Build user_selections from selected_keys
+    # Build user_selections: mark each frontend-sent selected key as True.
     user_selections: Dict[str, bool] = {}
-    for doc_path_str in req.documents:
-        doc_path = Path(doc_path_str)
-        matches = detected_pii[doc_path].get("matches", [])
-        for idx in range(len(matches)):
-            key = f"{doc_path}_{idx}"
-            user_selections[key] = key in [
-                k.replace(doc_path_str, str(doc_path)) for k in req.selected_keys
-                if k.startswith(doc_path_str)
-            ]
-
-    # Simpler approach: just mark selected keys as True
-    user_selections = {}
     for doc_path_str in req.documents:
         doc_path = Path(doc_path_str)
         matches = detected_pii[doc_path].get("matches", [])
