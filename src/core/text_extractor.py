@@ -243,22 +243,20 @@ class TextExtractor:
         results = []
 
         try:
-            doc = fitz.open(str(pdf_path))
-            page = doc[page_num - 1]
+            with fitz.open(str(pdf_path)) as doc:
+                page = doc[page_num - 1]
 
-            # Get text with coordinates
-            blocks = page.get_text("dict")["blocks"]
+                # Get text with coordinates
+                blocks = page.get_text("dict")["blocks"]
 
-            for block in blocks:
-                if block.get('type') == 0:  # Text block
-                    for line in block.get('lines', []):
-                        for span in line.get('spans', []):
-                            text = span.get('text', '').strip()
-                            bbox = span.get('bbox')
-                            if text and bbox:
-                                results.append((text, bbox))
-
-            doc.close()
+                for block in blocks:
+                    if block.get('type') == 0:  # Text block
+                        for line in block.get('lines', []):
+                            for span in line.get('spans', []):
+                                text = span.get('text', '').strip()
+                                bbox = span.get('bbox')
+                                if text and bbox:
+                                    results.append((text, bbox))
 
         except Exception as e:
             print(f"Error extracting coordinates: {str(e)}")

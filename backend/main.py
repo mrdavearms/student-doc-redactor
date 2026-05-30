@@ -299,26 +299,27 @@ def preview_page(req: PreviewRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Cannot open PDF: {e}")
 
-    if req.page_num < 0 or req.page_num >= len(doc):
-        doc.close()
-        raise HTTPException(
-            status_code=400,
-            detail=f"Page {req.page_num} out of range (0-{len(doc) - 1})",
+    try:
+        if req.page_num < 0 or req.page_num >= len(doc):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Page {req.page_num} out of range (0-{len(doc) - 1})",
+            )
+
+        page = doc[req.page_num]
+        # 150 DPI: multiply by 150/72
+        mat = fitz.Matrix(150 / 72, 150 / 72)
+        pix = page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        total = len(doc)
+
+        return PreviewResponse(
+            image_base64=base64.b64encode(img_bytes).decode("ascii"),
+            total_pages=total,
+            page_num=req.page_num,
         )
-
-    page = doc[req.page_num]
-    # 150 DPI: multiply by 150/72
-    mat = fitz.Matrix(150 / 72, 150 / 72)
-    pix = page.get_pixmap(matrix=mat)
-    img_bytes = pix.tobytes("png")
-    total = len(doc)
-    doc.close()
-
-    return PreviewResponse(
-        image_base64=base64.b64encode(img_bytes).decode("ascii"),
-        total_pages=total,
-        page_num=req.page_num,
-    )
+    finally:
+        doc.close()
 
 
 # ── Utility ───────────────────────────────────────────────────────────────
