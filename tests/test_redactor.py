@@ -3,7 +3,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'core'))
 
 import pytest
 import fitz  # PyMuPDF
-from redactor import PDFRedactor
+from unittest.mock import patch
+from pathlib import Path
+import tempfile
+from redactor import PDFRedactor, RedactionItem
 
 
 def _make_page_with_text(text: str):
@@ -111,3 +114,75 @@ class TestRedactTextSearch:
         fake_rect = fitz.Rect(100, 100, 150, 120)
         word_rects = [(fake_rect, "Joe's.")]
         assert redactor._is_whole_word_match(fake_rect, "Joe", word_rects) is True
+
+
+class TestRedactPdfRobustness:
+    """redact_pdf must never raise, must close its document, and must not
+    leave a partially-written output file behind when a stage fails."""
+
+    def _make_pdf_file(self, path, text="Hello Joe Bloggs"):
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 100), text, fontsize=12)
+        doc.save(str(path))
+        doc.close()
+
+    def test_failure_returns_false_without_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.pdf"
+            out = Path(tmp) / "out.pdf"
+            self._make_pdf_file(src)
+            redactor = PDFRedactor()
+
+            def boom(self, doc):
+                raise RuntimeError("strip failed")
+
+            with patch.object(PDFRedactor, "_strip_metadata", boom):
+                success, msg = redactor.redact_pdf(
+                    src, out, [RedactionItem(page_num=1, text="Joe Bloggs")]
+                )
+            assert success is False
+            assert "strip failed" in msg
+
+    def test_partial_output_removed_on_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.pdf"
+            out = Path(tmp) / "out.pdf"
+            self._make_pdf_file(src)
+            redactor = PDFRedactor()
+
+            def boom(self, doc):
+                out.write_bytes(b"%PDF partial")  # simulate a half-written file
+                raise RuntimeError("save failed")
+
+            with patch.object(PDFRedactor, "_strip_metadata", boom):
+                success, msg = redactor.redact_pdf(
+                    src, out, [RedactionItem(page_num=1, text="Joe Bloggs")]
+                )
+            assert success is False
+            assert not out.exists(), "partial output must be removed on failure"
+
+    def test_document_closed_on_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.pdf"
+            out = Path(tmp) / "out.pdf"
+            self._make_pdf_file(src)
+            redactor = PDFRedactor()
+            opened = []
+            real_open = fitz.open
+
+            def tracking_open(*a, **k):
+                d = real_open(*a, **k)
+                opened.append(d)
+                return d
+
+            def boom(self, doc):
+                raise RuntimeError("boom")
+
+            with patch("redactor.fitz.open", tracking_open), \
+                 patch.object(PDFRedactor, "_strip_metadata", boom):
+                redactor.redact_pdf(
+                    src, out, [RedactionItem(page_num=1, text="Joe Bloggs")]
+                )
+            assert opened, "redact_pdf should have opened a document"
+            assert opened[0].is_closed, "document must be closed after a failure"

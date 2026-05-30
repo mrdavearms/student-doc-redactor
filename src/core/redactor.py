@@ -102,6 +102,7 @@ class PDFRedactor:
         Returns:
             Tuple of (success, message)
         """
+        doc = None
         try:
             doc = fitz.open(str(input_pdf))
 
@@ -173,12 +174,22 @@ class PDFRedactor:
 
             # Save redacted document (clean=True removes incremental save data)
             doc.save(str(output_pdf), garbage=4, deflate=True, clean=True)
-            doc.close()
 
             return True, f"Successfully redacted {len(redaction_items)} items"
 
         except Exception as e:
+            # Remove any partially-written output so a failed redaction can
+            # never leave a file that looks like a successful result.
+            try:
+                out = Path(output_pdf)
+                if out.exists():
+                    out.unlink()
+            except OSError:
+                pass
             return False, f"Error during redaction: {str(e)}"
+        finally:
+            if doc is not None:
+                doc.close()
 
     def _redact_bbox(self, page: fitz.Page, bbox: Tuple[float, float, float, float]):
         """
