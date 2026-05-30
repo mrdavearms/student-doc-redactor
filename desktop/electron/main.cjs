@@ -101,8 +101,30 @@ function startBackend() {
     console.error(`[backend] ${data.toString().trim()}`);
   });
 
-  backendProcess.on('exit', (code) => {
-    console.log(`Backend exited with code ${code}`);
+  backendProcess.on('exit', (code, signal) => {
+    console.log(`Backend exited with code ${code}, signal ${signal}`);
+    // An exit we did not initiate (app not shutting down) means the engine
+    // crashed mid-session. The UI cannot recover without a restart.
+    if (!app.isQuitting) {
+      backendProcess = null;
+      dialog.showErrorBox(
+        'Redaction Engine Stopped',
+        'The redaction engine stopped unexpectedly. The app will now close — please reopen it to continue.',
+      );
+      app.quit();
+    }
+  });
+
+  backendProcess.on('error', (err) => {
+    // The process could not be spawned at all (bad path, permissions, etc.).
+    console.error('Failed to spawn backend:', err);
+    if (!app.isQuitting) {
+      dialog.showErrorBox(
+        'Failed to Start',
+        `The redaction engine could not be started.\n\n${err.message}\n\nPlease reinstall the application.`,
+      );
+      app.quit();
+    }
   });
 }
 
@@ -246,6 +268,7 @@ app.on('ready', async () => {
 });
 
 app.on('window-all-closed', () => {
+  app.isQuitting = true;
   if (backendProcess) {
     backendProcess.kill();
     backendProcess = null;
@@ -254,6 +277,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  app.isQuitting = true;
   if (updateCheckInterval) {
     clearInterval(updateCheckInterval);
     updateCheckInterval = null;
