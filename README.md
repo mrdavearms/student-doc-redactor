@@ -16,8 +16,8 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 >
 > | Platform | File | Notes |
 > |----------|------|-------|
-> | **macOS** (Apple Silicon) | `.dmg` installer | Drag to Applications. Not code-signed yet — see [macOS Gatekeeper note](#macos-gatekeeper-note) below. |
-> | **Windows** (64-bit) | `.exe` installer | Standard NSIS installer. Choose your install directory. |
+> | **macOS** (Apple Silicon) | `.dmg` installer | Drag to Applications. First launch shows a one-time security prompt — see [Security warnings on first launch](#security-warnings-on-first-launch). |
+> | **Windows** (64-bit) | `.exe` installer | Run the installer. First launch may show "Windows protected your PC" — see [Security warnings on first launch](#security-warnings-on-first-launch). |
 >
 > **LibreOffice** (free) is required to process Word documents. The app will prompt you to install it on first launch if it's missing. [Download LibreOffice](https://www.libreoffice.org/download/download-libreoffice/). If you only work with PDFs, LibreOffice is not needed.
 >
@@ -336,15 +336,31 @@ The desktop app bundles Python, Tesseract, and all AI models. You only need to i
 
 > **Linux** is not currently supported but is on the roadmap.
 
-### macOS Gatekeeper Note
+### Security Warnings on First Launch
 
-The Mac app is not code-signed yet. When you first open it, macOS may block it with "App can't be opened because it is from an unidentified developer." To bypass this:
+The app isn't yet registered with Apple or Microsoft (the paid code-signing certificates that remove these prompts are on the roadmap). The **first** time you open it, your computer shows a one-time "unrecognised app" warning. **This is expected — the app is safe, runs entirely on your own computer, and none of your documents ever leave it.**
 
-1. Right-click (or Control-click) the app in Finder
-2. Select **Open** from the context menu
-3. Click **Open** in the dialog that appears
+**macOS**
 
-You only need to do this once — macOS remembers your choice. Code signing is planned for a future release.
+When you first open it, macOS may say *"App can't be opened because it is from an unidentified developer"* (or *"…because Apple cannot check it for malicious software"*).
+
+1. Drag **Redaction Tool** from the `.dmg` into your **Applications** folder.
+2. In **Applications**, **right-click** (or Control-click) the app and choose **Open**.
+3. Click **Open** in the dialog that appears.
+
+You only need to do this once — macOS remembers your choice.
+
+> **Newer macOS (Sequoia and later):** if there's no **Open** button in the dialog, go to **Apple menu → System Settings → Privacy & Security**, scroll to the bottom, click **Open Anyway**, and confirm.
+
+**Windows**
+
+Because the installer isn't code-signed, Microsoft Defender SmartScreen may show a blue *"Windows protected your PC"* screen.
+
+1. If your browser warns about the download, choose **Keep**.
+2. On the blue SmartScreen box, click the small **More info** link.
+3. Click the **Run anyway** button that appears, then follow the installer.
+
+You only need to do this once per new version. Code signing for both platforms is planned for a future release.
 
 ---
 

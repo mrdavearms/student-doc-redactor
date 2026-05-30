@@ -161,9 +161,25 @@ jobs:
           | 🪟 **Windows** (64-bit) | [**Redaction-Tool-Setup-VERSION.exe**](https://github.com/REPO/releases/download/vVERSION/Redaction-Tool-Setup-VERSION.exe) |
           | 🍎 **macOS** (Apple Silicon) | [**Redaction-Tool-VERSION-arm64.dmg**](https://github.com/REPO/releases/download/vVERSION/Redaction-Tool-VERSION-arm64.dmg) |
 
-          > **First time on Mac?** macOS may block the app — right-click → Open → Open to bypass Gatekeeper. You only need to do this once.
+          ### ⚠️ First time opening it? Getting past the security warning
 
-          > **LibreOffice** (free) is needed to process Word documents. The app prompts you to install it on first launch. [Download LibreOffice](https://www.libreoffice.org/download/download-libreoffice/). If you only work with PDFs, LibreOffice is not needed.
+          This app is free and open-source, and isn't yet registered with Apple or Microsoft (the paid certificates that remove these prompts are on our roadmap). So the **first** time you open it, your computer shows a one-time "unrecognised app" warning. **This is expected — the app is safe, runs entirely on your own computer, and none of your documents ever leave it.** Here is exactly what to click:
+
+          **🍎 On a Mac**
+          1. Open the downloaded `.dmg` and drag **Redaction Tool** into your **Applications** folder.
+          2. In **Applications**, **right-click** (or hold Control and click) **Redaction Tool**, then choose **Open**.
+          3. When it warns that the developer can't be verified, click **Open** again.
+          4. Done — you only do this once. After that, open it like any other app.
+
+          > If you don't see an **Open** button (newer macOS versions): open the **Apple menu → System Settings → Privacy & Security**, scroll to the bottom, click **Open Anyway**, and confirm.
+
+          **🪟 On Windows**
+          1. Run the downloaded **Redaction-Tool-Setup** file. If your browser flags the download, choose **Keep**.
+          2. If a blue **"Windows protected your PC"** screen appears, click the small **More info** link.
+          3. Click the **Run anyway** button that appears, then follow the installer prompts.
+          4. You only do this once per new version.
+
+          > **LibreOffice** (free) is needed only if you process **Word** documents. The app prompts you to install it on first launch. [Download LibreOffice](https://www.libreoffice.org/download/download-libreoffice/). If you only work with PDFs, you don't need it.
 
           Everything else — Python, Tesseract OCR, and AI models — is bundled in the installer. No setup required.
 
