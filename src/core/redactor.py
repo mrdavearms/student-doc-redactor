@@ -599,7 +599,13 @@ class PDFRedactor:
             Number of PII word-groups successfully redacted via OCR.
         """
         if not self._check_tesseract():
-            return 0
+            # This page is image-only and its PII can only be located via OCR.
+            # If the OCR engine is missing we cannot redact it — fail loudly
+            # rather than emit a document with unredacted PII.
+            raise RuntimeError(
+                f"OCR engine (Tesseract) unavailable — cannot redact "
+                f"image-only page {page.number + 1}"
+            )
 
         # Resolve Tesseract paths using the same binary_resolver as TextExtractor
         try:

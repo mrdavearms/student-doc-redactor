@@ -371,14 +371,14 @@ class TestRedactOcrPageMatching:
         doc.close()
 
     @patch('redactor.pytesseract')
-    def test_no_tesseract_returns_zero(self, mock_tess):
-        """When Tesseract is not available, should return 0 gracefully."""
+    def test_no_tesseract_raises(self, mock_tess):
+        """When Tesseract is not available, _redact_ocr_page must raise RuntimeError."""
         mock_tess.get_tesseract_version.side_effect = Exception("not installed")
 
         page, doc = _make_image_only_page()
         items = [RedactionItem(page_num=1, text="Joe")]
-        count = self.redactor._redact_ocr_page(page, items)
-        assert count == 0
+        with pytest.raises(RuntimeError, match="OCR engine"):
+            self.redactor._redact_ocr_page(page, items)
         doc.close()
 
 
@@ -681,3 +681,19 @@ class TestRedactEmbeddedImages:
         new_bytes = new_img_data['image']
         assert new_bytes != orig_bytes
         doc.close()
+
+
+def test_ocr_page_fails_loudly_when_tesseract_unavailable(tmp_path):
+    """An image-only page with PII must NOT be reported as redacted when the
+    OCR engine is missing — redact_pdf must return failure, not silent success."""
+    pdf = _make_image_pdf_with_text("Joe Bloggs", tmp_path)
+    out = tmp_path / "out.pdf"
+    redactor = PDFRedactor()
+    items = [RedactionItem(page_num=1, text="Joe Bloggs")]
+
+    with patch.object(PDFRedactor, "_check_tesseract", return_value=False):
+        success, msg = redactor.redact_pdf(pdf, out, items)
+
+    assert success is False, "must fail when OCR engine is unavailable"
+    assert "OCR" in msg or "Tesseract" in msg, f"message should name the cause: {msg}"
+    assert not out.exists(), "no output file should be left behind"
