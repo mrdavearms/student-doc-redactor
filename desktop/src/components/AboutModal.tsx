@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ExternalLink, ShieldCheck, FolderOpen, Eye, Lightbulb, Zap, RefreshCw } from 'lucide-react';
 import { resetWalkthrough } from './Walkthrough';
-import type { UpdateState } from '../hooks/useUpdater';
+import { RELEASES_URL, type UpdateState } from '../hooks/useUpdater';
 
 interface AboutModalProps {
   open: boolean;
@@ -149,12 +149,20 @@ function TabAbout({ openLink, updateState, onCheckForUpdates }: {
     switch (updateState.status) {
       case 'checking':    return 'Checking…';
       case 'up-to-date':  return 'You\'re up to date ✓';
+      case 'available':   return 'Download update';
       case 'downloading': return `Downloading… ${updateState.percent > 0 ? updateState.percent + '%' : ''}`;
       case 'ready':       return 'Update ready — see banner above';
       case 'error':       return 'Check failed — try again';
       default:            return 'Check for Updates';
     }
   };
+
+  // When an update is available but can't auto-install (e.g. unsigned macOS),
+  // the button opens the download page instead of re-checking.
+  const onActionClick =
+    updateState.status === 'available'
+      ? () => openLink(RELEASES_URL)
+      : onCheckForUpdates;
 
   const checkButtonDisabled =
     updateState.status === 'checking' ||
@@ -189,7 +197,7 @@ function TabAbout({ openLink, updateState, onCheckForUpdates }: {
             Version <span className="font-medium text-slate-700">{appVersion || '—'}</span>
           </p>
           <button
-            onClick={onCheckForUpdates}
+            onClick={onActionClick}
             disabled={checkButtonDisabled}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium
                        bg-primary-600 text-white hover:bg-primary-700 disabled:bg-slate-200

@@ -17,7 +17,7 @@ function App() {
   const navigateTo = useStore((s) => s.navigateTo);
   const error = useStore((s) => s.error);
   const setError = useStore((s) => s.setError);
-  const { updateState, checkForUpdates, restartAndInstall, dismiss } = useUpdater();
+  const { updateState, checkForUpdates, restartAndInstall, downloadLatest, dismiss } = useUpdater();
   const [depsChecked, setDepsChecked] = useState(false);
   const backendReachable = useStore((s) => s.backendReachable);
   const setBackendReachable = useStore((s) => s.setBackendReachable);
@@ -75,6 +75,7 @@ function App() {
         updateState={updateState}
         onRestart={restartAndInstall}
         onDismiss={dismiss}
+        onDownloadLatest={downloadLatest}
       />
 
       {!backendReachable && (

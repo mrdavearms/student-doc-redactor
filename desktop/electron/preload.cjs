@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('download-progress', handler);
     return () => ipcRenderer.removeListener('download-progress', handler);
   },
+  onUpdateAvailableManual: (cb) => {
+    const handler = (_event, version) => cb(version);
+    ipcRenderer.on('update-available-manual', handler);
+    return () => ipcRenderer.removeListener('update-available-manual', handler);
+  },
+  onUpdateError: (cb) => {
+    const handler = (_event, message) => cb(message);
+    ipcRenderer.on('update-error', handler);
+    return () => ipcRenderer.removeListener('update-error', handler);
+  },
 
   restartAndInstall: () => ipcRenderer.invoke('restart-and-install'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),

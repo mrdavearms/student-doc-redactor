@@ -159,13 +159,22 @@ function createWindow() {
 // ── Auto-updater ──────────────────────────────────────────────────────
 
 function setupAutoUpdater() {
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // macOS auto-update requires a code-signed app AND a .zip artifact (Squirrel
+  // cannot apply a .dmg). Until the Mac build is signed/notarised, attempting an
+  // auto-download just fails — so on macOS we only DETECT updates and let the
+  // user download manually. Windows (NSIS) auto-updates fine without signing.
+  const canAutoUpdate = process.platform === 'win32';
+  autoUpdater.autoDownload = canAutoUpdate;
+  autoUpdater.autoInstallOnAppQuit = canAutoUpdate;
 
   autoUpdater.on('update-available', (info) => {
     console.log(`Update available: ${info.version}`);
-    if (mainWindow) {
+    if (!mainWindow) return;
+    if (canAutoUpdate) {
       mainWindow.webContents.send('update-available', info.version);
+    } else {
+      // Notify only — the renderer prompts a manual download.
+      mainWindow.webContents.send('update-available-manual', info.version);
     }
   });
 
@@ -178,6 +187,10 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     console.error('Auto-updater error:', err.message);
+    // Surface the failure to the UI so it never hangs on "Downloading…".
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', err.message);
+    }
   });
 
   autoUpdater.on('update-not-available', () => {
