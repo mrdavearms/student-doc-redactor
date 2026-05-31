@@ -235,7 +235,10 @@ ipcMain.handle('open-external', async (_event, url) => {
 });
 
 ipcMain.handle('restart-and-install', () => {
-  autoUpdater.quitAndInstall();
+  // isSilent=true, isForceRunAfter=true: install the update silently (no NSIS
+  // wizard for the assisted oneClick:false installer) and relaunch the app
+  // afterwards — a smooth, hands-off update for non-technical users (Windows).
+  autoUpdater.quitAndInstall(true, true);
 });
 
 ipcMain.handle('check-for-updates', async () => {
