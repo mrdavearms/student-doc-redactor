@@ -1,3 +1,8 @@
+# Environment secrets (never commit API keys / tokens)
+.env
+.env.*
+!.env.example
+
 # Git worktrees
 .worktrees/
 
