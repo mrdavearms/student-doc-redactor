@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (292 tests, ~4m30s)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (306 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -438,22 +438,25 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 272 tests total
+tests/                                # 306 tests total
 ├── test_pii_detector.py              # 52 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 65 tests: name variations, contextual detection, possessives, family, nicknames
-├── test_pii_orchestrator.py          # 25 tests: orchestrator merge, dedup, NER-primary coordination
+├── test_pii_orchestrator.py          # 27 tests: orchestrator merge, dedup, NER-primary coordination
 ├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
-├── test_redactor.py                  # 11 tests: text-layer redaction routing, possessive+punctuation, core redact_pdf
+├── test_redactor.py                  # 14 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
-├── test_ocr_redaction.py             # 28 tests: image-only page detection, OCR redaction, word matching
+├── test_ocr_redaction.py             # 29 tests: image-only page detection, OCR redaction, word matching
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
-├── test_widget_redaction.py          # 6 tests: AcroForm widget deletion
+├── test_widget_redaction.py          # 7 tests: AcroForm widget deletion (incl. word-boundary match)
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
+├── test_cleanup_api.py               # 13 tests: cleanup endpoint path-traversal guards
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
-├── test_integration.py               # 10 tests: end-to-end redaction pipeline (links, bookmarks, structure)
+├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing
+├── test_backend_redact.py            # 3 tests: detect→redact selection + clean-500 error wrapping
+├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
 └── test_false_positives.py           # 4 tests: false-positive regression tests
 ```
@@ -530,7 +533,7 @@ electron-builder uses `--publish always` to create a draft GitHub Release and up
 - **Do NOT push tags to trigger builds unless code is merged to `main` first.** Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - **Pushing a `v*` tag via Bash requires bypass permissions** — the tool's classifier blocks tag pushes that trigger public releases.
 - **Branch pushes trigger NO CI** — only `v*` tags run a workflow. Pushing `test`/`main` is free; only release tags consume GitHub Actions minutes (no Cloud Build exists for this repo).
-- **Version-sync before tagging:** bump `desktop/package.json` AND both `version` fields in `desktop/package-lock.json` to match the tag. electron-builder names/publishes artifacts from the `package.json` version while `release-notes` derives the version from the tag — a mismatch puts artifacts on the wrong release and breaks the download links. Validate with `cd desktop && npm ci`.
+- **Version-sync before tagging:** bump `desktop/package.json` AND both `version` fields in `desktop/package-lock.json` to match the tag. electron-builder names/publishes artifacts from the `package.json` version while `release-notes` derives the version from the tag — a mismatch puts artifacts on the wrong release and breaks the download links (existing users keep being told they're up to date). The `verify-version` CI job now hard-fails the release in seconds if `desktop/package.json` ≠ tag, before any build runs; `cd desktop && npm ci` still guards package.json↔lockfile drift.
 - **Changelog auto-generates from commit subjects** since the previous tag — use conventional-commit style (`fix(scope): subject`) so release notes read cleanly.
 - `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed).
 
@@ -538,13 +541,17 @@ electron-builder uses `--publish always` to create a draft GitHub Release and up
 
 The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` hook + `UpdateBanner.tsx` component handle the UX. Update metadata (`.yml` and `.blockmap` files) are published alongside installers.
 
+**Platform reality (critical — don't "fix" as a bug):** macOS auto-update CANNOT work until the app is code-signed/notarised AND a `zip` build target is added — Squirrel.Mac can't apply a `.dmg`, and the `mac` target is `dmg`-only so `latest-mac.yml` references the dmg. Since v1.3.2 macOS is intentionally **notify-only**: `setupAutoUpdater()` uses `canAutoUpdate = process.platform === 'win32'` to set `autoDownload=false` on macOS and emit `update-available-manual` (UI prompts a manual download via `RELEASES_URL`). Windows (NSIS) auto-updates fine unsigned — don't disable it. Unsigned macOS installs can never auto-update even after signing (signature mismatch) → those users must re-download once.
+
+**Updater spans 4 files — keep in sync:** `electron/main.cjs` `setupAutoUpdater()` (autoUpdater events → `webContents.send`) → `electron/preload.cjs` (`onUpdate*` bridges) → `src/hooks/useUpdater.ts` (state machine + a download-stall watchdog so it never hangs on "Downloading…") → `UpdateBanner.tsx`/`AboutModal.tsx` (render `available`/`error` with a Download link). `quitAndInstall(true, true)` (silent + relaunch) — don't revert to no-args; with NSIS `oneClick:false` the no-arg form pops the installer wizard.
+
 **ESLint baseline:** `cd desktop && npm run lint` reports **7 errors + 2 warnings** across `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, `Walkthrough.tsx`, and `FinalConfirmation.tsx`. New code must not increase the count, but these aren't yours to fix unless you're already touching those files.
 
 ---
 
 ## What's Next / Known Gaps
 
-- **Code signing**: Mac DMG uses ad-hoc signing (not notarised). Windows `.exe` is unsigned. Both work but show OS warnings on first launch.
+- **Code signing**: Mac DMG ad-hoc signed (not notarised); Windows `.exe` unsigned → first-launch OS warnings (release-notes template + README explain the bypass for both platforms). **Consequence:** macOS auto-update is disabled (notify-only) until a Developer ID signature + a `zip` target land. Windows signing note: Azure Trusted Signing (cheapest) is **not available in Australia** (US/CA/EU/UK only); the AU path is a traditional OV cert on a hardware token/HSM, and EV no longer bypasses SmartScreen (changed 2024).
 - **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
 - **Windows**: SUPPORTED as of v1.1.0. NSIS installer built via CI. Bundled Python + Tesseract. LibreOffice prompted on first run via Setup screen.
 - **Linux**: Not supported. No current plans.
