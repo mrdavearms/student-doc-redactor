@@ -10,8 +10,32 @@ permissions:
 
 jobs:
 
+  verify-version:
+    name: Verify version matches tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # electron-builder names artifacts and picks the target release from
+      # desktop/package.json's version, while the release-notes job derives the
+      # version from the git tag. If they disagree, installers land on the wrong
+      # release and existing users are told "you're up to date" — the new build
+      # silently never reaches anyone. Fail fast, before any 30-min build runs.
+      - name: Assert package.json version == tag
+        working-directory: desktop
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package.json=$PKG  tag=$TAG"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::desktop/package.json version ($PKG) does not match tag ($TAG). Bump desktop/package.json AND both package-lock.json version fields to match the tag before tagging."
+            exit 1
+          fi
+
   build-mac:
     name: Build macOS
+    needs: verify-version
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -44,6 +68,7 @@ jobs:
 
   build-windows:
     name: Build Windows
+    needs: verify-version
     runs-on: windows-latest
     steps:
       - name: Checkout
