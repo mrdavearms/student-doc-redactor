@@ -96,6 +96,17 @@ export const api = {
       ...options,
     }),
 
+  addManualPII: (params: {
+    doc_path: string;
+    text: string;
+    page_num: number;
+    category?: string;
+  }) =>
+    request<{ match: import('./types').PIIMatch; index: number }>('/api/pii/manual', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
   previewPage: (pdf_path: string, page_num: number) =>
     request<import('./types').PreviewResponse>('/api/preview', {
       method: 'POST',

@@ -45,6 +45,7 @@ interface AppState {
   toggleSelection: (key: string) => void;
   selectAll: (docPath: string, count: number) => void;
   deselectAll: (docPath: string, count: number) => void;
+  addManualMatch: (docPath: string, match: import('./types').PIIMatch, index: number) => void;
 
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
@@ -138,6 +139,18 @@ export const useStore = create<AppState>((set) => ({
       const selections = { ...state.userSelections };
       for (let i = 0; i < count; i++) selections[`${docPath}_${i}`] = false;
       return { userSelections: selections };
+    }),
+
+  addManualMatch: (docPath, match, index) =>
+    set((state) => {
+      if (!state.detectionResults) return {};
+      const documents = state.detectionResults.documents.map((doc) =>
+        doc.path === docPath ? { ...doc, matches: [...doc.matches, match] } : doc
+      );
+      return {
+        detectionResults: { ...state.detectionResults, documents },
+        userSelections: { ...state.userSelections, [`${docPath}_${index}`]: true },
+      };
     }),
 
   setRedactionResults: (results) => set({ redactionResults: results }),
