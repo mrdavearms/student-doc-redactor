@@ -33,6 +33,16 @@ describe('friendlyError', () => {
       .toMatch(/couldn't load that page/i);
   });
 
+  it('maps manual-PII text-too-short to a friendly message', () => {
+    expect(friendlyError(new Error('Manual PII text must be at least 3 characters.')))
+      .toMatch(/at least 3 characters/i);
+  });
+
+  it('maps manual-PII out-of-range page to a friendly message', () => {
+    expect(friendlyError(new Error('Page 5 does not exist in this document (it has 2 pages).')))
+      .toMatch(/doesn't have that many pages/i);
+  });
+
   it('returns the fallback for an unknown error', () => {
     expect(friendlyError(new Error('Unrecognised exception')))
       .toMatch(/something went wrong/i);

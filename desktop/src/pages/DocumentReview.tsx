@@ -1,16 +1,18 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, CheckSquare, Square, FileText, CheckCircle2,
+  ArrowLeft, ArrowRight, CheckSquare, Square, FileText, CheckCircle2, Plus,
 } from 'lucide-react';
 import { useStore } from '../store';
+import { api } from '../api';
+import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 
 export default function DocumentReview() {
   const {
     detectionResults, currentDocIndex, userSelections,
     setCurrentDocIndex, toggleSelection, selectAll, deselectAll,
-    navigateTo,
+    addManualMatch, setError, navigateTo,
   } = useStore();
 
   /** Find the next doc index that has PII matches, starting from `from`. Returns totalDocs if none found. */
@@ -20,6 +22,19 @@ export default function DocumentReview() {
     }
     return detectionResults?.documents.length ?? 0;
   };
+
+  const [manualText, setManualText] = useState('');
+  const [manualPage, setManualPage] = useState(1);
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualFieldError, setManualFieldError] = useState<string | null>(null);
+
+  // Reset the form when the current document changes so a stale entry
+  // can't accidentally get submitted against the wrong document.
+  useEffect(() => {
+    setManualText('');
+    setManualPage(1);
+    setManualFieldError(null);
+  }, [currentDocIndex]);
 
   // Auto-skip to first doc with PII on mount / when index changes
   useEffect(() => {
@@ -48,6 +63,30 @@ export default function DocumentReview() {
   const selectedCount = matches.filter(
     (_, idx) => userSelections[`${doc.path}_${idx}`]
   ).length;
+
+  const handleAddManual = async () => {
+    const trimmed = manualText.trim();
+    if (trimmed.length < 3) {
+      setManualFieldError('Enter at least 3 characters.');
+      return;
+    }
+    setManualFieldError(null);
+    setManualBusy(true);
+    try {
+      const result = await api.addManualPII({
+        doc_path: doc.path,
+        text: trimmed,
+        page_num: manualPage,
+      });
+      addManualMatch(doc.path, result.match, result.index);
+      setManualText('');
+      setManualPage(1);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setManualBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -178,6 +217,49 @@ export default function DocumentReview() {
               })}
             </div>
           </>
+        )}
+      </div>
+
+      {/* Manual "missed item" addition */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="flex items-center gap-2">
+          <Plus size={16} className="text-primary-500" />
+          <h3 className="text-sm font-medium text-slate-600">Add a Missed Item</h3>
+          <HelpTip text="If you spot something the tool didn't catch — a name, ID, or anything else — add it here and it will be redacted along with everything else." />
+        </div>
+        <div className="flex flex-wrap items-end gap-2 mt-3">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs text-slate-400 mb-1">Text to redact</label>
+            <input
+              type="text"
+              value={manualText}
+              onChange={(e) => { setManualText(e.target.value); setManualFieldError(null); }}
+              placeholder="e.g. a name or ID the tool missed"
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-primary-300"
+            />
+          </div>
+          <div className="w-24">
+            <label className="block text-xs text-slate-400 mb-1">Page</label>
+            <input
+              type="number"
+              min={1}
+              value={manualPage}
+              onChange={(e) => setManualPage(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-primary-300"
+            />
+          </div>
+          <button
+            onClick={handleAddManual}
+            disabled={manualBusy || manualText.trim().length < 3}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium
+                       bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-40
+                       disabled:cursor-not-allowed transition-colors btn-press"
+          >
+            <Plus size={14} /> {manualBusy ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+        {manualFieldError && (
+          <p className="text-xs text-rose-600 mt-2">{manualFieldError}</p>
         )}
       </div>
 
