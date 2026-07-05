@@ -383,6 +383,122 @@ class TestRedactOcrPageMatching:
 
 
 # ---------------------------------------------------------------------------
+# Fuzzy OCR matching — tolerates single-character OCR misreads
+# ---------------------------------------------------------------------------
+
+class TestFuzzyOcrMatching:
+    """
+    Scanned pages routinely produce single-character OCR misreads
+    (e.g. Tesseract reading 'Sarah' as 'Sarnh'). These tests confirm
+    _match_and_redact_ocr_words tolerates that without over-matching
+    short words or non-alphabetic PII (emails, IDs).
+    """
+
+    def setup_method(self):
+        self.redactor = PDFRedactor()
+
+    def _mock_ocr_data(self, words_with_boxes):
+        data = {'text': [], 'left': [], 'top': [], 'width': [], 'height': [], 'conf': []}
+        for word, x, y, w, h in words_with_boxes:
+            data['text'].append(word)
+            data['left'].append(x)
+            data['top'].append(y)
+            data['width'].append(w)
+            data['height'].append(h)
+            data['conf'].append(95)
+        return data
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_one_char_misread_matches_five_letter_name(self, mock_ocr, mock_tess_ver):
+        """PII 'Sarah' must match OCR 'Sarnh' (single substitution)."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Sarnh", 100, 50, 90, 30),
+            ("attended", 220, 50, 120, 30),
+        ])
+        page, doc = _make_image_only_page()
+        items = [RedactionItem(page_num=1, text="Sarah")]
+        count = self.redactor._redact_ocr_page(page, items)
+        assert count == 1
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_two_char_misread_does_not_match_five_letter_name(self, mock_ocr, mock_tess_ver):
+        """5-7 letter names only tolerate a distance of 1 — two substitutions
+        is too different to trust as the same word."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Soznh", 100, 50, 90, 30),  # 2 chars different from "Sarah"
+        ])
+        page, doc = _make_image_only_page()
+        items = [RedactionItem(page_num=1, text="Sarah")]
+        count = self.redactor._redact_ocr_page(page, items)
+        assert count == 0
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_long_name_tolerates_two_char_misread(self, mock_ocr, mock_tess_ver):
+        """8+ letter names tolerate a distance of 2."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Cbristinm", 100, 50, 120, 30),  # "Christina" with 2 substitutions
+        ])
+        page, doc = _make_image_only_page()
+        items = [RedactionItem(page_num=1, text="Christina")]
+        count = self.redactor._redact_ocr_page(page, items)
+        assert count == 1
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_short_word_never_fuzzy_matched(self, mock_ocr, mock_tess_ver):
+        """Words under 5 letters must require an exact match — fuzzing them
+        risks blacking out unrelated short words like 'And'."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("And", 100, 50, 60, 30),
+        ])
+        page, doc = _make_image_only_page()
+        items = [RedactionItem(page_num=1, text="Ann")]
+        count = self.redactor._redact_ocr_page(page, items)
+        assert count == 0
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_email_never_fuzzy_matched(self, mock_ocr, mock_tess_ver):
+        """Non-alphabetic PII (emails, IDs) must never use fuzzy matching —
+        only the existing exact-substring path applies to them."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("jane@examplc.com", 100, 50, 200, 30),  # 1 char off from real email
+        ])
+        page, doc = _make_image_only_page()
+        items = [RedactionItem(page_num=1, text="jane@example.com")]
+        count = self.redactor._redact_ocr_page(page, items)
+        assert count == 0
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_multi_word_pii_with_one_word_misread_still_matches(self, mock_ocr, mock_tess_ver):
+        """Multi-word PII 'Sarah Williams' must match OCR 'Sarnh Williams'."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Sarnh", 100, 50, 90, 30),
+            ("Williams", 200, 50, 140, 30),
+        ])
+        page, doc = _make_image_only_page()
+        items = [RedactionItem(page_num=1, text="Sarah Williams")]
+        count = self.redactor._redact_ocr_page(page, items)
+        assert count == 1
+        doc.close()
+
+
+# ---------------------------------------------------------------------------
 # redact_pdf routing tests
 # ---------------------------------------------------------------------------
 

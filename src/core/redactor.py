@@ -84,6 +84,33 @@ class RedactionItem:
     text: str
     bbox: Tuple[float, float, float, float] = None  # (x0, y0, x1, y1)
 
+
+def _levenshtein(a: str, b: str) -> int:
+    """
+    Standard edit distance (insertions, deletions, substitutions).
+    Used to tolerate common single-character OCR misreads (e.g. Tesseract
+    reading "Sarah" as "Sarnh") when matching OCR'd words against PII.
+    """
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            curr[j] = min(
+                prev[j] + 1,               # deletion
+                curr[j - 1] + 1,           # insertion
+                prev[j - 1] + (ca != cb),  # substitution
+            )
+        prev = curr
+    return prev[-1]
+
+
 class PDFRedactor:
     """Handles permanent redaction of PDF documents"""
 
@@ -324,6 +351,21 @@ class PDFRedactor:
         except Exception:
             return False
 
+    def _fuzzy_word_match(self, ocr_clean: str, pii_lower: str) -> bool:
+        """
+        Whether an OCR-read word is likely the same as a PII word, tolerating
+        common OCR misreads. Only ever applies to alphabetic PII of 5+
+        characters — never to emails/URLs/numeric PII (the exact-substring
+        branch already handles those), and never to short words where a
+        1-character tolerance would risk matching an unrelated word.
+        """
+        if not pii_lower.isalpha() or len(pii_lower) < 5:
+            return False
+        if abs(len(ocr_clean) - len(pii_lower)) > 2:
+            return False
+        max_distance = 1 if len(pii_lower) <= 7 else 2
+        return _levenshtein(ocr_clean, pii_lower) <= max_distance
+
     def _match_and_redact_ocr_words(
         self,
         draw: 'ImageDraw.ImageDraw',
@@ -369,6 +411,7 @@ class PDFRedactor:
                         or ocr_clean.rstrip(".,;:!?") == pii_lower
                         # Exact match for PII with special chars (emails, URLs)
                         or (not pii_lower.isalpha() and pii_lower in ocr_lower)
+                        or self._fuzzy_word_match(ocr_clean, pii_lower)
                     ):
                         x0, y0, x1, y1 = pixel_bbox
                         draw.rectangle(
@@ -383,7 +426,11 @@ class PDFRedactor:
                     for wi, pii_w in enumerate(pii_words):
                         ocr_w = ocr_words[start_idx + wi][0]
                         ocr_clean = re.sub(r"[^\w']", '', ocr_w.lower())
-                        if ocr_clean != pii_w and ocr_clean.rstrip(".,;:!?") != pii_w:
+                        if (
+                            ocr_clean != pii_w
+                            and ocr_clean.rstrip(".,;:!?") != pii_w
+                            and not self._fuzzy_word_match(ocr_clean, pii_w)
+                        ):
                             match = False
                             break
                     if match:
