@@ -68,6 +68,18 @@ class DetectionResultsResponse(BaseModel):
     total_matches: int
 
 
+class AddManualPIIRequest(BaseModel):
+    doc_path: str
+    text: str
+    page_num: int  # 1-indexed, matches PIIMatch.page_num convention
+    category: str = "Manual"
+
+
+class AddManualPIIResponse(BaseModel):
+    match: PIIMatchResponse
+    index: int
+
+
 # ── Redaction ─────────────────────────────────────────────────────────────
 
 class RedactionSelection(BaseModel):

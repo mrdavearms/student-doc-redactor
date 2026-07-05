@@ -44,6 +44,8 @@ from backend.schemas import (
     CleanupRequest,
     CleanupResponse,
     CleanupFailure,
+    AddManualPIIRequest,
+    AddManualPIIResponse,
 )
 
 app = FastAPI(title="Redaction Tool API", version="2.0.0")
@@ -204,6 +206,74 @@ def detect_pii(req: DetectPIIRequest):
     return DetectionResultsResponse(
         documents=doc_responses,
         total_matches=results.total_matches,
+    )
+
+
+@app.post("/api/pii/manual", response_model=AddManualPIIResponse)
+def add_manual_pii(req: AddManualPIIRequest):
+    """
+    Append a user-identified PII item the detection engines missed.
+
+    Stored in the same server-side cache /api/redact reads from, so once
+    the frontend marks it selected it is redacted exactly like any other
+    detected match — no changes needed to the redact endpoint itself.
+    """
+    import fitz
+
+    cached = _detection_cache.get(req.doc_path)
+    if not cached:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No cached detection data for {req.doc_path}. Run detection first.",
+        )
+
+    text = req.text.strip()
+    if len(text) < 3:
+        raise HTTPException(status_code=400, detail="Manual PII text must be at least 3 characters.")
+
+    doc_path = Path(req.doc_path)
+    if not doc_path.exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {doc_path}")
+
+    try:
+        pdf = fitz.open(str(doc_path))
+        total_pages = len(pdf)
+        pdf.close()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot open PDF: {e}")
+
+    if req.page_num < 1 or req.page_num > total_pages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Page {req.page_num} does not exist in this document (it has {total_pages} pages).",
+        )
+
+    match = PIIMatch(
+        text=text,
+        category=req.category,
+        confidence=1.0,
+        page_num=req.page_num,
+        line_num=0,
+        context=text,
+        source="manual",
+        bbox=None,
+    )
+    cached["matches"].append(match)
+    index = len(cached["matches"]) - 1
+
+    return AddManualPIIResponse(
+        match=PIIMatchResponse(
+            text=match.text,
+            category=match.category,
+            confidence=match.confidence,
+            confidence_label=match.confidence_label,
+            page_num=match.page_num,
+            line_num=match.line_num,
+            context=match.context,
+            source=match.source,
+            bbox=None,
+        ),
+        index=index,
     )
 
 
