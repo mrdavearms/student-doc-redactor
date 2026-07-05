@@ -179,7 +179,7 @@ match.confidence_label  # property: 'high' | 'medium' | 'low'
 
 ### 3. `PIIMatch` has a `source` field
 
-Added in `a699268`. Values: `'regex'`, `'presidio'`, `'gliner'`. Used by the orchestrator for deduplication logic. Don't remove it.
+Added in `a699268`. Values in practice: `'regex'`, `'presidio'`, and `'manual'` (user-added during document review — see rule #31). The docstring on the dataclass still lists `'gliner'` from before that engine was removed (see Known Gaps) — no code path emits it anymore. Used by the orchestrator for deduplication logic. Don't remove it.
 
 ### 4. Medicare detection requires 'medicare' in the same line
 
@@ -353,6 +353,14 @@ All `setError` call sites use `friendlyError(e)` from `desktop/src/lib/errorMess
 
 `/api/cleanup` and `/api/cleanup/list` only operate on `*_redacted.pdf` and `*.UNVERIFIED.pdf` files inside the resolved `output_folder` (verified via `Path.is_relative_to`). Do not relax these checks — they prevent path-traversal deletion of files outside the output area.
 
+### 31. Manually-added PII items live in the same detection cache as engine-found matches
+
+`POST /api/pii/manual` (`backend/main.py`) appends a `PIIMatch(source="manual")` directly to `_detection_cache[doc_path]["matches"]` — the same list `/api/redact` reads from. This means a manual item is only ever *appended*, never inserted at an arbitrary position: its index in that list becomes its selection key (`f"{doc_path}_{index}"`), and `/api/redact` derives `user_selections` by iterating `range(len(matches))` from the cache. Inserting anywhere but the end would silently reassign an existing item's key to unrelated new content.
+
+### 32. Fuzzy OCR matching only applies to alphabetic words of 5+ characters
+
+`_fuzzy_word_match()` in `redactor.py` (used by the shared `_match_and_redact_ocr_words()`, so it covers both `_redact_ocr_page()` and `_redact_embedded_images()`) tolerates single-character OCR misreads via Levenshtein distance — but only for alphabetic PII of 5+ characters (`pii_lower.isalpha()` guard, same one used elsewhere to keep fuzzing away from emails/URLs). Distance tolerance is 1 for 5-7 letter words, 2 for 8+. Words under 5 letters, and any non-alphabetic PII, require an exact match — fuzzing short words risks blacking out unrelated text (e.g. "And" for "Ann").
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -438,19 +446,20 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 306 tests total
+tests/                                # 316 tests total
 ├── test_pii_detector.py              # 52 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 65 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 27 tests: orchestrator merge, dedup, NER-primary coordination
 ├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
 ├── test_redactor.py                  # 14 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
-├── test_ocr_redaction.py             # 29 tests: image-only page detection, OCR redaction, word matching
+├── test_ocr_redaction.py             # 35 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
 ├── test_widget_redaction.py          # 7 tests: AcroForm widget deletion (incl. word-boundary match)
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
+├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
 ├── test_cleanup_api.py               # 13 tests: cleanup endpoint path-traversal guards
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
