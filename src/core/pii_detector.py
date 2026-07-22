@@ -603,10 +603,14 @@ class PIIDetector:
             #   1. "Father: Nick" or "Father Nick"  (colon/space)
             #   2. "his father (Nick)"               (parenthetical)
             #   3. "his sister, Summer,"              (comma-separated)
+            # Keyword matching is case-insensitive via a scoped inline flag,
+            # but the name capture stays case-SENSITIVE — a global IGNORECASE
+            # silently defeated the [A-Z][a-z]+ capitalisation requirement and
+            # flagged words like "email" in "Parent email:" as names.
             patterns = [
-                re.compile(r'\b' + keyword + r'[:\s]+' + _name_pat, re.IGNORECASE),
-                re.compile(r'\b' + keyword + r'\s*\(\s*' + _name_pat + r'\s*\)', re.IGNORECASE),
-                re.compile(r'\b' + keyword + r',\s+' + _name_pat, re.IGNORECASE),
+                re.compile(r'\b(?i:' + keyword + r')[:\s]+' + _name_pat),
+                re.compile(r'\b(?i:' + keyword + r')\s*\(\s*' + _name_pat + r'\s*\)'),
+                re.compile(r'\b(?i:' + keyword + r'),\s+' + _name_pat),
             ]
 
             found_name = False
