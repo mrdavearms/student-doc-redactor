@@ -284,34 +284,33 @@ class TestDOBDetection:
 
     def test_dob_dotted_separators(self):
         matches = self._dob_matches("DOB: 12.03.2015")
-        dob = [m for m in matches if m.category == "Date of birth"]
-        assert any(m.text == "12.03.2015" for m in dob)
+        assert len(matches) == 1
+        assert matches[0].text == "12.03.2015"
 
     def test_dob_two_digit_year(self):
         matches = self._dob_matches("DOB: 12/3/15")
-        dob = [m for m in matches if m.category == "Date of birth"]
-        assert any(m.text == "12/3/15" for m in dob)
+        assert len(matches) == 1
+        assert matches[0].text == "12/3/15"
 
     def test_dob_ordinal_day(self):
         matches = self._dob_matches("Date of Birth: 12th March 2015")
-        dob = [m for m in matches if m.category == "Date of birth"]
-        assert any("March 2015" in m.text for m in dob)
+        assert len(matches) == 1
+        assert matches[0].text == "12th March 2015"
 
     def test_dob_ordinal_with_of(self):
         matches = self._dob_matches("Born: 3rd of June 2014")
-        dob = [m for m in matches if m.category == "Date of birth"]
-        assert any("June 2014" in m.text for m in dob)
+        assert len(matches) == 1
+        assert matches[0].text == "3rd of June 2014"
 
     def test_dob_month_first_us_style(self):
         matches = self._dob_matches("Born: March 12, 2015")
-        dob = [m for m in matches if m.category == "Date of birth"]
-        assert any("March 12" in m.text for m in dob)
+        assert len(matches) == 1
+        assert matches[0].text == "March 12, 2015"
 
     def test_standalone_dotted_date_without_label_not_flagged(self):
         """Dotted dates still require a DOB label — review dates stay unflagged."""
         matches = self._dob_matches("Review meeting held 12.03.2025")
-        dob = [m for m in matches if m.category == "Date of birth"]
-        assert len(dob) == 0
+        assert len(matches) == 0
 
 
 class TestNDISDetection:
