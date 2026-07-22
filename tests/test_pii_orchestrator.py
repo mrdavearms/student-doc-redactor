@@ -274,3 +274,55 @@ def test_run_presidio_degrades_when_ner_optional():
     o.presidio_analyzer.analyze.side_effect = RuntimeError("spaCy crashed")
     result = o._run_presidio("Some document text", 1)
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# NER Variation Matching: Word Boundaries and Title Filtering
+# ---------------------------------------------------------------------------
+
+def _stub_person(text_val):
+    return PIIMatch(text=text_val, category="Person name (NER)", confidence=0.90,
+                    page_num=1, line_num=1, context="", source="presidio")
+
+
+class TestNerVariationBoundaries:
+    def _orchestrator_with_stub(self, monkeypatch, person_text):
+        # Skip the (slow) real Presidio init; stub the NER result directly.
+        monkeypatch.setattr(PIIOrchestrator, "_init_presidio", lambda self: None)
+        orch = PIIOrchestrator("Zara Quill")
+        orch.presidio_analyzer = object()  # truthy — _run_presidio is stubbed
+        monkeypatch.setattr(
+            orch, "_run_presidio",
+            lambda text, page_num: [_stub_person(person_text)]
+        )
+        return orch
+
+    def test_variation_does_not_match_inside_longer_word(self, monkeypatch):
+        orch = self._orchestrator_with_stub(monkeypatch, "Ann Chen")
+        text = "Ann Chen attended.\nAnnual Review scheduled for Term 3."
+        matches = orch.detect_pii_in_text(text, page_num=1)
+        ann_hits = [m for m in matches if m.text.lower() == "ann"]
+        assert all(m.line_num == 1 for m in ann_hits), \
+            f"'Ann' matched inside 'Annual': {[(m.text, m.line_num) for m in ann_hits]}"
+
+    def test_title_tokens_not_generated_as_variations(self, monkeypatch):
+        orch = self._orchestrator_with_stub(monkeypatch, "Mrs Thompson")
+        text = "Mrs Thompson is the classroom teacher."
+        matches = orch.detect_pii_in_text(text, page_num=1)
+        assert not any(m.text.lower() == "mrs" for m in matches), \
+            "Bare title 'Mrs' must not be flagged as a name variation"
+
+    def test_real_given_names_are_still_flagged_as_variations(self, monkeypatch):
+        """Regression guard: common given names must NOT be filtered out.
+
+        An earlier design filtered variations through _CONTEXTUAL_NAME_EXCLUDE,
+        which contains real names (Bob, Sue, Max, Pat, Ray, Ted...). That would
+        silently stop redacting a parent referred to by first name only.
+        """
+        for full, bare in [("Bob Henderson", "bob"), ("Sue Williams", "sue"),
+                           ("Max Fenn", "max"), ("Ray Smith", "ray")]:
+            orch = self._orchestrator_with_stub(monkeypatch, full)
+            text = f"{full} attended the meeting.\nLater {bare.capitalize()} phoned the school."
+            matches = orch.detect_pii_in_text(text, page_num=1)
+            assert any(m.text.lower() == bare for m in matches), \
+                f"Bare given name {bare!r} from {full!r} was not flagged — privacy risk"
