@@ -111,6 +111,38 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+# Whitespace or any hyphen/dash variant — used to split PII into tokens and to
+# join them when searching, so a name that OCR renders as "Smith - Jones" or
+# "sarah-williams" is still recognised as visible.
+_PII_SEP = r"[\s\-‐-―]"
+
+
+def _pii_visible_in_text(pii_text: str, haystack_lower: str) -> bool:
+    """
+    Whole-word visibility check used by both verification paths.
+
+    Substring checks caused false quarantines: after correctly redacting
+    "Ann", the word "Annual" elsewhere made verification report the PII as
+    still visible. This helper requires the PII to appear as (a) whole
+    word(s) — not embedded inside a longer alphanumeric run — while still
+    catching possessives ("Ann's") and multi-word PII that OCR wrapped,
+    hyphenated, or ran together.
+
+    Args:
+        pii_text: The redacted PII string (any case).
+        haystack_lower: The text to search, ALREADY lowercased by the caller.
+    """
+    tokens = [re.escape(t) for t in re.split(_PII_SEP + r"+", pii_text.lower()) if t]
+    if not tokens:
+        return False
+    pattern = (
+        r"(?<![A-Za-z0-9])"
+        + (_PII_SEP + r"*").join(tokens)
+        + r"(?:['’]s)?(?![A-Za-z0-9])"
+    )
+    return re.search(pattern, haystack_lower) is not None
+
+
 class PDFRedactor:
     """Handles permanent redaction of PDF documents"""
 
@@ -834,8 +866,9 @@ class PDFRedactor:
 
             doc.close()
 
-            # Check if the text still appears
-            if original_text.lower() in all_text.lower():
+            # Check if the text still appears (whole-word — substring checks
+            # false-flagged short names inside longer words, e.g. Ann/Annual)
+            if _pii_visible_in_text(original_text, all_text.lower()):
                 return False, f"Text still found in document: {original_text}"
             else:
                 return True, "Text successfully redacted"
@@ -920,9 +953,9 @@ class PDFRedactor:
                 # OCR the rendered image
                 ocr_text = pytesseract.image_to_string(img).lower()
 
-                # Check each redacted string
+                # Check each redacted string (whole-word — see _pii_visible_in_text)
                 for text in redacted_texts:
-                    if len(text) >= 3 and text.lower() in ocr_text:
+                    if len(text) >= 3 and _pii_visible_in_text(text, ocr_text):
                         failures.append(
                             f"Page {page_idx + 1}: '{text}' still visible after redaction"
                         )

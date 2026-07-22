@@ -186,3 +186,86 @@ class TestRedactPdfRobustness:
                 )
             assert opened, "redact_pdf should have opened a document"
             assert opened[0].is_closed, "document must be closed after a failure"
+
+
+class TestWholeWordVerification:
+    """Verification must not flag PII 'visible' inside longer ordinary words."""
+
+    def test_helper_no_match_inside_longer_word(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Ann", "annual review scheduled") is False
+
+    def test_helper_no_match_with_leading_letters(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Ann", "the banner was red") is False
+
+    def test_helper_matches_whole_word(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Ann", "ann was here") is True
+
+    def test_helper_matches_possessive(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Ann", "ann's workbook") is True
+
+    def test_helper_multiword_across_whitespace(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Sarah Williams", "report for sarah\nwilliams today") is True
+
+    def test_helper_multiword_joined_by_hyphen(self):
+        """OCR may join or hyphenate a name — that is still visible PII."""
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Sarah Williams", "sarah-williams") is True
+
+    def test_helper_hyphenated_name_split_by_spaces(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Smith-Jones", "smith - jones") is True
+
+    def test_helper_does_not_overmatch_longer_surname(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("Sarah Williams", "sarah williamson") is False
+
+    def test_helper_email_exact(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("nick.williams@gmail.com",
+                                    "contact nick.williams@gmail.com now") is True
+
+    def test_helper_apostrophe_name(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("O'Brien", "kate o'brien attended") is True
+
+    def test_verify_redaction_passes_when_name_only_inside_longer_word(self, tmp_path):
+        """A correctly-redacted doc containing 'Annual' must verify clean for 'Ann'."""
+        import fitz
+        from redactor import PDFRedactor, RedactionItem
+
+        src = tmp_path / "ann.pdf"
+        out = tmp_path / "ann_redacted.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 100), "Student: Ann Chen", fontsize=12)
+        page.insert_text((72, 130), "Annual Review scheduled for Term 3.", fontsize=12)
+        doc.save(str(src))
+        doc.close()
+
+        r = PDFRedactor()
+        ok, _ = r.redact_pdf(src, out, [RedactionItem(page_num=1, text="Ann"),
+                                        RedactionItem(page_num=1, text="Chen")])
+        assert ok
+
+        is_clean, msg = r.verify_redaction(out, "Ann")
+        assert is_clean, f"False positive: {msg}"
+
+    def test_verify_redaction_still_fails_when_name_remains(self, tmp_path):
+        import fitz
+        from redactor import PDFRedactor
+
+        pdf = tmp_path / "unredacted.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 100), "Student: Ann Chen", fontsize=12)
+        doc.save(str(pdf))
+        doc.close()
+
+        r = PDFRedactor()
+        is_clean, _ = r.verify_redaction(pdf, "Ann")
+        assert not is_clean
