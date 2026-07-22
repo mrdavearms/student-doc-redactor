@@ -12,10 +12,13 @@ class AustralianPhoneRecognizer(PatternRecognizer):
     """Detects Australian phone numbers."""
 
     PATTERNS = [
+        Pattern("AU_PHONE_INTL_MOBILE", r"\+61\s*4\d{2}\s*\d{3}\s*\d{3}", 0.85),
         Pattern("AU_PHONE_INTL", r"\+61\s*[2-478]\s*\d{4}\s*\d{4}", 0.85),
         Pattern("AU_PHONE_LANDLINE", r"0[2-478]\s*\d{4}\s*\d{4}", 0.85),
+        Pattern("AU_PHONE_LANDLINE_DOTTED", r"(?<!\d\.)0[2-478]\.\d{4}\.\d{4}(?!\d)", 0.85),
         Pattern("AU_PHONE_PARENS", r"\(0[2-478]\)\s*\d{4}\s*\d{4}", 0.85),
         Pattern("AU_PHONE_MOBILE_SPACED", r"04\d{2}\s*\d{3}\s*\d{3}", 0.85),
+        Pattern("AU_PHONE_MOBILE_DOTTED", r"(?<!\d\.)04\d{2}\.\d{3}\.\d{3}(?!\d)", 0.85),
         Pattern("AU_PHONE_MOBILE_NOSPACE", r"04\d{8}", 0.80),
     ]
 

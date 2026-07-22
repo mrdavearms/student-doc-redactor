@@ -47,6 +47,30 @@ class TestPhoneDetection:
         matches = self._phone_matches("Call 0412-345-678 for pickup")
         assert len(matches) >= 1
 
+    def test_mobile_international_format_spaced(self):
+        """'+61 412 345 678' — the standard intl mobile format."""
+        matches = self._phone_matches("Contact: +61 412 345 678")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert any("412 345 678" in m.text for m in phones)
+
+    def test_landline_dotted_separators(self):
+        """'02.6056.1234' — dot-separated landline."""
+        matches = self._phone_matches("Ph: 02.6056.1234")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert any("6056" in m.text for m in phones)
+
+    def test_mobile_dotted_separators(self):
+        """'0412.345.678' — dot-separated mobile."""
+        matches = self._phone_matches("Mob: 0412.345.678")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert len(phones) >= 1
+
+    def test_dotted_pattern_does_not_match_inside_a_longer_digit_run(self):
+        """Version/score strings must not become phone numbers."""
+        matches = self._phone_matches("Version 2.04.1234.5678 build")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert len(phones) == 0
+
 
 class TestEmailDetection:
     def setup_method(self):

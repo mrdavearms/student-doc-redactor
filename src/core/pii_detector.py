@@ -118,13 +118,18 @@ def generate_name_variations(name: str, preserve_short_name: str = None,
 class PIIDetector:
     """Detects PII in text using pattern matching and contextual analysis"""
 
-    # Australian phone number patterns
+    # Australian phone number patterns.
+    # The dotted variants carry (?<!\d\.) / (?!\d\.) guards so they cannot match
+    # inside a longer digit run (e.g. a version string "2.04.1234.5678").
     PHONE_PATTERNS = [
+        r'\+61[\s\-]*4\d{2}[\s\-]*\d{3}[\s\-]*\d{3}',   # +61 412 345 678 (intl mobile)
         r'\+61[\s\-]*[2-478][\s\-]*\d{4}[\s\-]*\d{4}',  # +61 2 1234 5678
-        r'0[2-478][\s\-]*\d{4}[\s\-]*\d{4}',  # 02 1234 5678
-        r'\(0[2-478]\)[\s\-]*\d{4}[\s\-]*\d{4}',  # (02) 1234 5678
-        r'04\d{2}[\s\-]*\d{3}[\s\-]*\d{3}',  # 0412 345 678 or 0412-345-678
-        r'04\d{8}',  # 0412345678
+        r'0[2-478][\s\-]*\d{4}[\s\-]*\d{4}',            # 02 1234 5678
+        r'(?<!\d\.)0[2-478]\.\d{4}\.\d{4}(?!\d)',       # 02.1234.5678
+        r'\(0[2-478]\)[\s\-]*\d{4}[\s\-]*\d{4}',        # (02) 1234 5678
+        r'04\d{2}[\s\-]*\d{3}[\s\-]*\d{3}',             # 0412 345 678
+        r'(?<!\d\.)04\d{2}\.\d{3}\.\d{3}(?!\d)',        # 0412.345.678
+        r'04\d{8}',                                      # 0412345678
     ]
 
     # Email pattern

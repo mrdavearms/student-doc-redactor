@@ -48,6 +48,12 @@ class TestAustralianPhoneRecognizer:
         results = rec.analyze("Phone: 02 9876 5432", rec.supported_entities, None)
         assert len(results) >= 1
 
+    def test_detects_intl_mobile_format(self):
+        """'+61 412 345 678' — international mobile with spaces."""
+        rec = AustralianPhoneRecognizer()
+        results = rec.analyze("+61 412 345 678", rec.supported_entities, None)
+        assert len(results) >= 1
+
 
 # ---------------------------------------------------------------------------
 # Australian Address Recognizer
