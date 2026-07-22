@@ -12,10 +12,13 @@ class AustralianPhoneRecognizer(PatternRecognizer):
     """Detects Australian phone numbers."""
 
     PATTERNS = [
+        Pattern("AU_PHONE_INTL_MOBILE", r"\+61\s*4\d{2}\s*\d{3}\s*\d{3}", 0.85),
         Pattern("AU_PHONE_INTL", r"\+61\s*[2-478]\s*\d{4}\s*\d{4}", 0.85),
         Pattern("AU_PHONE_LANDLINE", r"0[2-478]\s*\d{4}\s*\d{4}", 0.85),
+        Pattern("AU_PHONE_LANDLINE_DOTTED", r"(?<!\d\.)0[2-478]\.\d{4}\.\d{4}(?!\d)", 0.85),
         Pattern("AU_PHONE_PARENS", r"\(0[2-478]\)\s*\d{4}\s*\d{4}", 0.85),
         Pattern("AU_PHONE_MOBILE_SPACED", r"04\d{2}\s*\d{3}\s*\d{3}", 0.85),
+        Pattern("AU_PHONE_MOBILE_DOTTED", r"(?<!\d\.)04\d{2}\.\d{3}\.\d{3}(?!\d)", 0.85),
         Pattern("AU_PHONE_MOBILE_NOSPACE", r"04\d{8}", 0.80),
     ]
 
@@ -34,7 +37,7 @@ class AustralianAddressRecognizer(PatternRecognizer):
     PATTERNS = [
         Pattern(
             "AU_ADDRESS",
-            r"\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT)\s+\d{4}",
+            r"(?:(?:Unit|Flat|Apt|Apartment)\s+)?(?:\d+[A-Za-z]?\s*/\s*)?\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT)\s+\d{4}",
             0.85,
         ),
     ]
@@ -113,7 +116,7 @@ class CentrelinkCRNRecognizer(EntityRecognizer):
         if not any(kw in text_lower for kw in self.KEYWORDS):
             return results
 
-        pattern = re.compile(r"\b[A-Z0-9]{9}\b")
+        pattern = re.compile(r"\b\d{3}[\s\-]?\d{3}[\s\-]?\d{3}[A-Za-z]\b|\b[A-Z0-9]{9}\b")
         for match in pattern.finditer(text):
             results.append(
                 RecognizerResult(
@@ -136,10 +139,16 @@ class DateOfBirthRecognizer(EntityRecognizer):
     """Detects dates of birth — only when preceded by a DOB-related label."""
 
     DOB_LABELS = [r"DOB", r"D\.O\.B\.", r"Date of Birth", r"Date of birth", r"Born", r"Birth Date"]
+    _MONTHS = (
+        r"(?:January|February|March|April|May|June|July|August|September|"
+        r"October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    )
     DATE_PATTERNS = [
-        r"\d{1,2}/\d{1,2}/\d{4}",
-        r"\d{1,2}-\d{1,2}-\d{4}",
-        r"\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}",
+        r"\d{1,2}/\d{1,2}/\d{2,4}",
+        r"\d{1,2}-\d{1,2}-\d{2,4}",
+        r"\d{1,2}\.\d{1,2}\.\d{2,4}",
+        r"\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?" + _MONTHS + r"\s+\d{2,4}",
+        _MONTHS + r"\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}",
     ]
 
     def __init__(self):

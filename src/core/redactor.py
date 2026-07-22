@@ -111,11 +111,45 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+# Whitespace or any hyphen/dash variant — used to split PII into tokens and to
+# join them when searching, so a name that OCR renders as "Smith - Jones" or
+# "sarah-williams" is still recognised as visible.
+_PII_SEP = r"[\s\-‐-―]"
+
+
+def _pii_visible_in_text(pii_text: str, haystack_lower: str) -> bool:
+    """
+    Whole-word visibility check used by both verification paths.
+
+    Substring checks caused false quarantines: after correctly redacting
+    "Ann", the word "Annual" elsewhere made verification report the PII as
+    still visible. This helper requires the PII to appear as (a) whole
+    word(s) — not embedded inside a longer alphanumeric run — while still
+    catching possessives ("Ann's") and multi-word PII that OCR wrapped,
+    hyphenated, or ran together.
+
+    Args:
+        pii_text: The redacted PII string (any case).
+        haystack_lower: The text to search, ALREADY lowercased by the caller.
+    """
+    tokens = [re.escape(t) for t in re.split(_PII_SEP + r"+", pii_text.lower()) if t]
+    if not tokens:
+        return False
+    pattern = (
+        r"(?<![A-Za-z0-9])"
+        + (_PII_SEP + r"*").join(tokens)
+        + r"(?:['’]s)?(?![A-Za-z0-9])"
+    )
+    return re.search(pattern, haystack_lower) is not None
+
+
 class PDFRedactor:
     """Handles permanent redaction of PDF documents"""
 
     def __init__(self):
-        pass
+        # Memoised Tesseract availability — the check shells out to
+        # `tesseract --version` (~57ms), and Stage 2 asks once per page.
+        self._tesseract_ok = None
 
     def redact_pdf(self, input_pdf: Path, output_pdf: Path, redaction_items: List[RedactionItem], redact_header_footer: bool = False) -> Tuple[bool, str]:
         """
@@ -150,6 +184,7 @@ class PDFRedactor:
             ocr_redacted_count = 0
             image_redacted_count = 0
             all_redacted_texts = set()
+            ocr_handled_pages = set()
             for page_num, items in redactions_by_page.items():
                 page = doc[page_num - 1]  # Convert to 0-indexed
 
@@ -157,6 +192,9 @@ class PDFRedactor:
                     # Image-only page: render → OCR → draw black rects on image → replace page
                     ocr_hits = self._redact_ocr_page(page, items)
                     ocr_redacted_count += ocr_hits
+                    # This page's whole content was just rendered and OCR'd at
+                    # 300 DPI — Stage 2 would only re-OCR the same pixels.
+                    ocr_handled_pages.add(page.number)
                     # No apply_redactions needed — _redact_ocr_page replaces the page image directly
                 else:
                     # Text-layer page: standard redaction
@@ -171,12 +209,23 @@ class PDFRedactor:
                     # Apply all redactions on this page
                     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-                # Stage 2: Scan every embedded image on this page for PII.
-                # Runs on ALL pages — text-layer, image-only, and hybrid.
-                image_redacted_count += self._redact_embedded_images(page, items)
-
                 # Collect all redacted texts for cross-page cleanup
                 all_redacted_texts.update(item.text for item in items)
+
+            # ── Stage 2: Embedded-image OCR scan ──
+            # Runs on EVERY page with the full document-level item list, so an
+            # image containing PII on a page with no text-layer detections is
+            # still scanned. Pages already handled by _redact_ocr_page are
+            # skipped, and OCR results are cached per image xref, so repeated
+            # letterheads are read once per document rather than once per page.
+            if redaction_items:
+                ocr_cache: dict = {}
+                for page in doc:
+                    if page.number in ocr_handled_pages:
+                        continue
+                    image_redacted_count += self._redact_embedded_images(
+                        page, redaction_items, ocr_cache=ocr_cache
+                    )
 
             # ── Stage 4: Signature image detection ──
             # Runs on EVERY page, not just pages with detected PII.
@@ -344,12 +393,14 @@ class PDFRedactor:
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
     def _check_tesseract(self) -> bool:
-        """Check if Tesseract is installed and accessible."""
-        try:
-            pytesseract.get_tesseract_version()
-            return True
-        except Exception:
-            return False
+        """Whether Tesseract is installed and accessible (memoised per instance)."""
+        if self._tesseract_ok is None:
+            try:
+                pytesseract.get_tesseract_version()
+                self._tesseract_ok = True
+            except Exception:
+                self._tesseract_ok = False
+        return self._tesseract_ok
 
     def _fuzzy_word_match(self, ocr_clean: str, pii_lower: str) -> bool:
         """
@@ -448,7 +499,7 @@ class PDFRedactor:
 
         return redacted_count
 
-    def _redact_embedded_images(self, page: fitz.Page, items: list) -> int:
+    def _redact_embedded_images(self, page: fitz.Page, items: list, ocr_cache: dict = None) -> int:
         """
         Scan each embedded image on a page with OCR and black out any PII found.
 
@@ -492,17 +543,24 @@ class PDFRedactor:
             except Exception:
                 continue
 
-            ocr_data = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DICT)
-            ocr_words = []
-            for i in range(len(ocr_data['text'])):
-                word = ocr_data['text'][i].strip()
-                if not word:
-                    continue
-                x = ocr_data['left'][i]
-                y = ocr_data['top'][i]
-                w = ocr_data['width'][i]
-                h = ocr_data['height'][i]
-                ocr_words.append((word, (x, y, x + w, y + h)))
+            # The same logo/letterhead xref often repeats on every page — OCR
+            # it once per document rather than once per placement.
+            if ocr_cache is not None and xref in ocr_cache:
+                ocr_words = ocr_cache[xref]
+            else:
+                ocr_data = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DICT)
+                ocr_words = []
+                for i in range(len(ocr_data['text'])):
+                    word = ocr_data['text'][i].strip()
+                    if not word:
+                        continue
+                    x = ocr_data['left'][i]
+                    y = ocr_data['top'][i]
+                    w = ocr_data['width'][i]
+                    h = ocr_data['height'][i]
+                    ocr_words.append((word, (x, y, x + w, y + h)))
+                if ocr_cache is not None:
+                    ocr_cache[xref] = ocr_words
 
             if not ocr_words:
                 continue
@@ -834,8 +892,9 @@ class PDFRedactor:
 
             doc.close()
 
-            # Check if the text still appears
-            if original_text.lower() in all_text.lower():
+            # Check if the text still appears (whole-word — substring checks
+            # false-flagged short names inside longer words, e.g. Ann/Annual)
+            if _pii_visible_in_text(original_text, all_text.lower()):
                 return False, f"Text still found in document: {original_text}"
             else:
                 return True, "Text successfully redacted"
@@ -920,9 +979,9 @@ class PDFRedactor:
                 # OCR the rendered image
                 ocr_text = pytesseract.image_to_string(img).lower()
 
-                # Check each redacted string
+                # Check each redacted string (whole-word — see _pii_visible_in_text)
                 for text in redacted_texts:
-                    if len(text) >= 3 and text.lower() in ocr_text:
+                    if len(text) >= 3 and _pii_visible_in_text(text, ocr_text):
                         failures.append(
                             f"Page {page_idx + 1}: '{text}' still visible after redaction"
                         )

@@ -48,6 +48,12 @@ class TestAustralianPhoneRecognizer:
         results = rec.analyze("Phone: 02 9876 5432", rec.supported_entities, None)
         assert len(results) >= 1
 
+    def test_detects_intl_mobile_format(self):
+        """'+61 412 345 678' — international mobile with spaces."""
+        rec = AustralianPhoneRecognizer()
+        results = rec.analyze("+61 412 345 678", rec.supported_entities, None)
+        assert len(results) >= 1
+
 
 # ---------------------------------------------------------------------------
 # Australian Address Recognizer
@@ -115,6 +121,18 @@ class TestCentrelinkCRNRecognizer:
         results = _run_recognizer(rec, "Code: ABC123456")
         assert len(results) == 0
 
+    def test_detects_real_format_crn_with_letter(self):
+        rec = CentrelinkCRNRecognizer()
+        results = _run_recognizer(rec, "CRN: 123 456 789A")
+        assert len(results) >= 1
+        assert any(r.entity_type == "AU_CRN" for r in results)
+
+    def test_detects_compact_real_format_crn(self):
+        rec = CentrelinkCRNRecognizer()
+        results = _run_recognizer(rec, "CRN: 123456789A")
+        assert len(results) >= 1
+        assert any(r.entity_type == "AU_CRN" for r in results)
+
 
 # ---------------------------------------------------------------------------
 # DOB Recognizer
@@ -138,6 +156,16 @@ class TestDateOfBirthRecognizer:
         rec = DateOfBirthRecognizer()
         results = _run_recognizer(rec, "Born: 15 March 2010")
         assert len(results) == 1
+
+    def test_detects_dotted_dob(self):
+        rec = DateOfBirthRecognizer()
+        results = _run_recognizer(rec, "DOB: 12.03.2015")
+        assert len(results) >= 1
+
+    def test_detects_ordinal_dob(self):
+        rec = DateOfBirthRecognizer()
+        results = _run_recognizer(rec, "Date of Birth: 12th March 2015")
+        assert len(results) >= 1
 
 
 # ---------------------------------------------------------------------------

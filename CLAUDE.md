@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (306 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (361 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -210,6 +210,8 @@ The `or v == self.student_name` guard is important for students with short names
 - `verify_redaction(pdf_path, text)` — fast, text-layer only. Used in the main redaction flow for spot-checking.
 - `verify_redaction_ocr(pdf_path, texts)` — slow, renders at 300 DPI and OCRs. More thorough. Used for comprehensive post-redaction checks.
 
+Both verifiers use the module-level `_pii_visible_in_text()` whole-word check — never revert to substring matching, which falsely quarantined correctly-redacted files when a short name ('Ann') appeared inside an ordinary word ('Annual'). The helper splits PII on whitespace *and* hyphens so OCR variants like 'smith - jones' are still caught.
+
 ### 10. Metadata stripping happens inside `redact_pdf()`
 
 `_strip_metadata()` is called inside `redact_pdf()` before `doc.save()`. It strips author, title, subject, creator, producer, keywords, creation date, modification date, XMP metadata, and embedded files. It always runs — not optional.
@@ -240,7 +242,7 @@ OCR warnings are now **informational** (not error/skip signals). The audit log n
 
 ### 12. Every embedded image is OCR-scanned for PII (Stage 2)
 
-After text-layer redaction, `_redact_embedded_images()` runs on every page. It extracts each embedded image via `doc.extract_image(xref)`, OCRs it with pytesseract, blacks out PII matches in the image pixels using PIL, and replaces the original via `page.replace_image(xref, stream=png_bytes)`. This catches PII in email screenshots, scanned documents, and even small logos. No image is too small to scan — there is no size threshold.
+After per-page redaction, `_redact_embedded_images()` runs on **every page of the document** with the full document-level redaction item list (not just pages that had detections). Pages already processed by `_redact_ocr_page()` are skipped (their pixels were just OCR'd at 300 DPI), OCR results are cached per image xref for the run, and `_check_tesseract()` is memoised on the instance — without those three mitigations a 50-page scanned report costs ~65s. It extracts each embedded image via `doc.extract_image(xref)`, OCRs it with pytesseract, blacks out PII matches in the image pixels using PIL, and replaces the original via `page.replace_image(xref, stream=png_bytes)`. This catches PII in email screenshots, scanned documents, and even small logos. No image is too small to scan — there is no size threshold.
 
 ### 13. OCR word-matching logic is shared via `_match_and_redact_ocr_words()`
 
@@ -361,6 +363,14 @@ All `setError` call sites use `friendlyError(e)` from `desktop/src/lib/errorMess
 
 `_fuzzy_word_match()` in `redactor.py` (used by the shared `_match_and_redact_ocr_words()`, so it covers both `_redact_ocr_page()` and `_redact_embedded_images()`) tolerates single-character OCR misreads via Levenshtein distance — but only for alphabetic PII of 5+ characters (`pii_lower.isalpha()` guard, same one used elsewhere to keep fuzzing away from emails/URLs). Distance tolerance is 1 for 5-7 letter words, 2 for 8+. Words under 5 letters, and any non-alphabetic PII, require an exact match — fuzzing short words risks blacking out unrelated text (e.g. "And" for "Ann").
 
+### 33. The street-only Address pattern uses two street-type classes
+
+Unambiguous nouns (`Street`, `Road`, `Lane`…) match freely; abbreviations and words that are also common English nouns (`St`, `Dr`, `Court`, `Place`, `Rise`, `Way`, `Close`, `Grove`) must be followed by a comma, full stop, or end-of-line. Merging them back into one list re-introduces false positives on report language such as '2 Specialists Dr Jones' and '12 Point Rise in reading fluency' — which the Accept-All path would redact without the teacher noticing.
+
+### 34. Never filter NER name variations through `_CONTEXTUAL_NAME_EXCLUDE`
+
+That set contains real given names (Bob, Sue, Max, Pat, Ray, Ted, Penny…) because it filters keyword-adjacent noise in `_detect_contextual_names`. Using it on variations stops a parent referred to by first name only from being redacted. `pii_orchestrator._NAME_TITLES` exists for the honorific-filtering job; keep the two separate.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -424,6 +434,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | Phone number | 0.95 | High — structured Australian pattern |
 | Email address | 0.95 | High — standard pattern |
 | Address | 0.95 | High — requires state + postcode |
+| Address (street-only, no state/postcode) | 0.65 | Medium — capitalised street name + street type, no state/postcode anchor |
 | Medicare number | 0.95 | High — contextual guard required |
 | Date of birth | 0.95 | High — label required |
 | Student ID (surname match) | 0.95 | High — prefix matches student surname |
@@ -446,14 +457,14 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 316 tests total
-├── test_pii_detector.py              # 52 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
-├── test_pii_detector_names.py        # 65 tests: name variations, contextual detection, possessives, family, nicknames
-├── test_pii_orchestrator.py          # 27 tests: orchestrator merge, dedup, NER-primary coordination
-├── test_presidio_recognizers.py      # 18 tests: 6 custom AU Presidio recognizer unit tests
-├── test_redactor.py                  # 14 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
+tests/                                # 361 tests total
+├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
+├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
+├── test_pii_orchestrator.py          # 30 tests: orchestrator merge, dedup, NER-primary coordination
+├── test_presidio_recognizers.py      # 23 tests: 6 custom AU Presidio recognizer unit tests
+├── test_redactor.py                  # 26 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
-├── test_ocr_redaction.py             # 35 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching
+├── test_ocr_redaction.py             # 37 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
 ├── test_widget_redaction.py          # 7 tests: AcroForm widget deletion (incl. word-boundary match)
@@ -467,7 +478,7 @@ tests/                                # 316 tests total
 ├── test_backend_redact.py            # 3 tests: detect→redact selection + clean-500 error wrapping
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
-└── test_false_positives.py           # 4 tests: false-positive regression tests
+└── test_false_positives.py           # 5 tests: false-positive regression tests
 ```
 
 Tests use `sys.path.insert` to locate `src/core/` modules — this is required because the test runner runs from the repo root, not from within `src/`.
@@ -569,7 +580,7 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 - **Fuzzy name matching**: Nickname matching is now implemented via `nickname_map.py`. True fuzzy/edit-distance matching remains a future feature.
 - **GLiNER removed** (March 2026): GLiNER and PyTorch removed for bundle simplification. Two-engine architecture: regex + Presidio/spaCy.
 - **Batch processing** (multiple students at once): Not implemented.
-- **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words. There is no fuzzy OCR matching yet.
+- **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words.
 - **`docs/legacy/`**: Contains 6 legacy markdown files moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
 - **`docs/plans/`**: Contains implementation plans from each development phase. Reference only.
 

@@ -17,6 +17,19 @@ from pii_detector import PIIDetector, PIIMatch, generate_name_variations
 # DATE_TIME flags meeting and review dates that must not be redacted.
 PRESIDIO_SKIP_TYPES = {"LOCATION", "GPE", "FAC", "DATE_TIME"}
 
+# Honorifics that spaCy sometimes includes in a PERSON span ("Mrs Thompson"),
+# which then generate a bare title as a "first name" variation.
+#
+# This is deliberately its own set and NOT _CONTEXTUAL_NAME_EXCLUDE from
+# pii_detector: that set contains real given names (Bob, Sue, Max, Pat, Ray,
+# Ted, Penny...) because it filters keyword-adjacent noise. Filtering name
+# variations through it would stop redacting a parent referred to by first
+# name only — a privacy breach.
+_NAME_TITLES = {
+    "mr", "mrs", "ms", "miss", "mx", "dr", "prof", "professor",
+    "sir", "madam", "rev", "master",
+}
+
 # Category mapping from Presidio entity types to our display categories
 PRESIDIO_CATEGORY_MAP = {
     "PERSON": "Person name (NER)",
@@ -144,7 +157,15 @@ class PIIOrchestrator:
                     variations, _ = generate_name_variations(m.text, include_nicknames=False)
                     for var in variations:
                         if var.lower() != m.text.lower() and len(var) >= 3:
-                            for match in re.finditer(re.escape(var), text, re.IGNORECASE):
+                            # A bare honorific is not a name (see _NAME_TITLES).
+                            if var.lower() in _NAME_TITLES:
+                                continue
+                            # Lookaround boundaries: "Ann" must not match inside
+                            # "Annual". (\b fails for variations that start or end
+                            # with punctuation, like "J. Smith" or "S.W.")
+                            var_pattern = (r'(?<![A-Za-z0-9])' + re.escape(var)
+                                           + r'(?![A-Za-z0-9])')
+                            for match in re.finditer(var_pattern, text, re.IGNORECASE):
                                 line_num = text[:match.start()].count('\n') + 1
                                 all_matches.append(PIIMatch(
                                     text=match.group(), category="Person name (NER variation)",

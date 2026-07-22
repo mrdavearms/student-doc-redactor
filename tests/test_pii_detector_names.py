@@ -371,6 +371,31 @@ class TestContextualNameDetection:
         assert any("Sandra" in t for t in found_texts)
         assert any("Bob" in t for t in found_texts)
 
+    def test_lowercase_word_after_keyword_not_captured(self):
+        """'Parent email:' must not flag the word 'email' as a name."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text(
+            "Parent email: nick.williams@gmail.com", page_num=1)
+        contextual = [m for m in matches
+                      if m.category in ("Parent/Guardian", "Family member")]
+        assert not any(m.text == "email" for m in contextual)
+
+    def test_lowercase_phrase_after_keyword_not_captured(self):
+        """Today this captures 'reports that'; after the fix, nothing."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text(
+            "Mother reports that homework is difficult", page_num=1)
+        contextual = [m for m in matches
+                      if m.category in ("Parent/Guardian", "Family member")]
+        assert not contextual, f"Unexpected contextual matches: {[m.text for m in contextual]}"
+
+    def test_allcaps_name_after_keyword_still_captured(self):
+        """ALL-CAPS names (form headers) must still be captured."""
+        detector = PIIDetector("Joe Bloggs")
+        matches = detector.detect_pii_in_text("MOTHER: JANE attended", page_num=1)
+        contextual = [m for m in matches if m.category == "Parent/Guardian"]
+        assert any("JANE" in m.text for m in contextual)
+
 
 # ---------------------------------------------------------------------------
 # Contextual Name Exclude List Tests

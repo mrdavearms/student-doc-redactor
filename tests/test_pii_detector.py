@@ -47,6 +47,30 @@ class TestPhoneDetection:
         matches = self._phone_matches("Call 0412-345-678 for pickup")
         assert len(matches) >= 1
 
+    def test_mobile_international_format_spaced(self):
+        """'+61 412 345 678' — the standard intl mobile format."""
+        matches = self._phone_matches("Contact: +61 412 345 678")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert any("412 345 678" in m.text for m in phones)
+
+    def test_landline_dotted_separators(self):
+        """'02.6056.1234' — dot-separated landline."""
+        matches = self._phone_matches("Ph: 02.6056.1234")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert any("6056" in m.text for m in phones)
+
+    def test_mobile_dotted_separators(self):
+        """'0412.345.678' — dot-separated mobile."""
+        matches = self._phone_matches("Mob: 0412.345.678")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert len(phones) >= 1
+
+    def test_dotted_pattern_does_not_match_inside_a_longer_digit_run(self):
+        """Version/score strings must not become phone numbers."""
+        matches = self._phone_matches("Version 2.04.1234.5678 build")
+        phones = [m for m in matches if m.category == "Phone number"]
+        assert len(phones) == 0
+
 
 class TestEmailDetection:
     def setup_method(self):
@@ -103,6 +127,43 @@ class TestAddressDetection:
     def test_address_circuit_detected(self):
         matches = self._address_matches("Address: 12 Sunset Circuit, Cairns QLD 4870")
         assert len(matches) >= 1
+
+    def test_address_with_unit_prefix(self):
+        matches = self._address_matches("Address: Unit 3/45 High Street, Wodonga VIC 3690")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text.startswith("Unit 3/45") for m in addr)
+
+    def test_address_with_bare_unit_slash_prefix(self):
+        matches = self._address_matches("Lives at 3/45 High Street, Wodonga VIC 3690")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text.startswith("3/45") for m in addr)
+
+    def test_street_only_address_in_prose(self):
+        """Addresses without state+postcode get a medium-confidence match."""
+        matches = self._address_matches("Sarah lives at 12 Bakers Lane with her mother.")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text == "12 Bakers Lane" for m in addr)
+        assert all(m.confidence == 0.65 for m in addr)
+
+    def test_street_only_ambiguous_type_requires_terminator(self):
+        """'5 Rosewood Court,' is an address; '2 Year Level Place Value' is not."""
+        hit = self._address_matches("The family moved to 5 Rosewood Court, Wodonga")
+        assert any(m.category == "Address" and m.text == "5 Rosewood Court" for m in hit)
+
+        miss = self._address_matches("Working at 2 Year Level Place Value")
+        assert not [m for m in miss if m.category == "Address"]
+
+    def test_street_only_keeps_the_esplanade_style_names(self):
+        matches = self._address_matches("Lives at 12 The Esplanade, Torquay")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text == "12 The Esplanade" for m in addr)
+
+    def test_full_address_not_double_reported(self):
+        """A full-format address must yield ONE match, not full + street-only."""
+        matches = self._address_matches("Address: 12 Bakers Lane, Wodonga VIC 3690")
+        addr = [m for m in matches if m.category == "Address"]
+        assert len(addr) == 1
+        assert addr[0].confidence == 0.95
 
 
 class TestMedicareDetection:
@@ -161,6 +222,23 @@ class TestCRNDetection:
 
     def test_crn_label_but_no_9_char_token_no_match(self):
         matches = self._crn_matches("CRN: AB12")
+        assert len(matches) == 0
+
+    def test_crn_real_format_spaced(self):
+        """Real CRNs are 9 digits + a letter: '123 456 789A'."""
+        matches = self._crn_matches("CRN: 123 456 789A")
+        assert len(matches) == 1
+        assert matches[0].text == "123 456 789A"
+
+    def test_crn_real_format_compact(self):
+        """Compact real CRN: '123456789A' (10 chars, digit run + letter)."""
+        matches = self._crn_matches("CRN: 123456789A")
+        assert len(matches) == 1
+        assert matches[0].text == "123456789A"
+
+    def test_crn_letter_format_requires_keyword(self):
+        """Without a CRN keyword on the line, the number is not flagged."""
+        matches = self._crn_matches("Reference 123 456 789A")
         assert len(matches) == 0
 
 
@@ -240,6 +318,36 @@ class TestDOBDetection:
         matches = self._dob_matches("Date of birth: 15 Jan 2010")
         assert len(matches) == 1
         assert matches[0].category == 'Date of birth'
+
+    def test_dob_dotted_separators(self):
+        matches = self._dob_matches("DOB: 12.03.2015")
+        assert len(matches) == 1
+        assert matches[0].text == "12.03.2015"
+
+    def test_dob_two_digit_year(self):
+        matches = self._dob_matches("DOB: 12/3/15")
+        assert len(matches) == 1
+        assert matches[0].text == "12/3/15"
+
+    def test_dob_ordinal_day(self):
+        matches = self._dob_matches("Date of Birth: 12th March 2015")
+        assert len(matches) == 1
+        assert matches[0].text == "12th March 2015"
+
+    def test_dob_ordinal_with_of(self):
+        matches = self._dob_matches("Born: 3rd of June 2014")
+        assert len(matches) == 1
+        assert matches[0].text == "3rd of June 2014"
+
+    def test_dob_month_first_us_style(self):
+        matches = self._dob_matches("Born: March 12, 2015")
+        assert len(matches) == 1
+        assert matches[0].text == "March 12, 2015"
+
+    def test_standalone_dotted_date_without_label_not_flagged(self):
+        """Dotted dates still require a DOB label — review dates stay unflagged."""
+        matches = self._dob_matches("Review meeting held 12.03.2025")
+        assert len(matches) == 0
 
 
 class TestNDISDetection:
