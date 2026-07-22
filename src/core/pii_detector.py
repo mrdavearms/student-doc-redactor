@@ -119,7 +119,7 @@ class PIIDetector:
     """Detects PII in text using pattern matching and contextual analysis"""
 
     # Australian phone number patterns.
-    # The dotted variants carry (?<!\d\.) / (?!\d\.) guards so they cannot match
+    # The dotted variants carry (?<!\d\.) / (?!\d) guards so they cannot match
     # inside a longer digit run (e.g. a version string "2.04.1234.5678").
     PHONE_PATTERNS = [
         r'\+61[\s\-]*4\d{2}[\s\-]*\d{3}[\s\-]*\d{3}',   # +61 412 345 678 (intl mobile)
