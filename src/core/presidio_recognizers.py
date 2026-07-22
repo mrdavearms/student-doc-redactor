@@ -113,7 +113,7 @@ class CentrelinkCRNRecognizer(EntityRecognizer):
         if not any(kw in text_lower for kw in self.KEYWORDS):
             return results
 
-        pattern = re.compile(r"\b[A-Z0-9]{9}\b")
+        pattern = re.compile(r"\b\d{3}[\s\-]?\d{3}[\s\-]?\d{3}[A-Za-z]\b|\b[A-Z0-9]{9}\b")
         for match in pattern.finditer(text):
             results.append(
                 RecognizerResult(

@@ -136,8 +136,11 @@ class PIIDetector:
     # Medicare number pattern
     MEDICARE_PATTERN = r'\b\d{4}\s?\d{5}\s?\d\b'
 
-    # Centrelink CRN pattern
-    CRN_PATTERN = r'\b[A-Z0-9]{9}\b'
+    # Centrelink CRN pattern.
+    # Real CRNs are 9 digits + a letter ("123 456 789A" / "123456789A").
+    # The 9-char alphanumeric alternative is kept for older docs that print
+    # the CRN without its check letter.
+    CRN_PATTERN = r'\b\d{3}[\s\-]?\d{3}[\s\-]?\d{3}[A-Za-z]\b|\b[A-Z0-9]{9}\b'
 
     # Student ID pattern (3 uppercase letters + digits)
     STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d{3,}\b'

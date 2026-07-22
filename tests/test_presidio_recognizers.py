@@ -115,6 +115,16 @@ class TestCentrelinkCRNRecognizer:
         results = _run_recognizer(rec, "Code: ABC123456")
         assert len(results) == 0
 
+    def test_detects_real_format_crn_with_letter(self):
+        recognizer = CentrelinkCRNRecognizer()
+        results = recognizer.analyze("CRN: 123 456 789A", entities=["AU_CRN"])
+        assert len(results) >= 1
+
+    def test_detects_compact_real_format_crn(self):
+        recognizer = CentrelinkCRNRecognizer()
+        results = recognizer.analyze("CRN: 123456789A", entities=["AU_CRN"])
+        assert len(results) >= 1
+
 
 # ---------------------------------------------------------------------------
 # DOB Recognizer
