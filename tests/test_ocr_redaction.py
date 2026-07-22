@@ -567,8 +567,10 @@ class TestRedactPdfRouting:
     @patch.object(PDFRedactor, '_redact_embedded_images', return_value=0)
     @patch.object(PDFRedactor, '_redact_ocr_page', return_value=1)
     @patch.object(PDFRedactor, '_is_image_only_page', return_value=True)
-    def test_embedded_images_scanned_on_ocr_pages_too(self, mock_is_img, mock_ocr, mock_embed_redact, tmp_path):
-        """Image-only pages should ALSO run per-image scanning after OCR page redaction."""
+    def test_embedded_images_not_rescanned_on_ocr_handled_pages(self, mock_is_img, mock_ocr, mock_embed_redact, tmp_path):
+        """Image-only pages already rendered+OCR'd by _redact_ocr_page at 300 DPI
+        must be SKIPPED by the Stage 2 embedded-image scan — re-extracting and
+        re-OCR'ing the same page's single image is pure duplicate work."""
         doc = fitz.open()
         doc.new_page()
         input_pdf = tmp_path / "input.pdf"
@@ -581,7 +583,7 @@ class TestRedactPdfRouting:
         success, msg = self.redactor.redact_pdf(input_pdf, output_pdf, items)
 
         assert success is True
-        mock_embed_redact.assert_called_once()
+        mock_embed_redact.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -813,3 +815,51 @@ def test_ocr_page_fails_loudly_when_tesseract_unavailable(tmp_path):
     assert success is False, "must fail when OCR engine is unavailable"
     assert "OCR" in msg or "Tesseract" in msg, f"message should name the cause: {msg}"
     assert not out.exists(), "no output file should be left behind"
+
+
+class TestEmbeddedImageScanCoverage:
+    def test_embedded_image_scan_runs_on_all_pages_with_full_item_list(self, tmp_path):
+        """Stage 2 must scan EVERY page against the whole document's items,
+        not just pages that had their own detections."""
+        import fitz
+        from unittest.mock import patch
+        from redactor import PDFRedactor, RedactionItem
+
+        pdf = tmp_path / "two_page.pdf"
+        doc = fitz.open()
+        p1 = doc.new_page()
+        p1.insert_text((72, 100), "Report for Sarah Williams", fontsize=12)
+        p2 = doc.new_page()
+        p2.insert_text((72, 100), "General notes with nothing detected", fontsize=12)
+        doc.save(str(pdf))
+        doc.close()
+
+        items = [RedactionItem(page_num=1, text="Sarah Williams")]
+        calls = []
+
+        def record(self, page, its, ocr_cache=None):
+            calls.append((page.number, [i.text for i in its]))
+            return 0
+
+        r = PDFRedactor()
+        with patch.object(PDFRedactor, "_redact_embedded_images", autospec=True,
+                          side_effect=record):
+            ok, _ = r.redact_pdf(pdf, tmp_path / "out.pdf", items)
+
+        assert ok
+        pages_scanned = {c[0] for c in calls}
+        assert pages_scanned == {0, 1}, f"Expected both pages scanned, got {pages_scanned}"
+        for _, texts in calls:
+            assert texts == ["Sarah Williams"]
+
+    def test_tesseract_check_is_memoised(self):
+        """The availability check must not shell out once per page."""
+        from unittest.mock import patch
+        from redactor import PDFRedactor
+
+        r = PDFRedactor()
+        with patch("redactor.pytesseract.get_tesseract_version", return_value="5.0") as m:
+            assert r._check_tesseract() is True
+            assert r._check_tesseract() is True
+            assert r._check_tesseract() is True
+        assert m.call_count == 1
