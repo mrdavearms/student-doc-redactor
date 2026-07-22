@@ -165,24 +165,20 @@ class TestCRNDetection:
 
     def test_crn_real_format_spaced(self):
         """Real CRNs are 9 digits + a letter: '123 456 789A'."""
-        detector = PIIDetector("Joe Bloggs")
-        matches = detector.detect_pii_in_text("CRN: 123 456 789A", page_num=1)
-        crn = [m for m in matches if m.category == "Centrelink CRN"]
-        assert any(m.text == "123 456 789A" for m in crn)
+        matches = self._crn_matches("CRN: 123 456 789A")
+        assert len(matches) == 1
+        assert matches[0].text == "123 456 789A"
 
     def test_crn_real_format_compact(self):
         """Compact real CRN: '123456789A' (10 chars, digit run + letter)."""
-        detector = PIIDetector("Joe Bloggs")
-        matches = detector.detect_pii_in_text("CRN: 123456789A", page_num=1)
-        crn = [m for m in matches if m.category == "Centrelink CRN"]
-        assert any(m.text == "123456789A" for m in crn)
+        matches = self._crn_matches("CRN: 123456789A")
+        assert len(matches) == 1
+        assert matches[0].text == "123456789A"
 
     def test_crn_letter_format_requires_keyword(self):
         """Without a CRN keyword on the line, the number is not flagged."""
-        detector = PIIDetector("Joe Bloggs")
-        matches = detector.detect_pii_in_text("Reference 123 456 789A", page_num=1)
-        crn = [m for m in matches if m.category == "Centrelink CRN"]
-        assert len(crn) == 0
+        matches = self._crn_matches("Reference 123 456 789A")
+        assert len(matches) == 0
 
 
 class TestStudentIDDetection:

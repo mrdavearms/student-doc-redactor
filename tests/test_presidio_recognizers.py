@@ -116,14 +116,16 @@ class TestCentrelinkCRNRecognizer:
         assert len(results) == 0
 
     def test_detects_real_format_crn_with_letter(self):
-        recognizer = CentrelinkCRNRecognizer()
-        results = recognizer.analyze("CRN: 123 456 789A", entities=["AU_CRN"])
+        rec = CentrelinkCRNRecognizer()
+        results = _run_recognizer(rec, "CRN: 123 456 789A")
         assert len(results) >= 1
+        assert any(r.entity_type == "AU_CRN" for r in results)
 
     def test_detects_compact_real_format_crn(self):
-        recognizer = CentrelinkCRNRecognizer()
-        results = recognizer.analyze("CRN: 123456789A", entities=["AU_CRN"])
+        rec = CentrelinkCRNRecognizer()
+        results = _run_recognizer(rec, "CRN: 123456789A")
         assert len(results) >= 1
+        assert any(r.entity_type == "AU_CRN" for r in results)
 
 
 # ---------------------------------------------------------------------------
