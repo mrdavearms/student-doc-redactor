@@ -139,10 +139,16 @@ class DateOfBirthRecognizer(EntityRecognizer):
     """Detects dates of birth — only when preceded by a DOB-related label."""
 
     DOB_LABELS = [r"DOB", r"D\.O\.B\.", r"Date of Birth", r"Date of birth", r"Born", r"Birth Date"]
+    _MONTHS = (
+        r"(?:January|February|March|April|May|June|July|August|September|"
+        r"October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    )
     DATE_PATTERNS = [
-        r"\d{1,2}/\d{1,2}/\d{4}",
-        r"\d{1,2}-\d{1,2}-\d{4}",
-        r"\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}",
+        r"\d{1,2}/\d{1,2}/\d{2,4}",
+        r"\d{1,2}-\d{1,2}-\d{2,4}",
+        r"\d{1,2}\.\d{1,2}\.\d{2,4}",
+        r"\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?" + _MONTHS + r"\s+\d{2,4}",
+        _MONTHS + r"\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}",
     ]
 
     def __init__(self):

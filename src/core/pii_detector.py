@@ -169,11 +169,20 @@ class PIIDetector:
         r'Date of birth'
     ]
 
-    # Date patterns (various formats)
+    # Month-name fragment shared by the date patterns below
+    _MONTHS = (
+        r'(?:January|February|March|April|May|June|July|August|September|'
+        r'October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
+    )
+
+    # Date patterns (various formats). Only flagged as DOB when a DOB label
+    # is present on the same line (or the line above) — see _detect_dob().
     DATE_PATTERNS = [
-        r'\d{1,2}/\d{1,2}/\d{4}',  # DD/MM/YYYY
-        r'\d{1,2}-\d{1,2}-\d{4}',  # DD-MM-YYYY
-        r'\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}',  # DD Month YYYY
+        r'\d{1,2}/\d{1,2}/\d{2,4}',   # DD/MM/YYYY and DD/M/YY
+        r'\d{1,2}-\d{1,2}-\d{2,4}',   # DD-MM-YYYY
+        r'\d{1,2}\.\d{1,2}\.\d{2,4}', # DD.MM.YYYY
+        r'\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?' + _MONTHS + r'\s+\d{2,4}',  # 12th (of) March 2015
+        _MONTHS + r'\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}',  # March 12, 2015
     ]
 
     # Contextual keywords for family member detection

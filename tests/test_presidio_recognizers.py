@@ -157,6 +157,16 @@ class TestDateOfBirthRecognizer:
         results = _run_recognizer(rec, "Born: 15 March 2010")
         assert len(results) == 1
 
+    def test_detects_dotted_dob(self):
+        rec = DateOfBirthRecognizer()
+        results = _run_recognizer(rec, "DOB: 12.03.2015")
+        assert len(results) >= 1
+
+    def test_detects_ordinal_dob(self):
+        rec = DateOfBirthRecognizer()
+        results = _run_recognizer(rec, "Date of Birth: 12th March 2015")
+        assert len(results) >= 1
+
 
 # ---------------------------------------------------------------------------
 # Student Name Recognizer
