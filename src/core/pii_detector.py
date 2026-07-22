@@ -135,8 +135,54 @@ class PIIDetector:
     # Email pattern
     EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 
-    # Australian address pattern
-    ADDRESS_PATTERN = r'\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory)\s+\d{4}'
+    # Street-type suffixes for the FULL address pattern (anchored by state+postcode,
+    # so ambiguity is not a risk there).
+    STREET_TYPES = (
+        r'Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|'
+        r'Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|'
+        r'Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp'
+    )
+
+    # Optional unit/flat prefix: "Unit 3/", "Flat 2 ", "3/"
+    UNIT_PREFIX = r'(?:(?:Unit|Flat|Apt|Apartment)\s+)?(?:\d+[A-Za-z]?\s*/\s*)?'
+
+    # Full Australian address: needs street type + suburb + state + postcode
+    ADDRESS_PATTERN = (
+        UNIT_PREFIX
+        + r'\d+\s+[A-Za-z\s]+(?:' + STREET_TYPES + r'),?\s+[A-Za-z\s]+,?\s+'
+        + r'(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|'
+        + r'South Australia|Western Australia|Tasmania|Northern Territory|'
+        + r'Australian Capital Territory)\s+\d{4}'
+    )
+
+    # ── Street-only address (no state/postcode) — medium confidence ──
+    # Deliberately case-SENSITIVE, and split into two street-type classes:
+    #   _STREET_FREE     unambiguous nouns — may be followed by anything
+    #   _STREET_ANCHORED abbreviations + words that are common English nouns
+    #                    ("Court", "Place", "Rise", "Dr") — must be followed by
+    #                    a comma, full stop, or end of line.
+    # Without that split, report language like "2 Specialists Dr Jones" and
+    # "12 Point Rise in reading fluency" is flagged as an address and silently
+    # redacted via the Accept-All path.
+    _STREET_FREE = (
+        r'Street|Road|Avenue|Drive|Lane|Crescent|Boulevard|Terrace|Highway|'
+        r'Parade|Circuit|Esplanade|Mews'
+    )
+    _STREET_ANCHORED = (
+        r'St|Rd|Ave|Dr|Ln|Cres|Blvd|Tce|Hwy|Pde|Cct|'
+        r'Court|Place|Close|Grove|Way|Rise|Vale|Loop|Ct|Pl|Cl|Gr'
+    )
+    # At most two leading capitalised words. The FIRST may be a stop-word so
+    # genuine names like "12 The Esplanade" work; the SECOND may not, which is
+    # what rejects "8 On The Rise".
+    _STREET_LEAD = (
+        r'\d+\s+[A-Z][A-Za-z]*'
+        r'(?:\s+(?!(?:The|On|In|At|Of|And|To|For|A|An)\b)[A-Z][A-Za-z]*){0,1}\s+'
+    )
+    STREET_ONLY_PATTERN = (
+        r'\b' + UNIT_PREFIX + _STREET_LEAD + r'(?:' + _STREET_FREE + r')\b'
+        + r'|\b' + UNIT_PREFIX + _STREET_LEAD + r'(?:' + _STREET_ANCHORED + r')(?=[,.]|\s*$)'
+    )
 
     # Medicare number pattern
     MEDICARE_PATTERN = r'\b\d{4}\s?\d{5}\s?\d\b'
@@ -364,15 +410,33 @@ class PIIDetector:
         return matches
 
     def _detect_addresses(self, line: str, page_num: int, line_num: int, lines=None, line_idx=None) -> List[PIIMatch]:
-        """Detect Australian addresses"""
+        """Detect Australian addresses — full (state+postcode) and street-only."""
         matches = []
+        full_spans = []
         pattern = re.compile(self.ADDRESS_PATTERN, re.IGNORECASE)
         for match in pattern.finditer(line):
+            full_spans.append((match.start(), match.end()))
             context = self._get_context(line, match.start(), match.end())
             matches.append(PIIMatch(
                 text=match.group(),
                 category='Address',
                 confidence=0.95,
+                page_num=page_num,
+                line_num=line_num,
+                context=context
+            ))
+
+        # Street-only fallback (no state/postcode) — medium confidence.
+        # NOT case-insensitive: street names must be capitalised.
+        street_pattern = re.compile(self.STREET_ONLY_PATTERN)
+        for match in street_pattern.finditer(line):
+            if any(match.start() >= s and match.end() <= e for s, e in full_spans):
+                continue  # Already covered by a full address match
+            context = self._get_context(line, match.start(), match.end())
+            matches.append(PIIMatch(
+                text=match.group(),
+                category='Address',
+                confidence=0.65,
                 page_num=page_num,
                 line_num=line_num,
                 context=context

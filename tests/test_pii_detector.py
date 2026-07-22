@@ -128,6 +128,43 @@ class TestAddressDetection:
         matches = self._address_matches("Address: 12 Sunset Circuit, Cairns QLD 4870")
         assert len(matches) >= 1
 
+    def test_address_with_unit_prefix(self):
+        matches = self._address_matches("Address: Unit 3/45 High Street, Wodonga VIC 3690")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text.startswith("Unit 3/45") for m in addr)
+
+    def test_address_with_bare_unit_slash_prefix(self):
+        matches = self._address_matches("Lives at 3/45 High Street, Wodonga VIC 3690")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text.startswith("3/45") for m in addr)
+
+    def test_street_only_address_in_prose(self):
+        """Addresses without state+postcode get a medium-confidence match."""
+        matches = self._address_matches("Sarah lives at 12 Bakers Lane with her mother.")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text == "12 Bakers Lane" for m in addr)
+        assert all(m.confidence == 0.65 for m in addr)
+
+    def test_street_only_ambiguous_type_requires_terminator(self):
+        """'5 Rosewood Court,' is an address; '2 Year Level Place Value' is not."""
+        hit = self._address_matches("The family moved to 5 Rosewood Court, Wodonga")
+        assert any(m.category == "Address" and m.text == "5 Rosewood Court" for m in hit)
+
+        miss = self._address_matches("Working at 2 Year Level Place Value")
+        assert not [m for m in miss if m.category == "Address"]
+
+    def test_street_only_keeps_the_esplanade_style_names(self):
+        matches = self._address_matches("Lives at 12 The Esplanade, Torquay")
+        addr = [m for m in matches if m.category == "Address"]
+        assert any(m.text == "12 The Esplanade" for m in addr)
+
+    def test_full_address_not_double_reported(self):
+        """A full-format address must yield ONE match, not full + street-only."""
+        matches = self._address_matches("Address: 12 Bakers Lane, Wodonga VIC 3690")
+        addr = [m for m in matches if m.category == "Address"]
+        assert len(addr) == 1
+        assert addr[0].confidence == 0.95
+
 
 class TestMedicareDetection:
     def setup_method(self):
