@@ -8,6 +8,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   isElectron: true,
+  getApiToken: () => ipcRenderer.invoke('get-api-token'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 

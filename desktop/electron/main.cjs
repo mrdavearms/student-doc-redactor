@@ -8,6 +8,12 @@ const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
 const { autoUpdater } = require('electron-updater');
+const crypto = require('crypto');
+
+// Per-session shared secret between the renderer and the Python backend.
+// Passed to the backend via env and handed to the renderer over IPC (NOT via
+// additionalArguments, which would expose it in `ps` output on a shared machine).
+const API_TOKEN = crypto.randomBytes(32).toString('hex');
 
 const BACKEND_PORT = 8765;
 const DEV_SERVER = `http://localhost:5173`;
@@ -89,6 +95,7 @@ function startBackend() {
       PYTHONPATH: path.join(appRoot, 'src', 'core'),
       RESOURCES_PATH: resourcesPath,
       TESSDATA_PREFIX: path.join(resourcesPath, 'bundled-tesseract', 'tessdata'),
+      REDACTION_API_TOKEN: API_TOKEN,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -233,6 +240,8 @@ ipcMain.handle('select-folder', async () => {
 ipcMain.handle('open-external', async (_event, url) => {
   await shell.openExternal(url);
 });
+
+ipcMain.handle('get-api-token', () => API_TOKEN);
 
 ipcMain.handle('restart-and-install', () => {
   // isSilent=true, isForceRunAfter=true: install the update silently (no NSIS

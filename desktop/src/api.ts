@@ -13,6 +13,24 @@ export class BackendUnreachableError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+// The API token is fetched once over IPC and cached for the session.
+// Outside Electron (vitest, browser dev without the shell) it resolves to ''
+// and no header is sent — the backend then has auth disabled too.
+let tokenPromise: Promise<string> | null = null;
+
+function getApiToken(): Promise<string> {
+  if (!tokenPromise) {
+    const getter = typeof window === 'undefined' ? undefined : window.electronAPI?.getApiToken;
+    tokenPromise = getter ? getter().catch(() => '') : Promise.resolve('');
+  }
+  return tokenPromise;
+}
+
+/** Test-only: drop the cached token so each test can stub its own. */
+export function __resetApiTokenCache() {
+  tokenPromise = null;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_TIMEOUT_MS);
@@ -22,8 +40,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   let res: Response;
   try {
+    const token = await getApiToken();
     res = await fetch(`${BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'X-Api-Token': token } : {}),
+      },
       ...options,
       signal,
     });
