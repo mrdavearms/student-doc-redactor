@@ -67,3 +67,28 @@ describe('store: addManualMatch', () => {
     expect(state.userSelections['/tmp/a.pdf_1']).toBe(true);
   });
 });
+
+describe('store: detectionParamsKey', () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  it('stores the key and clears it on reset', () => {
+    useStore.getState().setDetectionParamsKey('fingerprint-1');
+    expect(useStore.getState().detectionParamsKey).toBe('fingerprint-1');
+    useStore.getState().reset();
+    expect(useStore.getState().detectionParamsKey).toBe('');
+  });
+
+  it('clears the key when the backend becomes unreachable', () => {
+    useStore.getState().setDetectionParamsKey('fingerprint-1');
+    useStore.getState().setBackendReachable(false);
+    expect(useStore.getState().detectionParamsKey).toBe('');
+  });
+
+  it('keeps the key when the backend is reachable again', () => {
+    useStore.getState().setDetectionParamsKey('fingerprint-1');
+    useStore.getState().setBackendReachable(true);
+    expect(useStore.getState().detectionParamsKey).toBe('fingerprint-1');
+  });
+});

@@ -47,6 +47,13 @@ interface AppState {
   deselectAll: (docPath: string, count: number) => void;
   addManualMatch: (docPath: string, match: import('./types').PIIMatch, index: number) => void;
 
+  // Fingerprint of the inputs used for the last successful detection run.
+  // Lets the wizard skip re-detection (preserving review work and the backend
+  // cache) when nothing has changed. MUST be cleared whenever the backend
+  // cache might be gone, or the wizard can loop with no way forward.
+  detectionParamsKey: string;
+  setDetectionParamsKey: (key: string) => void;
+
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
   setRedactionResults: (results: RedactionResults) => void;
@@ -89,6 +96,7 @@ const initialState = {
   loadingMessage: '',
   error: null,
   backendReachable: true,
+  detectionParamsKey: '',
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -153,6 +161,8 @@ export const useStore = create<AppState>((set) => ({
       };
     }),
 
+  setDetectionParamsKey: (key) => set({ detectionParamsKey: key }),
+
   setRedactionResults: (results) => set({ redactionResults: results }),
 
   setLastOutputPath: (path) => set({ lastOutputPath: path }),
@@ -161,7 +171,10 @@ export const useStore = create<AppState>((set) => ({
 
   setError: (error) => set({ error }),
 
-  setBackendReachable: (reachable) => set({ backendReachable: reachable }),
+  // Losing the backend may mean a restarted process with an empty detection
+  // cache — drop the fingerprint so the next Continue re-runs detection.
+  setBackendReachable: (reachable) =>
+    set(reachable ? { backendReachable: true } : { backendReachable: false, detectionParamsKey: '' }),
 
   reset: () => set(initialState),
 }));

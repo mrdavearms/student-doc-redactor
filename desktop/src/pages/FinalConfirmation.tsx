@@ -123,6 +123,11 @@ export default function FinalConfirmation() {
         }
         setCancelled(true);
       } else {
+        if (/no cached detection data/i.test(e?.message ?? '')) {
+          // Server-side cache is gone — force a fresh detection run next time
+          // (see Task 6; without this the wizard can loop forever).
+          useStore.getState().setDetectionParamsKey('');
+        }
         setError(friendlyError(e));
       }
     } finally {
