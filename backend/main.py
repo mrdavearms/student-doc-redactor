@@ -451,6 +451,9 @@ def cleanup(req: CleanupRequest):
         if path.suffix != ".pdf":
             failed.append(CleanupFailure(path=p, reason="not a PDF"))
             continue
+        if not (path.name.endswith("_redacted.pdf") or path.name.endswith(".UNVERIFIED.pdf")):
+            failed.append(CleanupFailure(path=p, reason="not a redaction output file"))
+            continue
         if not path.exists():
             continue  # Already gone — treat as no-op success
         try:

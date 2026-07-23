@@ -141,3 +141,32 @@ class TestCleanup:
             assert len(r.json()["failed"]) == 1
         finally:
             sibling.unlink(missing_ok=True)
+
+    def test_rejects_pdf_not_matching_output_patterns(self, tmp_path):
+        """An original student PDF must never be deletable via cleanup."""
+        f = tmp_path / "original student report.pdf"
+        f.write_bytes(b"%PDF-1.4 fake")
+        r = client.post("/api/cleanup", json={
+            "output_folder": str(tmp_path), "file_paths": [str(f)],
+        })
+        assert r.status_code == 200
+        assert f.exists()
+        assert "not a redaction output file" in r.json()["failed"][0]["reason"]
+
+    def test_deletes_redacted_pattern(self, tmp_path):
+        f = tmp_path / "report_redacted.pdf"
+        f.write_bytes(b"%PDF-1.4 fake")
+        r = client.post("/api/cleanup", json={
+            "output_folder": str(tmp_path), "file_paths": [str(f)],
+        })
+        assert r.status_code == 200
+        assert not f.exists()
+
+    def test_deletes_unverified_pattern(self, tmp_path):
+        f = tmp_path / "report_redacted.UNVERIFIED.pdf"
+        f.write_bytes(b"%PDF-1.4 fake")
+        r = client.post("/api/cleanup", json={
+            "output_folder": str(tmp_path), "file_paths": [str(f)],
+        })
+        assert r.status_code == 200
+        assert not f.exists()
