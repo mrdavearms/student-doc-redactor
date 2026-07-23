@@ -67,7 +67,13 @@ export default function Completion() {
   }
 
   const r = redactionResults;
-  const hasFailures = r.verification_failures.length > 0;
+  // Documents that errored outright. Verification failures are reported in
+  // their own section — excluded here so one document never fills two red boxes.
+  const erroredDocs = r.document_results.filter(
+    (d) => !d.success && d.verification_failures.length === 0
+  );
+  const hasVerificationFailures = r.verification_failures.length > 0;
+  const hasFailures = hasVerificationFailures || erroredDocs.length > 0;
   const hasOcrWarnings = r.ocr_warnings.length > 0;
 
   return (
@@ -93,7 +99,7 @@ export default function Completion() {
         )}
         <h3 className={`text-lg font-semibold ${hasFailures ? 'text-amber-800' : 'text-emerald-800'}`}>
           {hasFailures
-            ? 'Completed with warnings'
+            ? `${r.successfully_redacted} of ${r.total_documents} document${r.total_documents === 1 ? '' : 's'} redacted — review the issues below`
             : `All ${r.total_documents} document${r.total_documents === 1 ? '' : 's'} redacted successfully`}
         </h3>
         <p className="text-sm mt-1 text-slate-500">
@@ -102,7 +108,7 @@ export default function Completion() {
       </motion.div>
 
       {/* Verification failures */}
-      {hasFailures && (
+      {hasVerificationFailures && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -119,6 +125,26 @@ export default function Completion() {
           {r.verification_failures.map((f, i) => (
             <p key={i} className="text-xs text-red-500 py-0.5">
               {f.filename}: {f.message}
+            </p>
+          ))}
+        </motion.div>
+      )}
+
+      {/* Documents that errored before producing a redacted copy */}
+      {erroredDocs.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-red-50 border border-red-200 rounded-xl p-5"
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-red-700 mb-2">
+            <XCircle size={16} />
+            {erroredDocs.length} document{erroredDocs.length === 1 ? '' : 's'} could not be redacted
+            <HelpTip text="These documents hit an error during redaction, so no redacted copy was produced for them. The originals are untouched — do not share these documents until the problem is resolved." />
+          </div>
+          {erroredDocs.map((d, i) => (
+            <p key={i} className="text-xs text-red-500 py-0.5">
+              {d.document_name}: {d.error_message || 'Redaction did not complete.'}
             </p>
           ))}
         </motion.div>

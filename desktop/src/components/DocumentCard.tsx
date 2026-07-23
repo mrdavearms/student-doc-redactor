@@ -20,7 +20,10 @@ export default function DocumentCard({ result, categoryCounts, hasMediumConfiden
   const outputName = result.output_path ? result.output_path.split('/').pop() || '' : '';
   const renamed = inputName !== outputName;
   const hasWarnings = result.ocr_warnings.length > 0;
-  const hasFails = result.verification_failures.length > 0;
+  const verificationFailed = result.verification_failures.length > 0;
+  // Any unsuccessful document gets the failure treatment, whether it failed
+  // verification or errored outright.
+  const hasFails = verificationFailed || !result.success;
 
   const StatusIcon = hasFails
     ? () => <XCircle size={16} className="text-rose-500" />
@@ -101,9 +104,17 @@ export default function DocumentCard({ result, categoryCounts, hasMediumConfiden
                 <p className="text-xs text-slate-400">No items redacted from this document.</p>
               )}
 
-              {hasFails && (
+              {verificationFailed && (
                 <div className="mt-3 bg-rose-50 rounded-lg px-3 py-2">
                   <p className="text-xs text-rose-600">Verification failed — review this document manually.</p>
+                </div>
+              )}
+
+              {!result.success && !verificationFailed && (
+                <div className="mt-3 bg-rose-50 rounded-lg px-3 py-2">
+                  <p className="text-xs text-rose-600">
+                    {result.error_message || 'Redaction did not complete for this document.'}
+                  </p>
                 </div>
               )}
 
