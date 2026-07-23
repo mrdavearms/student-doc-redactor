@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (361 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (376 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -353,7 +353,7 @@ All `setError` call sites use `friendlyError(e)` from `desktop/src/lib/errorMess
 
 ### 30. Cleanup endpoints are restricted to the user-selected output folder
 
-`/api/cleanup` and `/api/cleanup/list` only operate on `*_redacted.pdf` and `*.UNVERIFIED.pdf` files inside the resolved `output_folder` (verified via `Path.is_relative_to`). Do not relax these checks — they prevent path-traversal deletion of files outside the output area.
+`/api/cleanup` and `/api/cleanup/list` only operate on `*_redacted.pdf` and `*.UNVERIFIED.pdf` files inside the resolved `output_folder` (verified via `Path.is_relative_to`); the delete endpoint enforces the filename patterns itself, not just the list endpoint. Do not relax these checks — they prevent path-traversal deletion of files outside the output area.
 
 ### 31. Manually-added PII items live in the same detection cache as engine-found matches
 
@@ -370,6 +370,22 @@ Unambiguous nouns (`Street`, `Road`, `Lane`…) match freely; abbreviations and 
 ### 34. Never filter NER name variations through `_CONTEXTUAL_NAME_EXCLUDE`
 
 That set contains real given names (Bob, Sue, Max, Pat, Ray, Ted, Penny…) because it filters keyword-adjacent noise in `_detect_contextual_names`. Using it on variations stops a parent referred to by first name only from being redacted. `pii_orchestrator._NAME_TITLES` exists for the honorific-filtering job; keep the two separate.
+
+### 35. API token auth, and middleware order
+
+When `REDACTION_API_TOKEN` is set (Electron sets it at spawn), every endpoint except `/api/health` requires a matching `X-Api-Token` header. The token flows `main.cjs` → backend env + `ipcMain.handle('get-api-token')` → `preload.cjs` → `window.electronAPI.getApiToken()` → cached in `api.ts`. Unset (manual `uvicorn`, pytest) means auth is disabled. **The `@app.middleware("http")` token function must be defined BEFORE `app.add_middleware(CORSMiddleware, ...)`** — Starlette inserts at index 0, so the last registration is outermost, and only that ordering lets a 401 carry CORS headers the dev renderer can read. CORS is pinned to the two Vite dev origins; the packaged app sends no Origin at all and needs no entry, and `"null"` is deliberately excluded (it is the sandboxed-iframe origin).
+
+### 36. Cooperative redaction cancel
+
+`POST /api/redact/cancel` flips `_redaction_control['cancel_requested']`; `RedactionService.execute(should_cancel=...)` checks it between documents, sets `RedactionResults.cancelled`, and marks the audit log via `logger.set_cancelled()`. The frontend does NOT abort the redact request on cancel — it keeps it alive and reads accurate partial results from the response, including `quarantine_path` for `.UNVERIFIED.pdf` files (which have no `output_path`).
+
+### 37. spaCy loads once per process
+
+`_get_shared_nlp_engine()` in `pii_orchestrator.py` caches the NLP engine module-level (thread-locked). Never construct `NlpEngineProvider` per request — it costs ~0.6s each time. The `AnalyzerEngine` itself stays per-orchestrator (~0.01s) because `StudentNameRecognizer` is parameterised per run.
+
+### 38. `detectionParamsKey` must be cleared on any backend-cache doubt
+
+The frontend skips re-detection when the fingerprint matches, which is only safe while `_detection_cache` holds the same run. Every path that can observe a `no cached detection data` error — and `setBackendReachable(false)` — clears the key. Without that the wizard loops: skip detection → redact 400s → 'go back one step' → skip again.
 
 ---
 
@@ -423,6 +439,10 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | `loading` | boolean | Generic loading overlay active |
 | `loadingMessage` | string | Loading overlay text |
 | `error` | string \| null | Global error toast message |
+| `detectionParamsKey` | string | Fingerprint of last detection inputs — matching inputs skip re-detection |
+| `conversionFolderPath` | string | Folder that produced conversionResults — mismatch triggers reprocessing |
+
+`setFolderPath` is deliberately dumb (it fires on every keystroke); folder-change invalidation happens via `conversionFolderPath` in `ConversionStatus`, and `setDetectionResults` clears any stale `redactionResults`.
 
 ---
 
@@ -457,10 +477,10 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 361 tests total
+tests/                                # 376 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
-├── test_pii_orchestrator.py          # 30 tests: orchestrator merge, dedup, NER-primary coordination
+├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
 ├── test_presidio_recognizers.py      # 23 tests: 6 custom AU Presidio recognizer unit tests
 ├── test_redactor.py                  # 26 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
@@ -471,11 +491,12 @@ tests/                                # 361 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_cleanup_api.py               # 13 tests: cleanup endpoint path-traversal guards
+├── test_cleanup_api.py               # 16 tests: cleanup endpoint path-traversal guards
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing
-├── test_backend_redact.py            # 3 tests: detect→redact selection + clean-500 error wrapping
+├── test_backend_redact.py            # 7 tests: detect→redact selection + clean-500 error wrapping
+├── test_api_auth.py                  # 7 tests: API token middleware, CORS header on 401, non-ASCII header
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
 └── test_false_positives.py           # 5 tests: false-positive regression tests
