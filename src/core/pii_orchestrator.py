@@ -8,8 +8,31 @@ catches structured PII and user-provided names.
 """
 
 import re
+import threading
 from typing import List, Optional
 from pii_detector import PIIDetector, PIIMatch, generate_name_variations
+
+
+# The spaCy model behind Presidio takes ~0.6s to wire up per call. Load it
+# once per process and share it across orchestrators — the AnalyzerEngine
+# itself is ~0.01s and stays per-orchestrator, because StudentNameRecognizer
+# is parameterised with each run's name variations.
+_NLP_ENGINE = None
+_NLP_ENGINE_LOCK = threading.Lock()
+
+
+def _get_shared_nlp_engine():
+    """Create the spaCy NLP engine on first use; return the cached one after."""
+    global _NLP_ENGINE
+    with _NLP_ENGINE_LOCK:
+        if _NLP_ENGINE is None:
+            from presidio_analyzer.nlp_engine import NlpEngineProvider
+            provider = NlpEngineProvider(nlp_configuration={
+                "nlp_engine_name": "spacy",
+                "models": [{"lang_code": "en", "model_name": "en_core_web_lg"}],
+            })
+            _NLP_ENGINE = provider.create_engine()
+        return _NLP_ENGINE
 
 
 # Presidio entity types that are too broad for this use case.
@@ -81,7 +104,6 @@ class PIIOrchestrator:
         """Initialise Presidio analyzer with spaCy NER and custom AU recognizers."""
         try:
             from presidio_analyzer import AnalyzerEngine
-            from presidio_analyzer.nlp_engine import NlpEngineProvider
 
             from presidio_recognizers import (
                 AustralianPhoneRecognizer,
@@ -92,12 +114,8 @@ class PIIOrchestrator:
                 StudentNameRecognizer,
             )
 
-            # Create NLP engine with spaCy
-            provider = NlpEngineProvider(nlp_configuration={
-                "nlp_engine_name": "spacy",
-                "models": [{"lang_code": "en", "model_name": "en_core_web_lg"}],
-            })
-            nlp_engine = provider.create_engine()
+            # Shared, cached NLP engine (see _get_shared_nlp_engine)
+            nlp_engine = _get_shared_nlp_engine()
 
             # Create analyzer
             self.presidio_analyzer = AnalyzerEngine(
