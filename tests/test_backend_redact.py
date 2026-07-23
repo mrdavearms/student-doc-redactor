@@ -90,3 +90,69 @@ def test_detect_bad_path_still_returns_400():
         "organisation_names": [],
     })
     assert resp.status_code == 400
+
+
+class TestRedactionCancel:
+    def _make_request(self, tmp_path, names):
+        import fitz
+        from src.services.redaction_service import RedactionRequest
+
+        docs = []
+        for name in names:
+            p = tmp_path / name
+            d = fitz.open()
+            pg = d.new_page()
+            pg.insert_text((72, 72), f"Document {name}")
+            d.save(str(p))
+            d.close()
+            docs.append(p)
+
+        detected = {p: {"matches": [], "text_data": {"pages": {}, "ocr_pages": []}}
+                    for p in docs}
+        return RedactionRequest(
+            folder_path=tmp_path,
+            student_name="Test Student",
+            documents=docs,
+            detected_pii=detected,
+            user_selections={},
+        )
+
+    def test_execute_stops_between_documents_when_cancelled(self, tmp_path):
+        from src.services.redaction_service import RedactionService
+
+        req = self._make_request(tmp_path, ("a.pdf", "b.pdf", "c.pdf"))
+        # execute() calls should_cancel() exactly once per iteration, before
+        # processing: first returns False (doc 1 runs), second returns True.
+        flags = iter([False, True])
+        results = RedactionService().execute(req, should_cancel=lambda: next(flags))
+
+        assert results.cancelled is True
+        assert len(results.document_results) == 1
+
+    def test_execute_without_cancel_processes_all(self, tmp_path):
+        from src.services.redaction_service import RedactionService
+
+        req = self._make_request(tmp_path, ("a.pdf", "b.pdf"))
+        results = RedactionService().execute(req)
+        assert results.cancelled is False
+        assert len(results.document_results) == 2
+
+    def test_cancelled_run_is_recorded_in_the_audit_log(self, tmp_path):
+        from src.services.redaction_service import RedactionService
+
+        req = self._make_request(tmp_path, ("a.pdf", "b.pdf", "c.pdf"))
+        flags = iter([False, True])
+        results = RedactionService().execute(req, should_cancel=lambda: next(flags))
+        assert "RUN CANCELLED" in results.log_content
+
+    def test_cancel_endpoint_sets_flag(self):
+        from backend import main as backend_main
+
+        backend_main._redaction_control["cancel_requested"] = False
+        try:
+            r = client.post("/api/redact/cancel")
+            assert r.status_code == 200
+            assert backend_main._redaction_control["cancel_requested"] is True
+        finally:
+            # Never leave the flag set — a later test would phantom-cancel.
+            backend_main._redaction_control["cancel_requested"] = False

@@ -5,6 +5,7 @@ declare global {
     electronAPI?: {
       platform: string;
       isElectron: boolean;
+      getApiToken?: () => Promise<string>;
       selectFolder: () => Promise<string | null>;
       openExternal: (url: string) => Promise<void>;
 

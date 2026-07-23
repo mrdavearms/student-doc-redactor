@@ -11,6 +11,7 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/detection failed/i, "Something went wrong while detecting personal information. Please try that step again."],
   [/folder processing failed/i, "Something went wrong while processing that folder. Please try again."],
   [/redaction failed/i, "Something went wrong while redacting the documents. Please try again."],
+  [/api token/i, "The app couldn't authenticate with its redaction engine. Please restart the app."],
 ];
 
 const FALLBACK = "Something went wrong. Please try again, or restart the app if this keeps happening.";

@@ -326,3 +326,17 @@ class TestNerVariationBoundaries:
             matches = orch.detect_pii_in_text(text, page_num=1)
             assert any(m.text.lower() == bare for m in matches), \
                 f"Bare given name {bare!r} from {full!r} was not flagged — privacy risk"
+
+
+# ---------------------------------------------------------------------------
+# NLP Engine Cache Tests
+# ---------------------------------------------------------------------------
+
+class TestNlpEngineCache:
+    def test_nlp_engine_shared_between_orchestrators(self):
+        o1 = PIIOrchestrator("Amy One")
+        o2 = PIIOrchestrator("Ben Two")
+        if o1.presidio_analyzer is None or o2.presidio_analyzer is None:
+            pytest.skip("Presidio/spaCy not available in this environment")
+        assert o1.presidio_analyzer.nlp_engine is o2.presidio_analyzer.nlp_engine, \
+            "spaCy NLP engine must be loaded once per process, not per orchestrator"

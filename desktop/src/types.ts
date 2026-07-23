@@ -69,6 +69,7 @@ export interface DocumentResult {
   verification_failures: string[];
   ocr_warnings: string[];
   error_message: string | null;
+  quarantine_path: string | null;
 }
 
 export interface PreviewResponse {
@@ -86,4 +87,5 @@ export interface RedactionResults {
   successfully_redacted: number;
   verification_failures: { filename: string; message: string }[];
   ocr_warnings: { filename: string; count: number }[];
+  cancelled: boolean;
 }

@@ -82,6 +82,11 @@ export default function DocumentReview() {
       setManualText('');
       setManualPage(1);
     } catch (e) {
+      if (/no cached detection data/i.test((e as { message?: string })?.message ?? '')) {
+        // Server-side cache is gone — force a fresh detection run next time
+        // (see Task 6; without this the wizard can loop forever).
+        useStore.getState().setDetectionParamsKey('');
+      }
       setError(friendlyError(e));
     } finally {
       setManualBusy(false);

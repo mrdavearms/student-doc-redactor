@@ -13,17 +13,43 @@ export class BackendUnreachableError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+// The API token is fetched once over IPC and cached for the session.
+// Outside Electron (vitest, browser dev without the shell) it resolves to ''
+// and no header is sent — the backend then has auth disabled too.
+let tokenPromise: Promise<string> | null = null;
+
+function getApiToken(): Promise<string> {
+  if (!tokenPromise) {
+    const getter = typeof window === 'undefined' ? undefined : window.electronAPI?.getApiToken;
+    tokenPromise = getter ? getter().catch(() => '') : Promise.resolve('');
+  }
+  return tokenPromise;
+}
+
+/** Test-only: drop the cached token so each test can stub its own. */
+export function __resetApiTokenCache() {
+  tokenPromise = null;
+}
+
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
   const signal = options?.signal
     ? AbortSignal.any([options.signal, timeoutController.signal])
     : timeoutController.signal;
 
   let res: Response;
   try {
+    const token = await getApiToken();
     res = await fetch(`${BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'X-Api-Token': token } : {}),
+      },
       ...options,
       signal,
     });
@@ -75,7 +101,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }),
+    }, 30 * 60_000),
 
   redact: (params: {
     folder_path: string;
@@ -94,7 +120,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }),
+    }, 30 * 60_000),
+
+  cancelRedaction: () =>
+    request<{ status: string }>('/api/redact/cancel', { method: 'POST' }),
 
   addManualPII: (params: {
     doc_path: string;

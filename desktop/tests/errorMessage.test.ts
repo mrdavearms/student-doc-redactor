@@ -73,4 +73,9 @@ describe('friendlyError', () => {
     expect(friendlyError(new Error('Redaction failed: boom')))
       .toMatch(/redact/i);
   });
+
+  it('maps the API token 401 detail', () => {
+    expect(friendlyError(new Error('Invalid or missing API token')))
+      .toMatch(/couldn't authenticate/i);
+  });
 });

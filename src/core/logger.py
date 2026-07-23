@@ -30,6 +30,7 @@ class RedactionLogger:
         self.flagged_files: List[tuple] = []
         self.total_documents = 0
         self.successfully_redacted = 0
+        self.cancelled = False
 
     def add_entry(self, entry: LogEntry):
         """Add a log entry"""
@@ -43,6 +44,10 @@ class RedactionLogger:
         """Set document totals"""
         self.total_documents = total
         self.successfully_redacted = successful
+
+    def set_cancelled(self, cancelled: bool = True):
+        """Mark the run as user-cancelled so the audit log says so."""
+        self.cancelled = cancelled
 
     def generate_log(self) -> str:
         """
@@ -62,6 +67,11 @@ class RedactionLogger:
         lines.append(f"Total documents: {self.total_documents}")
         lines.append(f"Successfully redacted: {self.successfully_redacted}")
         lines.append(f"Flagged for manual review: {len(self.flagged_files)}")
+        if self.cancelled:
+            lines.append(
+                f"RUN CANCELLED BY USER — {self.successfully_redacted} of "
+                f"{self.total_documents} documents were processed"
+            )
         lines.append("")
 
         # Group entries by document

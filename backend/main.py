@@ -6,6 +6,7 @@ Run with: uvicorn backend.main:app --port 8765 --reload
 import base64
 import os
 import platform
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,8 @@ from typing import Dict, List
 _project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project_root / "src" / "core"))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.services.conversion_service import ConversionService
@@ -50,11 +52,42 @@ from backend.schemas import (
 
 app = FastAPI(title="Redaction Tool API", version="2.0.0")
 
-# Allow the Electron/Vite frontend to connect
+# ── API token auth ────────────────────────────────────────────────────────
+# The Electron shell generates a random per-session token, passes it to this
+# process via REDACTION_API_TOKEN, and the renderer sends it on every request.
+# Requests without the token are rejected, so a webpage open in the user's
+# browser cannot drive this API. When the env var is unset (manual `uvicorn`
+# runs, pytest), auth is disabled.
+#
+# Registered BEFORE CORSMiddleware on purpose: Starlette's add_middleware
+# inserts at index 0, so the LAST registration is outermost. Defining this
+# first leaves CORS outermost, which is what lets a 401 carry the
+# Access-Control-Allow-Origin header the dev renderer needs to read it.
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    expected = os.environ.get("REDACTION_API_TOKEN", "")
+    if expected and request.method != "OPTIONS" and request.url.path != "/api/health":
+        provided = request.headers.get("x-api-token", "")
+        # Compare as bytes: compare_digest raises TypeError on non-ASCII str,
+        # which would turn a bad header into a 500 + traceback.
+        if not secrets.compare_digest(
+            provided.encode("utf-8", "ignore"), expected.encode("utf-8")
+        ):
+            return JSONResponse(status_code=401,
+                                content={"detail": "Invalid or missing API token"})
+    return await call_next(request)
+
+
+# Allow the Electron/Vite frontend to connect. Origins are pinned to the Vite
+# dev server only. The packaged app loads via file:// and sends NO Origin
+# header, triggers no preflight, and works with no CORS headers at all — so it
+# needs no entry here. "null" is deliberately NOT allowed: that is the origin
+# sandboxed iframes and data:/blob: documents send. The real access control is
+# the API token above; CORS only stops browser pages reading responses.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -64,6 +97,9 @@ app.add_middleware(
 # redaction step needs. We store them server-side keyed by doc path so the
 # frontend only needs to send back selection keys.
 _detection_cache: Dict[str, Dict] = {}
+
+# Cooperative cancel flag for the (single) in-flight redaction run.
+_redaction_control = {"cancel_requested": False}
 
 
 # ── Health ────────────────────────────────────────────────────────────────
@@ -279,8 +315,16 @@ def add_manual_pii(req: AddManualPIIRequest):
 
 # ── Redaction ─────────────────────────────────────────────────────────────
 
+@app.post("/api/redact/cancel")
+def cancel_redaction():
+    """Ask an in-flight /api/redact run to stop after the current document."""
+    _redaction_control["cancel_requested"] = True
+    return {"status": "cancel_requested"}
+
+
 @app.post("/api/redact", response_model=RedactionResultsResponse)
 def redact_documents(req: RedactRequest):
+    _redaction_control["cancel_requested"] = False
     folder_path = Path(req.folder_path)
     documents = [Path(p) for p in req.documents]
 
@@ -323,7 +367,10 @@ def redact_documents(req: RedactRequest):
             redact_header_footer=req.redact_header_footer,
         )
 
-        results = service.execute(request)
+        results = service.execute(
+            request,
+            should_cancel=lambda: _redaction_control["cancel_requested"],
+        )
 
         return RedactionResultsResponse(
             redacted_folder=str(results.redacted_folder),
@@ -336,6 +383,7 @@ def redact_documents(req: RedactRequest):
                     verification_failures=r.verification_failures,
                     ocr_warnings=r.ocr_warnings,
                     error_message=r.error_message,
+                    quarantine_path=str(r.quarantine_path) if r.quarantine_path else None,
                 )
                 for r in results.document_results
             ],
@@ -349,6 +397,7 @@ def redact_documents(req: RedactRequest):
             ocr_warnings=[
                 {"filename": f, "count": c} for f, c in results.ocr_warnings
             ],
+            cancelled=results.cancelled,
         )
     except HTTPException:
         raise
@@ -450,6 +499,9 @@ def cleanup(req: CleanupRequest):
             continue
         if path.suffix != ".pdf":
             failed.append(CleanupFailure(path=p, reason="not a PDF"))
+            continue
+        if not (path.name.endswith("_redacted.pdf") or path.name.endswith(".UNVERIFIED.pdf")):
+            failed.append(CleanupFailure(path=p, reason="not a redaction output file"))
             continue
         if not path.exists():
             continue  # Already gone — treat as no-op success
