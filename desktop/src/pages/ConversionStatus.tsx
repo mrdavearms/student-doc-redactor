@@ -11,7 +11,7 @@ import type { DependencyStatus } from '../types';
 
 export default function ConversionStatus() {
   const {
-    folderPath, conversionResults, setConversionResults,
+    folderPath, conversionResults, conversionFolderPath, setConversionResults,
     setDetectionResults, studentName, parentNames, familyNames,
     organisationNames, detectionResults, userSelections,
     detectionParamsKey, setDetectionParamsKey,
@@ -30,7 +30,9 @@ export default function ConversionStatus() {
 
   // Process folder on mount (if not already done)
   useEffect(() => {
-    if (conversionResults || !deps) return;
+    // Reprocess when the folder changed since these results were produced.
+    if (!deps) return;
+    if (conversionResults && conversionFolderPath === folderPath) return;
     setProcessing(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -41,7 +43,7 @@ export default function ConversionStatus() {
       })
       .finally(() => setProcessing(false));
     return () => ctrl.abort();
-  }, [deps, folderPath, conversionResults, setConversionResults, setError]);
+  }, [deps, folderPath, conversionResults, conversionFolderPath, setConversionResults, setError]);
 
   const results = conversionResults;
   const toggle = (key: string) => setExpanded((s) => ({ ...s, [key]: !s[key] }));

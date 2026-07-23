@@ -92,3 +92,46 @@ describe('store: detectionParamsKey', () => {
     expect(useStore.getState().detectionParamsKey).toBe('fingerprint-1');
   });
 });
+
+describe('store: conversionFolderPath', () => {
+  const conversion = {
+    pdf_files: [], converted_files: [], failed_conversions: [],
+    password_protected: [], total_files: 1, processable_count: 1, flagged_count: 0,
+  };
+
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  it('records the folder that produced the conversion results', () => {
+    useStore.getState().setFolderPath('/folder-a');
+    useStore.getState().setConversionResults(conversion);
+    expect(useStore.getState().conversionFolderPath).toBe('/folder-a');
+  });
+
+  it('leaves conversion results intact when the path is edited (no keystroke data loss)', () => {
+    useStore.getState().setFolderPath('/folder-a');
+    useStore.getState().setConversionResults(conversion);
+    useStore.setState({ detectionResults: { documents: [], total_matches: 0 } });
+
+    useStore.getState().setFolderPath('/folder-b');
+
+    // Nothing destroyed — the mismatch is what triggers reprocessing.
+    expect(useStore.getState().conversionResults).toBe(conversion);
+    expect(useStore.getState().detectionResults).not.toBeNull();
+    expect(useStore.getState().conversionFolderPath).toBe('/folder-a');
+    expect(useStore.getState().folderPath).toBe('/folder-b');
+  });
+
+  it('clears stale redaction results when a new detection run lands', () => {
+    useStore.setState({
+      redactionResults: {
+        redacted_folder: '/old', document_results: [], log_content: '', log_path: null,
+        total_documents: 0, successfully_redacted: 0, verification_failures: [],
+        ocr_warnings: [], cancelled: false,
+      },
+    });
+    useStore.getState().setDetectionResults({ documents: [], total_matches: 0 });
+    expect(useStore.getState().redactionResults).toBeNull();
+  });
+});

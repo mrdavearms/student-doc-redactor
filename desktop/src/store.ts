@@ -36,6 +36,10 @@ interface AppState {
   conversionResults: ConversionResults | null;
   setConversionResults: (results: ConversionResults) => void;
 
+  // Which folder produced conversionResults — lets ConversionStatus detect a
+  // folder change and reprocess, without destroying state on every keystroke.
+  conversionFolderPath: string;
+
   // Step 3: Detection & Review
   detectionResults: DetectionResults | null;
   currentDocIndex: number;
@@ -87,6 +91,7 @@ const initialState = {
   redactHeaderFooter: false,
   folderValid: false,
   conversionResults: null,
+  conversionFolderPath: '',
   detectionResults: null,
   currentDocIndex: 0,
   userSelections: {} as Record<string, boolean>,
@@ -112,7 +117,11 @@ export const useStore = create<AppState>((set) => ({
   setRedactHeaderFooter: (val) => set({ redactHeaderFooter: val }),
   setFolderValid: (valid) => set({ folderValid: valid }),
 
-  setConversionResults: (results) => set({ conversionResults: results }),
+  setConversionResults: (results) =>
+    set((state) => ({
+      conversionResults: results,
+      conversionFolderPath: state.folderPath,
+    })),
 
   setDetectionResults: (results) => {
     // Initialise all selections to true (pre-selected)
@@ -122,7 +131,12 @@ export const useStore = create<AppState>((set) => ({
         selections[`${doc.path}_${idx}`] = true;
       });
     }
-    set({ detectionResults: results, userSelections: selections, currentDocIndex: 0 });
+    set({
+      detectionResults: results,
+      userSelections: selections,
+      currentDocIndex: 0,
+      redactionResults: null,
+    });
   },
 
   setCurrentDocIndex: (idx) => set({ currentDocIndex: idx }),
