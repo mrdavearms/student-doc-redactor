@@ -605,6 +605,7 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words.
 - **`docs/legacy/`**: Contains 6 legacy markdown files moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
 - **`docs/plans/`**: Contains implementation plans from each development phase. Reference only.
+- **Dependency advisories (July 2026)**: `npm audit` was cleared from 10 down to **1 remaining low-severity** advisory (`esbuild` GHSA-g7r4-m6w7-qqqr, CVSS 2.5 — arbitrary file read via the *dev server* on *Windows only*). It is **deliberately not fixed**: the only patch is esbuild ≥0.28.1, which requires vite 8, which is outside the peer range of `@vitejs/plugin-react`, `@tailwindcss/vite` (Tailwind v4) **and** vitest 3 — so `npm audit fix --force` would cascade into a major upgrade of the entire build toolchain that produces the shipped app, to fix a build-time-only advisory that never ships in the `.dmg`/`.exe`. **Do NOT run `npm audit fix --force` here.** Revisit only when those three plugins add vite-8 support. (The safe, non-breaking fixes — js-yaml, tar, shell-quote, brace-expansion, and the vitest 2→3 bump that dropped the vulnerable transitive vite@5/esbuild@0.21.5 chain — are already applied.)
 
 ---
 
