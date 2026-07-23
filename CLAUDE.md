@@ -586,7 +586,8 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 
 **Updater spans 4 files — keep in sync:** `electron/main.cjs` `setupAutoUpdater()` (autoUpdater events → `webContents.send`) → `electron/preload.cjs` (`onUpdate*` bridges) → `src/hooks/useUpdater.ts` (state machine + a download-stall watchdog so it never hangs on "Downloading…") → `UpdateBanner.tsx`/`AboutModal.tsx` (render `available`/`error` with a Download link). `quitAndInstall(true, true)` (silent + relaunch) — don't revert to no-args; with NSIS `oneClick:false` the no-arg form pops the installer wizard.
 
-**ESLint baseline:** `cd desktop && npm run lint` reports **7 errors + 2 warnings** across `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, `Walkthrough.tsx`, and `FinalConfirmation.tsx`. New code must not increase the count, but these aren't yours to fix unless you're already touching those files.
+**ESLint baseline:** `cd desktop && npm run lint` reports **7 errors + 1 warning** — errors across `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, `Walkthrough.tsx`, and `FinalConfirmation.tsx`; the warning in `DocumentReview.tsx` (`react-hooks/exhaustive-deps`). New code must not increase the count, but these aren't yours to fix unless you're already touching those files.
+`eslint.config.js`'s `globalIgnores` includes `release` alongside `dist` — without it, a local Mac/Windows build (`npm run dist:mac`/`dist:win`) leaves `desktop/release/` on disk (gitignored, but not eslint-ignored) and `eslint .` sweeps up a bundled third-party file inside it, adding a spurious extra warning. Don't drop `release` from `globalIgnores`, or the baseline count above stops being deterministic.
 
 ---
 
