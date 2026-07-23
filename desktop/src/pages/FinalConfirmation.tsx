@@ -18,7 +18,8 @@ export default function FinalConfirmation() {
   const [outputMode, setOutputMode] = useState<'default' | 'custom'>('default');
   const [customPath, setCustomPath] = useState('');
   const [redacting, setRedacting] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const cancelRequestedRef = useRef(false);
+  const [cancelPending, setCancelPending] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [partialFiles, setPartialFiles] = useState<string[] | null>(null);
   const [cleaningUp, setCleaningUp] = useState(false);
@@ -58,12 +59,12 @@ export default function FinalConfirmation() {
 
   const handleRedact = async () => {
     setRedacting(true);
+    cancelRequestedRef.current = false;
+    setCancelPending(false);
     const resolvedOutputPath = outputMode === 'custom' && customPath
       ? customPath
       : `${folderPath}/redacted`;
     setLastOutputPath(resolvedOutputPath);
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
     try {
       const selectedKeys: string[] = [];
       for (const doc of detectionResults.documents) {
@@ -89,14 +90,41 @@ export default function FinalConfirmation() {
           detectionResults.documents.map((d) => [d.path, d.matches])
         ),
         selected_keys: selectedKeys,
-        folder_action: outputMode === 'default' ? null : null,
+        folder_action: null,
         custom_output_path: outputMode === 'custom' ? customPath : null,
-      }, { signal: ctrl.signal });
+      });
+
+      if (cancelRequestedRef.current || results.cancelled) {
+        // The backend stopped between documents, so its results ARE the
+        // accurate partial-output list — no directory guessing needed.
+        // Quarantined (.UNVERIFIED.pdf) files have no output_path, so include
+        // quarantine_path or they'd be invisible to "Delete partial output".
+        setPartialFiles(
+          results.document_results
+            .map((d) => d.output_path || d.quarantine_path)
+            .filter((p): p is string => Boolean(p))
+        );
+        setRedactionResults(results);
+        setCancelled(true);
+        return;
+      }
 
       setRedactionResults(results);
       navigateTo('completion');
     } catch (e: any) {
-      if (e.name !== 'AbortError') setError(friendlyError(e));
+      if (cancelRequestedRef.current) {
+        // Cancel was requested but the request itself failed — fall back to
+        // listing whatever redaction outputs exist on disk.
+        try {
+          const list = await api.cleanupList(resolvedOutputPath);
+          setPartialFiles(list.files);
+        } catch {
+          setPartialFiles([]);
+        }
+        setCancelled(true);
+      } else {
+        setError(friendlyError(e));
+      }
     } finally {
       setRedacting(false);
     }
@@ -185,27 +213,23 @@ export default function FinalConfirmation() {
         <div className="mt-8">
           <button
             onClick={async () => {
-              if (!confirm("This will stop further documents from being processed. Files already redacted will remain in the output folder. Continue cancelling?")) {
+              if (cancelPending) return;
+              if (!confirm('Stop after the current document finishes? Documents already redacted will remain in the output folder.')) {
                 return;
               }
-              abortRef.current?.abort();
-              setRedacting(false);
-              setCancelled(true);
-
-              // Wait briefly so the backend can finish writing the current document
-              // before we list what's on disk — prevents the list from being stale.
-              await new Promise((r) => setTimeout(r, 1500));
-
+              cancelRequestedRef.current = true;
+              setCancelPending(true);
               try {
-                const list = await api.cleanupList(lastOutputPath);
-                setPartialFiles(list.files);
+                await api.cancelRedaction();
               } catch {
-                setPartialFiles([]);
+                // The backend may have already finished — the in-flight redact
+                // response will resolve normally and we handle it there.
               }
             }}
-            className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 transition-colors btn-press"
+            disabled={cancelPending}
+            className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors btn-press"
           >
-            Cancel
+            {cancelPending ? 'Stopping after current document…' : 'Cancel'}
           </button>
         </div>
       </div>

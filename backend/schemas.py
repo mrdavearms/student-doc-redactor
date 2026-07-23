@@ -110,6 +110,7 @@ class DocumentResultResponse(BaseModel):
     verification_failures: List[str]
     ocr_warnings: List[str]
     error_message: Optional[str] = None
+    quarantine_path: Optional[str] = None
 
 
 class RedactionResultsResponse(BaseModel):
@@ -121,6 +122,7 @@ class RedactionResultsResponse(BaseModel):
     successfully_redacted: int
     verification_failures: List[Dict[str, str]]  # [{filename, message}]
     ocr_warnings: List[Dict[str, int]]  # [{filename, count}]
+    cancelled: bool = False
 
 
 # ── Preview ──────────────────────────────────────────────────────────────

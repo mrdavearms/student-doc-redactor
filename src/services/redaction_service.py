@@ -54,6 +54,7 @@ class RedactionResults:
     document_results: List[DocumentResult] = field(default_factory=list)
     log_content: str = ""
     log_path: Optional[Path] = None
+    cancelled: bool = False
 
     @property
     def total_documents(self) -> int:
@@ -88,7 +89,7 @@ class RedactionService:
     def __init__(self):
         self._redactor = PDFRedactor()
 
-    def execute(self, request: RedactionRequest) -> RedactionResults:
+    def execute(self, request: RedactionRequest, should_cancel=None) -> RedactionResults:
         """
         Execute a full redaction run.
 
@@ -130,6 +131,11 @@ class RedactionService:
         results = RedactionResults(redacted_folder=redacted_folder)
 
         for doc in request.documents:
+            # Cooperative cancel: the API layer flips a flag when the user
+            # clicks Cancel; we stop cleanly between documents.
+            if should_cancel is not None and should_cancel():
+                results.cancelled = True
+                break
             doc_result = self._process_document(
                 doc=doc,
                 detected_pii=request.detected_pii,
@@ -152,6 +158,8 @@ class RedactionService:
             len(request.documents),
             results.successfully_redacted,
         )
+        if results.cancelled:
+            logger.set_cancelled(True)
         results.log_content = logger.generate_log()
         results.log_path = logger.save_log()
 

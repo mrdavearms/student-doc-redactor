@@ -31,9 +31,13 @@ export function __resetApiTokenCache() {
   tokenPromise = null;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
   const signal = options?.signal
     ? AbortSignal.any([options.signal, timeoutController.signal])
     : timeoutController.signal;
@@ -97,7 +101,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }),
+    }, 30 * 60_000),
 
   redact: (params: {
     folder_path: string;
@@ -116,7 +120,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }),
+    }, 30 * 60_000),
+
+  cancelRedaction: () =>
+    request<{ status: string }>('/api/redact/cancel', { method: 'POST' }),
 
   addManualPII: (params: {
     doc_path: string;

@@ -98,6 +98,9 @@ app.add_middleware(
 # frontend only needs to send back selection keys.
 _detection_cache: Dict[str, Dict] = {}
 
+# Cooperative cancel flag for the (single) in-flight redaction run.
+_redaction_control = {"cancel_requested": False}
+
 
 # ── Health ────────────────────────────────────────────────────────────────
 
@@ -312,8 +315,16 @@ def add_manual_pii(req: AddManualPIIRequest):
 
 # ── Redaction ─────────────────────────────────────────────────────────────
 
+@app.post("/api/redact/cancel")
+def cancel_redaction():
+    """Ask an in-flight /api/redact run to stop after the current document."""
+    _redaction_control["cancel_requested"] = True
+    return {"status": "cancel_requested"}
+
+
 @app.post("/api/redact", response_model=RedactionResultsResponse)
 def redact_documents(req: RedactRequest):
+    _redaction_control["cancel_requested"] = False
     folder_path = Path(req.folder_path)
     documents = [Path(p) for p in req.documents]
 
@@ -356,7 +367,10 @@ def redact_documents(req: RedactRequest):
             redact_header_footer=req.redact_header_footer,
         )
 
-        results = service.execute(request)
+        results = service.execute(
+            request,
+            should_cancel=lambda: _redaction_control["cancel_requested"],
+        )
 
         return RedactionResultsResponse(
             redacted_folder=str(results.redacted_folder),
@@ -369,6 +383,7 @@ def redact_documents(req: RedactRequest):
                     verification_failures=r.verification_failures,
                     ocr_warnings=r.ocr_warnings,
                     error_message=r.error_message,
+                    quarantine_path=str(r.quarantine_path) if r.quarantine_path else None,
                 )
                 for r in results.document_results
             ],
@@ -382,6 +397,7 @@ def redact_documents(req: RedactRequest):
             ocr_warnings=[
                 {"filename": f, "count": c} for f, c in results.ocr_warnings
             ],
+            cancelled=results.cancelled,
         )
     except HTTPException:
         raise
