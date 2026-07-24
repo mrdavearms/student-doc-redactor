@@ -129,6 +129,20 @@ class TestRedactionCancel:
         assert results.cancelled is True
         assert len(results.document_results) == 1
 
+    def test_cancelled_run_reports_full_requested_total(self, tmp_path):
+        """total_documents must be the intended count, not just the processed
+        count — otherwise a cancelled run reads as '1 of 1' instead of '1 of 3'
+        and disagrees with the audit log (which already uses the full count)."""
+        from src.services.redaction_service import RedactionService
+
+        req = self._make_request(tmp_path, ("a.pdf", "b.pdf", "c.pdf"))
+        flags = iter([False, True])
+        results = RedactionService().execute(req, should_cancel=lambda: next(flags))
+
+        assert len(results.document_results) == 1  # only one processed
+        assert results.successfully_redacted == 1
+        assert results.total_documents == 3        # but three were requested
+
     def test_execute_without_cancel_processes_all(self, tmp_path):
         from src.services.redaction_service import RedactionService
 

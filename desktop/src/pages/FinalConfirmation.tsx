@@ -94,7 +94,12 @@ export default function FinalConfirmation() {
         custom_output_path: outputMode === 'custom' ? customPath : null,
       });
 
-      if (cancelRequestedRef.current || results.cancelled) {
+      // Trust the backend's authoritative signal, NOT whether Cancel was
+      // clicked: if the run finished before the flag was seen (or the cancel
+      // POST failed), results.cancelled is false and every document completed —
+      // those are valid, complete redactions, so fall through to completion
+      // rather than mislabelling them as partial output the user should delete.
+      if (results.cancelled) {
         // The backend stopped between documents, so its results ARE the
         // accurate partial-output list — no directory guessing needed.
         // Quarantined (.UNVERIFIED.pdf) files have no output_path, so include

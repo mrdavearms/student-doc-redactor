@@ -35,6 +35,12 @@ class TestApiTokenAuth:
         monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
         assert client.get("/api/health").status_code == 200
 
+    def test_health_exempt_tolerates_trailing_slash(self, monkeypatch):
+        """The exemption is path-normalised, so /api/health/ is not spuriously
+        401'd — an exact-string match would block the trailing-slash variant."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        assert client.get("/api/health/").status_code != 401
+
     def test_non_ascii_token_header_returns_401_not_500(self, monkeypatch):
         """secrets.compare_digest raises TypeError on non-ASCII str — must not 500.
 

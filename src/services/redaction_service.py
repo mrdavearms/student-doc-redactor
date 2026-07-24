@@ -55,9 +55,16 @@ class RedactionResults:
     log_content: str = ""
     log_path: Optional[Path] = None
     cancelled: bool = False
+    # How many documents the run was asked to process. Set by execute() so a
+    # cancelled run (which stops early and appends fewer document_results) still
+    # reports the intended total, matching the audit log. None → fall back to
+    # the processed count for callers that construct results directly.
+    requested_document_count: Optional[int] = None
 
     @property
     def total_documents(self) -> int:
+        if self.requested_document_count is not None:
+            return self.requested_document_count
         return len(self.document_results)
 
     @property
@@ -128,7 +135,10 @@ class RedactionService:
                     name_variations.append(word)
 
         # 3. Process each document
-        results = RedactionResults(redacted_folder=redacted_folder)
+        results = RedactionResults(
+            redacted_folder=redacted_folder,
+            requested_document_count=len(request.documents),
+        )
 
         for doc in request.documents:
             # Cooperative cancel: the API layer flips a flag when the user

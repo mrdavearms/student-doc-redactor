@@ -66,7 +66,7 @@ app = FastAPI(title="Redaction Tool API", version="2.0.0")
 @app.middleware("http")
 async def require_api_token(request: Request, call_next):
     expected = os.environ.get("REDACTION_API_TOKEN", "")
-    if expected and request.method != "OPTIONS" and request.url.path != "/api/health":
+    if expected and request.method != "OPTIONS" and request.url.path.rstrip("/") != "/api/health":
         provided = request.headers.get("x-api-token", "")
         # Compare as bytes: compare_digest raises TypeError on non-ASCII str,
         # which would turn a bad header into a 500 + traceback.
@@ -98,7 +98,13 @@ app.add_middleware(
 # frontend only needs to send back selection keys.
 _detection_cache: Dict[str, Dict] = {}
 
-# Cooperative cancel flag for the (single) in-flight redaction run.
+# Cooperative cancel flag for the in-flight redaction run. This is a single
+# process-global, which is correct only under the app's single-user,
+# one-redaction-at-a-time model (the desktop UI awaits /api/redact before it can
+# start another). redact_documents() resets it on entry so a stale flag can't
+# phantom-cancel the next run. If concurrent redaction runs ever become
+# possible, this must become per-run (e.g. keyed by a run id) or a second run
+# would share — and wrongly trip — the first run's cancel flag.
 _redaction_control = {"cancel_requested": False}
 
 
