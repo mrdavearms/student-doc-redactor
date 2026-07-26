@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (376 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (396 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -89,6 +89,7 @@ React (Vite)
 FastAPI (backend/main.py)
 ├── /api/health, /api/dependencies/check
 ├── /api/folder/process, /api/folder/validate, /api/folder/open
+├── /api/file/process, /api/file/validate   → single-document mode
 ├── /api/pii/detect   → returns matches, caches PIIMatch objects server-side
 ├── /api/redact       → uses cached detection data + user selections
 └── /api/preview      → renders PDF page at 150 DPI, returns base64 PNG
@@ -383,7 +384,24 @@ When `REDACTION_API_TOKEN` is set (Electron sets it at spawn), every endpoint ex
 
 `_get_shared_nlp_engine()` in `pii_orchestrator.py` caches the NLP engine module-level (thread-locked). Never construct `NlpEngineProvider` per request — it costs ~0.6s each time. The `AnalyzerEngine` itself stays per-orchestrator (~0.01s) because `StudentNameRecognizer` is parameterised per run.
 
-### 38. `detectionParamsKey` must be cleared on any backend-cache doubt
+### 38. Single-document mode reuses the whole folder pipeline
+
+Step 1 offers two equal choices: one document or a whole folder (`inputMode` in the store). Single-document mode is not a separate pipeline — `ConversionService.process_file()` returns the same `ConversionResults` shape as `process_folder()`, so detection, review and redaction are byte-for-byte the same code path afterwards.
+
+Three things hold it together:
+- **`setFilePath` also sets `folderPath`** to the file's parent folder. Redaction still works in folders (audit log location, default `redacted/` output), so nothing downstream needs to know which mode is active.
+- **`conversionFolderPath` stores the *file* path in file mode**, not the folder. Storing the folder would let a second file in the same folder reuse the first file's conversion results.
+- **The conversion screen auto-advances in file mode** when exactly one file came through clean (`processable_count === 1 && flagged_count === 0`), guarded by `autoAdvancedKey`. Without that guard, any screen navigating back to `conversion_status` would be bounced straight forward again and the user could never reach step 1.
+
+### 39. `custom_output_filename` is honoured for one document only
+
+The Save As dialog (file mode) names a single file. `RedactionService.execute()` ignores `custom_output_filename` unless `len(request.documents) == 1` — several documents would all collide on the one name. `_sanitise_output_filename()` strips any directory component (so a crafted name can't write outside the chosen folder) and forces a `.pdf` suffix.
+
+An explicit filename also **skips the collision counter** — the native Save dialog has already asked the user about replacing an existing file. Without an override, the existing PII-stripping (`strip_pii_from_filename`) and `_2`/`_3` collision suffixes apply exactly as before.
+
+`desktop/src/lib/filename.ts` only *suggests* the name that pre-fills the dialog; the backend stays authoritative for the default name.
+
+### 40. `detectionParamsKey` must be cleared on any backend-cache doubt
 
 The frontend skips re-detection when the fingerprint matches, which is only safe while `_detection_cache` holds the same run. Every path that can observe a `no cached detection data` error — and `setBackendReachable(false)` — clears the key. Without that the wizard loops: skip detection → redact 400s → 'go back one step' → skip again.
 
@@ -424,7 +442,11 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | Key | Type | Purpose |
 |-----|------|---------|
 | `currentScreen` | Screen | Active wizard step |
-| `folderPath` | string | Selected input folder |
+| `inputMode` | 'file' \| 'folder' | One document or a whole folder (default `folder`) |
+| `filePath` | string | Selected single document (file mode) |
+| `fileValid` | boolean | Whether the single document exists and is a supported type |
+| `autoAdvancedKey` | string | Input that already auto-skipped the conversion screen |
+| `folderPath` | string | Selected input folder — derived from `filePath` in file mode |
 | `studentName` | string | Student full name |
 | `parentNames` | string | Comma-separated parent names |
 | `familyNames` | string | Comma-separated family names |
@@ -477,7 +499,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 376 tests total
+tests/                                # 396 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -491,6 +513,7 @@ tests/                                # 376 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
+├── test_single_document.py           # 18 tests: single-file conversion, /api/file/* endpoints, custom output filename
 ├── test_cleanup_api.py               # 16 tests: cleanup endpoint path-traversal guards
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution

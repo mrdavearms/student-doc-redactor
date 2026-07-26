@@ -24,6 +24,11 @@ class ProcessFolderRequest(BaseModel):
     folder_path: str
 
 
+class ProcessFileRequest(BaseModel):
+    """Single-document mode — one file instead of a whole folder."""
+    file_path: str
+
+
 class ConversionResultsResponse(BaseModel):
     pdf_files: List[str]
     converted_files: List[str]
@@ -96,6 +101,8 @@ class RedactRequest(BaseModel):
     selected_keys: List[str]  # ["<doc_path>_<idx>", ...]
     folder_action: Optional[str] = None  # 'overwrite' | 'new' | None
     custom_output_path: Optional[str] = None  # User-chosen output folder
+    # User-chosen output filename from the Save As dialog (single document only)
+    custom_output_filename: Optional[str] = None
     parent_names: List[str] = []
     family_names: List[str] = []
     organisation_names: List[str] = []

@@ -6,7 +6,7 @@ Framework-agnostic — no Streamlit imports.
 
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, List, Optional, Set, Tuple
 
 from src.core.pii_detector import PIIDetector, PIIMatch
@@ -28,6 +28,10 @@ class RedactionRequest:
     folder_action: Optional[str] = None
     # Optional user-chosen output folder (overrides default subfolder)
     custom_output_path: Optional[Path] = None
+    # Optional user-chosen output filename. Single-document runs only — the
+    # Save As dialog names one file, so it is ignored when several documents
+    # are being redacted (they would all collide on the one name).
+    custom_output_filename: Optional[str] = None
     parent_names: List[str] = field(default_factory=list)
     family_names: List[str] = field(default_factory=list)
     organisation_names: List[str] = field(default_factory=list)
@@ -134,6 +138,14 @@ class RedactionService:
                 if len(word) >= 3 and word not in name_variations:
                     name_variations.append(word)
 
+        # 2c. Resolve a user-chosen output filename, if any. Only honoured for a
+        # single document — see RedactionRequest.custom_output_filename.
+        filename_override = None
+        if request.custom_output_filename and len(request.documents) == 1:
+            filename_override = self._sanitise_output_filename(
+                request.custom_output_filename
+            )
+
         # 3. Process each document
         results = RedactionResults(
             redacted_folder=redacted_folder,
@@ -154,6 +166,7 @@ class RedactionService:
                 logger=logger,
                 name_variations=name_variations,
                 redact_header_footer=request.redact_header_footer,
+                output_filename_override=filename_override,
             )
             results.document_results.append(doc_result)
 
@@ -174,6 +187,22 @@ class RedactionService:
         results.log_path = logger.save_log()
 
         return results
+
+    @staticmethod
+    def _sanitise_output_filename(name: str) -> Optional[str]:
+        """
+        Reduce a user-supplied output filename to a bare, safe PDF filename.
+
+        Strips any directory component (so a crafted name cannot write outside
+        the chosen output folder) and forces a .pdf extension. Returns None if
+        nothing usable is left, which falls back to the generated name.
+        """
+        bare = PurePath(name.replace("\\", "/")).name.strip()
+        if not bare or bare in (".", ".."):
+            return None
+        if not bare.lower().endswith(".pdf"):
+            bare += ".pdf"
+        return bare
 
     def _prepare_output_folder(
         self, folder_path: Path, folder_action: Optional[str],
@@ -211,6 +240,7 @@ class RedactionService:
         logger: RedactionLogger,
         name_variations: List[str] = None,
         redact_header_footer: bool = False,
+        output_filename_override: Optional[str] = None,
     ) -> DocumentResult:
         """Process a single document: filter selections, redact, verify."""
         doc_data = detected_pii.get(doc, {})
@@ -244,15 +274,20 @@ class RedactionService:
             )
             result.ocr_warnings.append(warning_msg)
 
-        # Compute safe output filename (strips PII from stem)
-        safe_stem = strip_pii_from_filename(doc.stem, name_variations or [])
-        output_filename = f"{safe_stem}_redacted.pdf"
+        if output_filename_override:
+            # The user named this file in a Save As dialog, which already asked
+            # them about replacing an existing file — so no collision guard.
+            output_filename = output_filename_override
+        else:
+            # Compute safe output filename (strips PII from stem)
+            safe_stem = strip_pii_from_filename(doc.stem, name_variations or [])
+            output_filename = f"{safe_stem}_redacted.pdf"
 
-        # Collision guard: if another file already produced the same stripped name
-        counter = 2
-        while (redacted_folder / output_filename).exists():
-            output_filename = f"{safe_stem}_{counter}_redacted.pdf"
-            counter += 1
+            # Collision guard: if another file already produced the same stripped name
+            counter = 2
+            while (redacted_folder / output_filename).exists():
+                output_filename = f"{safe_stem}_{counter}_redacted.pdf"
+                counter += 1
 
         output_path = redacted_folder / output_filename
 

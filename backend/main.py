@@ -38,6 +38,7 @@ from backend.schemas import (
     PIIMatchResponse,
     PreviewRequest,
     PreviewResponse,
+    ProcessFileRequest,
     ProcessFolderRequest,
     RedactRequest,
     RedactionResultsResponse,
@@ -159,6 +160,34 @@ def process_folder(req: ProcessFolderRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Folder processing failed: {e}") from e
+
+    return ConversionResultsResponse(
+        pdf_files=[str(p) for p in results.pdf_files],
+        converted_files=[str(p) for p in results.converted_files],
+        failed_conversions=[
+            {"path": str(p), "reason": r} for p, r in results.failed_conversions
+        ],
+        password_protected=[str(p) for p in results.password_protected],
+        total_files=results.total_files,
+        processable_count=results.processable_count,
+        flagged_count=results.flagged_count,
+    )
+
+
+@app.post("/api/file/process", response_model=ConversionResultsResponse)
+def process_file(req: ProcessFileRequest):
+    """Single-document mode: prepare one file instead of scanning a folder."""
+    file_path = Path(req.file_path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=400, detail=f"File not found: {req.file_path}")
+
+    try:
+        service = ConversionService()
+        results = service.process_file(file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File processing failed: {e}") from e
 
     return ConversionResultsResponse(
         pdf_files=[str(p) for p in results.pdf_files],
@@ -367,6 +396,7 @@ def redact_documents(req: RedactRequest):
             user_selections=user_selections,
             folder_action=req.folder_action,
             custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
+            custom_output_filename=req.custom_output_filename,
             parent_names=req.parent_names,
             family_names=req.family_names,
             organisation_names=req.organisation_names,
@@ -475,6 +505,21 @@ def validate_folder(req: ProcessFolderRequest):
     exists = folder.exists()
     is_dir = folder.is_dir() if exists else False
     return {"exists": exists, "is_directory": is_dir, "path": req.folder_path}
+
+
+@app.post("/api/file/validate")
+def validate_file(req: ProcessFileRequest):
+    """Check a single document path, and whether it is a type we can handle."""
+    file_path = Path(req.file_path)
+    exists = file_path.exists()
+    is_file = file_path.is_file() if exists else False
+    supported = file_path.suffix.lower() in (".pdf", ".doc", ".docx")
+    return {
+        "exists": exists,
+        "is_file": is_file,
+        "supported": supported,
+        "path": req.file_path,
+    }
 
 
 # ── Cleanup ──────────────────────────────────────────────────────────────

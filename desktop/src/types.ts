@@ -8,8 +8,11 @@ export type Screen =
   | 'final_confirmation'
   | 'completion';
 
+/** What the user picked to redact: one document, or a whole folder */
+export type InputMode = 'file' | 'folder';
+
 export const SCREENS: { key: Screen; label: string; step: number }[] = [
-  { key: 'folder_selection', label: 'Select Folder', step: 1 },
+  { key: 'folder_selection', label: 'Select Documents', step: 1 },
   { key: 'conversion_status', label: 'Convert Docs', step: 2 },
   { key: 'document_review', label: 'Review PII', step: 3 },
   { key: 'final_confirmation', label: 'Confirm', step: 4 },

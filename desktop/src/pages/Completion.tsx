@@ -253,7 +253,7 @@ export default function Completion() {
           className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
                      bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
         >
-          <RotateCcw size={16} /> Process Another Folder
+          <RotateCcw size={16} /> Redact Something Else
         </button>
       </div>
     </div>

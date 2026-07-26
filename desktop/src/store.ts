@@ -4,8 +4,10 @@
  */
 
 import { create } from 'zustand';
+import { dirname } from './lib/paths';
 import type {
   Screen,
+  InputMode,
   ConversionResults,
   DetectionResults,
   RedactionResults,
@@ -15,6 +17,14 @@ interface AppState {
   // Navigation
   currentScreen: Screen;
   navigateTo: (screen: Screen) => void;
+
+  // Step 1: What to redact — one document or a whole folder
+  inputMode: InputMode;
+  filePath: string;
+  fileValid: boolean;
+  setInputMode: (mode: InputMode) => void;
+  setFilePath: (path: string) => void;
+  setFileValid: (valid: boolean) => void;
 
   // Step 1: Folder & student info
   folderPath: string;
@@ -36,9 +46,16 @@ interface AppState {
   conversionResults: ConversionResults | null;
   setConversionResults: (results: ConversionResults) => void;
 
-  // Which folder produced conversionResults — lets ConversionStatus detect a
-  // folder change and reprocess, without destroying state on every keystroke.
+  // Which input produced conversionResults (the folder, or the single file) —
+  // lets ConversionStatus detect a change and reprocess, without destroying
+  // state on every keystroke.
   conversionFolderPath: string;
+
+  // Input key that has already auto-advanced past the conversion screen in
+  // single-document mode. Without it, pressing Back from the review screen
+  // would immediately auto-advance again and trap the user.
+  autoAdvancedKey: string;
+  setAutoAdvancedKey: (key: string) => void;
 
   // Step 3: Detection & Review
   detectionResults: DetectionResults | null;
@@ -83,6 +100,9 @@ interface AppState {
 
 const initialState = {
   currentScreen: 'folder_selection' as Screen,
+  inputMode: 'folder' as InputMode,
+  filePath: '',
+  fileValid: false,
   folderPath: '',
   studentName: '',
   parentNames: '',
@@ -102,12 +122,21 @@ const initialState = {
   error: null,
   backendReachable: true,
   detectionParamsKey: '',
+  autoAdvancedKey: '',
 };
 
 export const useStore = create<AppState>((set) => ({
   ...initialState,
 
   navigateTo: (screen) => set({ currentScreen: screen, error: null }),
+
+  setInputMode: (mode) => set({ inputMode: mode }),
+
+  // The redaction run still works in folders (audit log, default output
+  // location), so a chosen file also sets folderPath to its containing folder.
+  setFilePath: (path) => set({ filePath: path, folderPath: dirname(path) }),
+
+  setFileValid: (valid) => set({ fileValid: valid }),
 
   setFolderPath: (path) => set({ folderPath: path }),
   setStudentName: (name) => set({ studentName: name }),
@@ -120,8 +149,11 @@ export const useStore = create<AppState>((set) => ({
   setConversionResults: (results) =>
     set((state) => ({
       conversionResults: results,
-      conversionFolderPath: state.folderPath,
+      conversionFolderPath:
+        state.inputMode === 'file' ? state.filePath : state.folderPath,
     })),
+
+  setAutoAdvancedKey: (key) => set({ autoAdvancedKey: key }),
 
   setDetectionResults: (results) => {
     // Initialise all selections to true (pre-selected)

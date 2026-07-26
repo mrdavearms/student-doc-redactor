@@ -237,6 +237,30 @@ ipcMain.handle('select-folder', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('select-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Document',
+    filters: [
+      { name: 'Documents', extensions: ['pdf', 'doc', 'docx'] },
+      { name: 'PDF', extensions: ['pdf'] },
+      { name: 'Word', extensions: ['doc', 'docx'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('save-file-as', async (_event, defaultPath) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Redacted Document As',
+    defaultPath: defaultPath || undefined,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  return result.filePath;
+});
+
 ipcMain.handle('open-external', async (_event, url) => {
   await shell.openExternal(url);
 });

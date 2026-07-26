@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, FolderOpen, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, FolderOpen, FileText, Search, Trash2 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
+import { basename, dirname, joinPath, stem } from '../lib/paths';
+import { suggestRedactedFilename } from '../lib/filename';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
 
@@ -11,12 +13,16 @@ export default function FinalConfirmation() {
   const {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
+    inputMode, filePath,
     navigateTo, setRedactionResults, setError,
     lastOutputPath, setLastOutputPath,
   } = useStore();
 
   const [outputMode, setOutputMode] = useState<'default' | 'custom'>('default');
   const [customPath, setCustomPath] = useState('');
+  // Single-document mode: the full path chosen in the Save As dialog, or null
+  // while the default (a 'redacted' subfolder, backend-generated name) applies.
+  const [savePath, setSavePath] = useState<string | null>(null);
   const [redacting, setRedacting] = useState(false);
   const cancelRequestedRef = useRef(false);
   const [cancelPending, setCancelPending] = useState(false);
@@ -38,6 +44,22 @@ export default function FinalConfirmation() {
     }
   }, []);
 
+  const isFileMode = inputMode === 'file';
+
+  const handleSaveAs = useCallback(async () => {
+    const names = [
+      studentName,
+      ...parentNames.split(','),
+      ...familyNames.split(','),
+      ...organisationNames.split(','),
+    ].map((n) => n.trim()).filter(Boolean);
+    const suggestedName = suggestRedactedFilename(stem(filePath), names);
+    const selected = await window.electronAPI?.saveFileAs?.(
+      joinPath(folderPath, suggestedName)
+    );
+    if (selected) setSavePath(selected);
+  }, [filePath, folderPath, studentName, parentNames, familyNames, organisationNames]);
+
   if (!detectionResults) return null;
 
   // Count selected items by category
@@ -57,13 +79,20 @@ export default function FinalConfirmation() {
   // Derive the default output path for display
   const defaultOutputDisplay = `${folderPath}/redacted/`;
 
+  // A custom folder was chosen in folder mode but no path picked yet.
+  const outputIncomplete = !isFileMode && outputMode === 'custom' && !customPath;
+
   const handleRedact = async () => {
     setRedacting(true);
     cancelRequestedRef.current = false;
     setCancelPending(false);
-    const resolvedOutputPath = outputMode === 'custom' && customPath
-      ? customPath
-      : `${folderPath}/redacted`;
+    // Single-document mode uses the Save As choice (folder + filename);
+    // folder mode uses the radio buttons (folder only).
+    const chosenFolder = isFileMode
+      ? (savePath ? dirname(savePath) : null)
+      : (outputMode === 'custom' && customPath ? customPath : null);
+    const chosenFilename = isFileMode && savePath ? basename(savePath) : null;
+    const resolvedOutputPath = chosenFolder ?? joinPath(folderPath, 'redacted');
     setLastOutputPath(resolvedOutputPath);
     try {
       const selectedKeys: string[] = [];
@@ -91,7 +120,8 @@ export default function FinalConfirmation() {
         ),
         selected_keys: selectedKeys,
         folder_action: null,
-        custom_output_path: outputMode === 'custom' ? customPath : null,
+        custom_output_path: chosenFolder,
+        custom_output_filename: chosenFilename,
       });
 
       // Trust the backend's authoritative signal, NOT whether Cancel was
@@ -303,11 +333,62 @@ export default function FinalConfirmation() {
         className="bg-white rounded-xl border border-slate-200 p-5"
       >
         <div className="flex items-center gap-2 mb-4">
-          <FolderOpen size={16} className="text-primary-500" />
-          <h3 className="text-sm font-medium text-slate-600">Save Redacted Files To</h3>
+          {isFileMode
+            ? <FileText size={16} className="text-primary-500" />
+            : <FolderOpen size={16} className="text-primary-500" />}
+          <h3 className="text-sm font-medium text-slate-600">
+            {isFileMode ? 'Save Redacted Document As' : 'Save Redacted Files To'}
+          </h3>
           <HelpTip text="Redacted copies are saved separately — your original files are never modified. By default they go in a 'redacted' folder inside your source folder." />
         </div>
 
+        {isFileMode ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-3 p-3.5 rounded-lg border border-slate-100 bg-slate-50/60">
+              <div className="flex-1 min-w-0">
+                {savePath ? (
+                  <>
+                    <span className="text-sm text-slate-700 font-medium">Saving to your chosen location</span>
+                    <code className="text-[11px] text-slate-500 mt-1.5 block break-all">{savePath}</code>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm text-slate-700 font-medium">Default location</span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">redacted</code> folder
+                      inside the document's own folder. The filename has the student's details stripped out automatically.
+                    </p>
+                    <code className="text-[11px] text-slate-400 mt-1.5 block break-all">
+                      {joinPath(folderPath, 'redacted')}
+                    </code>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSaveAs}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-200 bg-slate-50
+                           text-sm text-slate-600 font-medium hover:bg-slate-100 hover:border-slate-300
+                           transition-colors btn-press"
+              >
+                <Search size={14} />
+                {savePath ? 'Change location or name' : 'Choose where to save...'}
+              </button>
+              {savePath && (
+                <button
+                  type="button"
+                  onClick={() => setSavePath(null)}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  Use the default instead
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
         <div className="space-y-2.5">
           {/* Default option */}
           <label
@@ -374,6 +455,7 @@ export default function FinalConfirmation() {
             </div>
           </label>
         </div>
+        )}
       </motion.section>
 
       {/* Warning */}
@@ -396,16 +478,16 @@ export default function FinalConfirmation() {
         <div className="flex gap-2">
           <button
             onClick={handleRedact}
-            disabled={totalSelected === 0 || (outputMode === 'custom' && !customPath)}
+            disabled={totalSelected === 0 || outputIncomplete}
             className={`
               flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
-              ${totalSelected > 0 && !(outputMode === 'custom' && !customPath)
+              ${totalSelected > 0 && !outputIncomplete
                 ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow btn-press'
                 : 'bg-slate-100 text-slate-300 cursor-not-allowed'
               }
             `}
           >
-            <ShieldCheck size={16} /> Create Redacted Documents
+            <ShieldCheck size={16} /> Create Redacted {isFileMode ? 'Document' : 'Documents'}
           </button>
         </div>
       </div>

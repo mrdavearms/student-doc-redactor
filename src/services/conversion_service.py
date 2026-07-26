@@ -72,6 +72,26 @@ class ConversionService:
             tesseract_ok=tess_ok,
         )
 
+    def process_file(self, file_path: Path) -> ConversionResults:
+        """
+        Process a single document: convert it if it is a Word file, check it if
+        it is a PDF.
+
+        Args:
+            file_path: Path to the document
+
+        Returns:
+            ConversionResults with the one file in the appropriate list
+        """
+        raw = self._converter.process_file(file_path)
+
+        return ConversionResults(
+            pdf_files=raw['pdf_files'],
+            converted_files=raw['converted_files'],
+            failed_conversions=raw['failed_conversions'],
+            password_protected=raw['password_protected'],
+        )
+
     def process_folder(self, folder_path: Path) -> ConversionResults:
         """
         Process all documents in a folder: convert Word files, check PDFs.

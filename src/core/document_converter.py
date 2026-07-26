@@ -105,6 +105,49 @@ class DocumentConverter:
         except Exception as e:
             return True, f"Error checking PDF: {str(e)}"
 
+    def process_file(self, file_path: Path) -> Dict:
+        """
+        Process a single document (the single-document redaction path).
+
+        Same result shape as process_folder() so every downstream step —
+        detection, review, redaction — is identical for one file or many.
+
+        Args:
+            file_path: Path to a .pdf, .doc or .docx file
+
+        Returns:
+            Dictionary with the same keys as process_folder()
+        """
+        results = {
+            'pdf_files': [],
+            'converted_files': [],
+            'failed_conversions': [],
+            'password_protected': []
+        }
+
+        suffix = file_path.suffix.lower()
+
+        if suffix in ('.doc', '.docx'):
+            temp_dir = file_path.parent / '.temp_converted'
+            temp_dir.mkdir(exist_ok=True)
+            success, message, output_path = self.convert_to_pdf(file_path, temp_dir)
+            if success:
+                results['converted_files'].append(output_path)
+            else:
+                results['failed_conversions'].append((file_path, message))
+        elif suffix == '.pdf':
+            is_protected, message = self.check_pdf_password_protected(file_path)
+            if is_protected:
+                results['password_protected'].append(file_path)
+            else:
+                results['pdf_files'].append(file_path)
+        else:
+            results['failed_conversions'].append(
+                (file_path, f"Unsupported file type: {file_path.suffix or 'no extension'}")
+            )
+
+        return results
+
     def process_folder(self, folder_path: Path) -> Dict:
         """
         Process all documents in a folder

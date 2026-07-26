@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   getApiToken: () => ipcRenderer.invoke('get-api-token'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFile: () => ipcRenderer.invoke('select-file'),
+  saveFileAs: (defaultPath) => ipcRenderer.invoke('save-file-as', defaultPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
   // Returns a cleanup function — call it in useEffect's return to avoid listener buildup

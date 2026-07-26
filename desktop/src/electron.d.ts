@@ -7,6 +7,8 @@ declare global {
       isElectron: boolean;
       getApiToken?: () => Promise<string>;
       selectFolder: () => Promise<string | null>;
+      selectFile?: () => Promise<string | null>;
+      saveFileAs?: (defaultPath?: string) => Promise<string | null>;
       openExternal: (url: string) => Promise<void>;
 
       // Each returns a cleanup function for useEffect

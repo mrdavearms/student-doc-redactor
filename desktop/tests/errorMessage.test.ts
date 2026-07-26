@@ -15,7 +15,12 @@ describe('friendlyError', () => {
 
   it('maps "File not found" to a file-moved message', () => {
     expect(friendlyError(new Error('File not found: /tmp/x.pdf')))
-      .toMatch(/files couldn't be opened/i);
+      .toMatch(/couldn't be opened/i);
+  });
+
+  it('maps "File processing failed" to a friendly retry message', () => {
+    expect(friendlyError(new Error('File processing failed: disk error')))
+      .toMatch(/preparing that document/i);
   });
 
   it('maps "No cached detection data" to a re-run-detection message', () => {

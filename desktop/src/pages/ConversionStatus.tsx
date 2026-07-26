@@ -11,10 +11,12 @@ import type { DependencyStatus } from '../types';
 
 export default function ConversionStatus() {
   const {
+    inputMode, filePath,
     folderPath, conversionResults, conversionFolderPath, setConversionResults,
     setDetectionResults, studentName, parentNames, familyNames,
     organisationNames, detectionResults, userSelections,
     detectionParamsKey, setDetectionParamsKey,
+    autoAdvancedKey, setAutoAdvancedKey,
     navigateTo, setLoading, setError,
   } = useStore();
 
@@ -23,27 +25,35 @@ export default function ConversionStatus() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const abortRef = useRef<AbortController | null>(null);
 
+  const isFileMode = inputMode === 'file';
+  // What produced the current conversion results — the single file, or the folder.
+  const sourceKey = isFileMode ? filePath : folderPath;
+
   // Check dependencies on mount
   useEffect(() => {
     api.checkDependencies().then(setDeps).catch((e) => setError(friendlyError(e)));
   }, [setError]);
 
-  // Process folder on mount (if not already done)
+  // Process the folder (or the single document) on mount, if not already done
   useEffect(() => {
-    // Reprocess when the folder changed since these results were produced.
+    // Reprocess when the input changed since these results were produced.
     if (!deps) return;
-    if (conversionResults && conversionFolderPath === folderPath) return;
+    if (conversionResults && conversionFolderPath === sourceKey) return;
     setProcessing(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    api.processFolder(folderPath, { signal: ctrl.signal })
+    const work = isFileMode
+      ? api.processFile(filePath, { signal: ctrl.signal })
+      : api.processFolder(folderPath, { signal: ctrl.signal });
+    work
       .then((r) => setConversionResults(r))
       .catch((e) => {
         if (e.name !== 'AbortError') setError(friendlyError(e));
       })
       .finally(() => setProcessing(false));
     return () => ctrl.abort();
-  }, [deps, folderPath, conversionResults, conversionFolderPath, setConversionResults, setError]);
+  }, [deps, isFileMode, filePath, folderPath, sourceKey, conversionResults,
+      conversionFolderPath, setConversionResults, setError]);
 
   const results = conversionResults;
   const toggle = (key: string) => setExpanded((s) => ({ ...s, [key]: !s[key] }));
@@ -119,11 +129,31 @@ export default function ConversionStatus() {
     }
   };
 
+  // Single-document mode: nothing to review on this screen when the one file
+  // came through cleanly, so go straight to PII detection. Keyed on the file so
+  // pressing Back from the review screen doesn't bounce the user forward again.
+  const continueRef = useRef(handleContinue);
+  continueRef.current = handleContinue;
+
+  useEffect(() => {
+    if (!isFileMode || processing || !results) return;
+    if (results.processable_count !== 1 || results.flagged_count > 0) return;
+    if (!sourceKey || autoAdvancedKey === sourceKey) return;
+    setAutoAdvancedKey(sourceKey);
+    continueRef.current();
+  }, [isFileMode, processing, results, sourceKey, autoAdvancedKey, setAutoAdvancedKey]);
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Document Conversion</h2>
-        <p className="text-sm text-slate-400 mt-1">Checking dependencies and converting Word documents to PDF.</p>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
+          {isFileMode ? 'Preparing Your Document' : 'Document Conversion'}
+        </h2>
+        <p className="text-sm text-slate-400 mt-1">
+          {isFileMode
+            ? 'Checking dependencies and preparing the document you selected.'
+            : 'Checking dependencies and converting Word documents to PDF.'}
+        </p>
       </div>
 
       {/* Dependencies */}
@@ -167,7 +197,7 @@ export default function ConversionStatus() {
         <div className="flex items-center justify-between py-4">
           <div className="flex items-center gap-3 text-sm text-slate-500">
             <RefreshCw size={16} className="animate-spin text-primary-500" />
-            Converting documents...
+            {isFileMode ? 'Preparing document...' : 'Converting documents...'}
           </div>
           <button
             onClick={() => {
@@ -256,7 +286,9 @@ export default function ConversionStatus() {
       {/* No files */}
       {results && results.processable_count === 0 && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
-          No files available for processing. Check your folder and try again.
+          {isFileMode
+            ? 'That document could not be prepared. Check the details above, or go back and choose another file.'
+            : 'No files available for processing. Check your folder and try again.'}
         </div>
       )}
 

@@ -90,6 +90,19 @@ export const api = {
       ...options,
     }),
 
+  validateFile: (file_path: string) =>
+    request<{ exists: boolean; is_file: boolean; supported: boolean; path: string }>(
+      '/api/file/validate',
+      { method: 'POST', body: JSON.stringify({ file_path }) },
+    ),
+
+  processFile: (file_path: string, options?: RequestInit) =>
+    request<import('./types').ConversionResults>('/api/file/process', {
+      method: 'POST',
+      body: JSON.stringify({ file_path }),
+      ...options,
+    }),
+
   detectPII: (params: {
     pdf_paths: string[];
     student_name: string;
@@ -115,6 +128,7 @@ export const api = {
     selected_keys: string[];
     folder_action: string | null;
     custom_output_path?: string | null;
+    custom_output_filename?: string | null;
   }, options?: RequestInit) =>
     request<import('./types').RedactionResults>('/api/redact', {
       method: 'POST',
