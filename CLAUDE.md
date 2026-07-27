@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (403 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (405 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -403,7 +403,13 @@ An explicit filename also **skips the collision counter** — the native Save di
 
 `desktop/src/lib/filename.ts` only *suggests* the name that pre-fills the dialog; the backend stays authoritative for the default name.
 
-### 40. `detectionParamsKey` must be cleared on any backend-cache doubt
+### 40. Response models carrying mixed-type rows need a typed model, not `Dict[str, X]`
+
+`RedactionResultsResponse.ocr_warnings` was declared `List[Dict[str, int]]` while the endpoint built `{"filename": str, "count": int}` — so Pydantic rejected the filename and **every redaction of a scanned document returned a 500** instead of its results. It went unnoticed because the failure needs a selected PII item on an image-only page. It is now an `OcrWarning` model (`filename: str`, `count: int`).
+
+`verification_failures` is genuinely `Dict[str, str]` and is fine as-is. Any future row with mixed value types must get its own model.
+
+### 41. `detectionParamsKey` must be cleared on any backend-cache doubt
 
 The frontend skips re-detection when the fingerprint matches, which is only safe while `_detection_cache` holds the same run. Every path that can observe a `no cached detection data` error — and `setBackendReachable(false)` — clears the key. Without that the wizard loops: skip detection → redact 400s → 'go back one step' → skip again.
 
@@ -501,7 +507,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 403 tests total
+tests/                                # 405 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -520,7 +526,7 @@ tests/                                # 403 tests total
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing
-├── test_backend_redact.py            # 7 tests: detect→redact selection + clean-500 error wrapping
+├── test_backend_redact.py            # 10 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape
 ├── test_api_auth.py                  # 7 tests: API token middleware, CORS header on 401, non-ASCII header
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions

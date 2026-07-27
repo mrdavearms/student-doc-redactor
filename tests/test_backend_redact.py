@@ -55,6 +55,62 @@ def test_redact_honours_only_selected_keys():
         assert body["document_results"][0]["items_redacted"] == 1
 
 
+class TestOcrWarningsResponse:
+    """Regression: a redaction whose selected items sit on scanned (image-only)
+    pages must return its results, not a 500. RedactionResultsResponse declared
+    ocr_warnings as Dict[str, int], so the str filename failed validation and
+    every scanned document — a mainstream case for this tool — errored out."""
+
+    def _seed_cache(self, pdf, page_num=1):
+        """Put one match on a page the extractor reported as image-only."""
+        from backend import main as backend_main
+        from src.core.pii_detector import PIIMatch
+
+        backend_main._detection_cache[str(pdf)] = {
+            "matches": [PIIMatch(
+                text="Joe Bloggs", category="Student name", confidence=0.95,
+                page_num=page_num, line_num=1, context="Joe Bloggs",
+                source="regex", bbox=None,
+            )],
+            "text_data": {"pages": {}, "ocr_pages": [page_num]},
+        }
+
+    def test_scanned_page_returns_200_with_its_warnings(self, tmp_path):
+        pdf = tmp_path / "scanned report.pdf"
+        _make_pdf(pdf, "Joe Bloggs attended.")
+        self._seed_cache(pdf)
+
+        resp = client.post("/api/redact", json={
+            "folder_path": str(tmp_path),
+            "student_name": "Joe Bloggs",
+            "parent_names": [], "family_names": [], "organisation_names": [],
+            "redact_header_footer": False,
+            "documents": [str(pdf)],
+            "detected_pii": {},
+            "selected_keys": [f"{pdf}_0"],
+            "folder_action": None,
+        })
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ocr_warnings"] == [
+            {"filename": "scanned report.pdf", "count": 1}
+        ]
+
+    def test_response_model_accepts_a_string_filename(self):
+        """Guards the schema directly, so the shape can't regress to Dict[str, int]."""
+        from backend.schemas import RedactionResultsResponse
+
+        model = RedactionResultsResponse(
+            redacted_folder="/tmp/redacted",
+            document_results=[], log_content="", total_documents=1,
+            successfully_redacted=1, verification_failures=[],
+            ocr_warnings=[{"filename": "report.pdf", "count": 2}],
+        )
+
+        assert model.ocr_warnings[0].filename == "report.pdf"
+        assert model.ocr_warnings[0].count == 2
+
+
 from unittest.mock import patch
 
 

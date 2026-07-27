@@ -34,6 +34,7 @@ from backend.schemas import (
     DocumentPIIResponse,
     DocumentResultResponse,
     HealthResponse,
+    OcrWarning,
     OpenFolderRequest,
     PIIMatchResponse,
     PreviewRequest,
@@ -431,7 +432,7 @@ def redact_documents(req: RedactRequest):
                 {"filename": f, "message": m} for f, m in results.verification_failures
             ],
             ocr_warnings=[
-                {"filename": f, "count": c} for f, c in results.ocr_warnings
+                OcrWarning(filename=f, count=c) for f, c in results.ocr_warnings
             ],
             cancelled=results.cancelled,
         )

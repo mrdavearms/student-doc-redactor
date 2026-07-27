@@ -120,6 +120,18 @@ class DocumentResultResponse(BaseModel):
     quarantine_path: Optional[str] = None
 
 
+class OcrWarning(BaseModel):
+    """
+    One document's count of PII items that sat on scanned (image-only) pages.
+
+    A typed model, NOT Dict[str, int]: the dict form claimed both values were
+    ints, so the str filename failed validation and every redaction of a
+    scanned document returned a 500 instead of its results.
+    """
+    filename: str
+    count: int
+
+
 class RedactionResultsResponse(BaseModel):
     redacted_folder: str
     document_results: List[DocumentResultResponse]
@@ -128,7 +140,7 @@ class RedactionResultsResponse(BaseModel):
     total_documents: int
     successfully_redacted: int
     verification_failures: List[Dict[str, str]]  # [{filename, message}]
-    ocr_warnings: List[Dict[str, int]]  # [{filename, count}]
+    ocr_warnings: List[OcrWarning]
     cancelled: bool = False
 
 
