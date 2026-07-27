@@ -4,7 +4,7 @@ import { ArrowLeft, ShieldCheck, FolderOpen, FileText, Search, Trash2 } from 'lu
 import { useStore } from '../store';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
-import { basename, dirname, joinPath, stem } from '../lib/paths';
+import { basename, dirname, isSamePath, joinPath, stem } from '../lib/paths';
 import { suggestRedactedFilename } from '../lib/filename';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
@@ -57,8 +57,20 @@ export default function FinalConfirmation() {
     const selected = await window.electronAPI?.saveFileAs?.(
       joinPath(folderPath, suggestedName)
     );
-    if (selected) setSavePath(selected);
-  }, [filePath, folderPath, studentName, parentNames, familyNames, organisationNames]);
+    if (!selected) return;
+    // The dialog opens in the source document's own folder, so the original is
+    // right there to be picked. Redacting over it would destroy the only
+    // unredacted copy, so refuse here rather than let the run fail.
+    if (isSamePath(selected, filePath)) {
+      setError(
+        "That's the original document. Choose a different name or folder so " +
+        'your unredacted copy is kept.'
+      );
+      return;
+    }
+    setSavePath(selected);
+  }, [filePath, folderPath, studentName, parentNames, familyNames,
+      organisationNames, setError]);
 
   if (!detectionResults) return null;
 

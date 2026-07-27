@@ -134,7 +134,14 @@ export const useStore = create<AppState>((set) => ({
 
   // The redaction run still works in folders (audit log, default output
   // location), so a chosen file also sets folderPath to its containing folder.
-  setFilePath: (path) => set({ filePath: path, folderPath: dirname(path) }),
+  //
+  // That silently moves folderPath out from under folderValid, which was only
+  // ever true for a folder the user picked themselves — so clear it. Otherwise
+  // switching back to folder mode shows a green "Folder found" for a folder
+  // that was never validated, and Start Processing would redact everything in
+  // it. FolderSelection re-validates on the way back.
+  setFilePath: (path) =>
+    set({ filePath: path, folderPath: dirname(path), folderValid: false }),
 
   setFileValid: (valid) => set({ fileValid: valid }),
 

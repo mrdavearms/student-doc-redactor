@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { basename, dirname, joinPath, separatorFor, stem } from '../src/lib/paths';
+import { basename, dirname, isSamePath, joinPath, separatorFor, stem } from '../src/lib/paths';
 import { suggestRedactedFilename } from '../src/lib/filename';
 import { useStore } from '../src/store';
 
@@ -35,6 +35,34 @@ describe('paths', () => {
 
   it('does not double the separator on a trailing slash', () => {
     expect(joinPath('/Users/dave/', 'redacted')).toBe('/Users/dave/redacted');
+  });
+});
+
+describe('isSamePath', () => {
+  it('matches a path against itself', () => {
+    expect(isSamePath('/Users/dave/Docs/report.pdf', '/Users/dave/Docs/report.pdf')).toBe(true);
+  });
+
+  it('ignores case, because macOS and Windows filesystems do', () => {
+    expect(isSamePath('/Users/dave/Docs/Report.pdf', '/Users/dave/Docs/report.pdf')).toBe(true);
+  });
+
+  it('ignores separator style', () => {
+    expect(isSamePath('C:\\Users\\dave\\report.pdf', 'C:/Users/dave/report.pdf')).toBe(true);
+  });
+
+  it('does not match a different file in the same folder', () => {
+    expect(isSamePath('/Users/dave/Docs/report.pdf', '/Users/dave/Docs/report_redacted.pdf'))
+      .toBe(false);
+  });
+
+  it('does not match the same name in a different folder', () => {
+    expect(isSamePath('/Users/dave/Docs/redacted/report.pdf', '/Users/dave/Docs/report.pdf'))
+      .toBe(false);
+  });
+
+  it('treats empty paths as not matching', () => {
+    expect(isSamePath('', '')).toBe(false);
   });
 });
 
@@ -86,6 +114,21 @@ describe('store: single-document mode', () => {
     const state = useStore.getState();
     expect(state.filePath).toBe('/Users/dave/Docs/report.pdf');
     expect(state.folderPath).toBe('/Users/dave/Docs');
+  });
+
+  it('invalidates a previously validated folder when a file is chosen', () => {
+    // Folder A validated in folder mode...
+    useStore.getState().setFolderPath('/Users/dave/FolderA');
+    useStore.getState().setFolderValid(true);
+
+    // ...then a file in an unrelated folder is picked. folderPath now points
+    // somewhere the user never validated, so the green tick must not survive —
+    // otherwise switching back would redact all of FolderB.
+    useStore.getState().setFilePath('/Users/dave/FolderB/report.pdf');
+
+    const state = useStore.getState();
+    expect(state.folderPath).toBe('/Users/dave/FolderB');
+    expect(state.folderValid).toBe(false);
   });
 
   it('stamps conversion results with the file path in file mode', () => {

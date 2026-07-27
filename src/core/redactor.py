@@ -16,6 +16,23 @@ from PIL import Image, ImageDraw
 import pytesseract
 
 
+def is_same_file(a: Path, b: Path) -> bool:
+    """
+    True when two paths point at the same file on disk.
+
+    Uses os.path.samefile when both exist — that handles symlinks, hard links,
+    and the case-insensitive filesystems this app ships on (macOS, Windows),
+    which a plain string or resolve() comparison would miss. Falls back to
+    comparing resolved paths when the output does not exist yet.
+    """
+    try:
+        if a.exists() and b.exists():
+            return os.path.samefile(str(a), str(b))
+    except OSError:
+        pass
+    return a.resolve() == b.resolve()
+
+
 # Zone redaction fractions — fraction of page height to blank
 HEADER_ZONE_FRACTION = 0.12   # top 12%
 FOOTER_ZONE_FRACTION = 0.08   # bottom 8%
@@ -256,9 +273,15 @@ class PDFRedactor:
         except Exception as e:
             # Remove any partially-written output so a failed redaction can
             # never leave a file that looks like a successful result.
+            #
+            # NEVER when the output path IS the source document: PyMuPDF
+            # rejects a non-incremental save over the file it opened, and
+            # deleting "the output" here would destroy the user's only
+            # unredacted original. Callers must not pass input == output, but
+            # this is the last line of defence if one does.
             try:
                 out = Path(output_pdf)
-                if out.exists():
+                if out.exists() and not is_same_file(out, Path(input_pdf)):
                     out.unlink()
             except OSError:
                 pass

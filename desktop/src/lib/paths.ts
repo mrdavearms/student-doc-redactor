@@ -34,6 +34,21 @@ export function stem(filename: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+/**
+ * True when two paths point at the same file.
+ *
+ * Separator style is normalised and the comparison is case-insensitive,
+ * because this app ships on macOS and Windows — both of which have
+ * case-insensitive filesystems by default, so "Report.pdf" and "report.pdf"
+ * in the same folder are the same file. This is a UI-level check only; the
+ * backend enforces the same rule authoritatively with os.path.samefile.
+ */
+export function isSamePath(a: string, b: string): boolean {
+  const normalise = (p: string) =>
+    p.replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+  return Boolean(a) && Boolean(b) && normalise(a) === normalise(b);
+}
+
 /** Join segments using the separator style of the first one. */
 export function joinPath(base: string, ...segments: string[]): string {
   const sep = separatorFor(base);

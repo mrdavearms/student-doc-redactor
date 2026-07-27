@@ -10,7 +10,12 @@ from pathlib import Path, PurePath
 from typing import Dict, List, Optional, Set, Tuple
 
 from src.core.pii_detector import PIIDetector, PIIMatch
-from src.core.redactor import PDFRedactor, RedactionItem, strip_pii_from_filename
+from src.core.redactor import (
+    PDFRedactor,
+    RedactionItem,
+    is_same_file,
+    strip_pii_from_filename,
+)
 from src.core.logger import RedactionLogger, LogEntry
 
 
@@ -290,6 +295,21 @@ class RedactionService:
                 counter += 1
 
         output_path = redacted_folder / output_filename
+
+        # The redacted copy must never be written over the source document.
+        # A Save As dialog opens in the source document's own folder, so the
+        # original is one click away — and redacting in place cannot work:
+        # PyMuPDF rejects a non-incremental save over the file it has open, and
+        # the failure would leave the user with no original AND no redacted
+        # copy. Refuse before any file operation happens.
+        if is_same_file(output_path, doc):
+            message = (
+                "Cannot save the redacted copy over the original document. "
+                "Choose a different filename or folder."
+            )
+            logger.add_flagged_file(doc.name, message)
+            result.error_message = message
+            return result
 
         # Build redaction items and log entries
         redaction_items = []

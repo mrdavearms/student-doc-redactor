@@ -118,7 +118,13 @@ export default function FolderSelection() {
           />
           <ModeCard
             selected={!isFileMode}
-            onSelect={() => setInputMode('folder')}
+            onSelect={() => {
+              setInputMode('folder');
+              // Picking a file rewrote folderPath and cleared folderValid, so
+              // re-check whatever is in the box rather than showing a stale
+              // (or missing) result for a path the user never validated.
+              if (folderPath.trim()) validateFolder(folderPath);
+            }}
             icon={<FolderOpen size={18} />}
             title="A whole folder"
             subtitle="Every document in a folder"

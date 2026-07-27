@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from src.core.redactor import PDFRedactor, RedactionItem, is_same_file
 from src.services.conversion_service import ConversionService
 from src.services.redaction_service import RedactionService, RedactionRequest
 
@@ -190,6 +191,41 @@ class TestCustomOutputFilename:
         names = {r.output_path.name for r in results.document_results}
         assert names == {"Report One_redacted.pdf", "Report Two_redacted.pdf"}
 
+    def test_refuses_to_save_over_the_source_document(self, tmp_path):
+        """The Save As dialog opens in the source document's own folder, so the
+        original is one click away. Redacting in place cannot work — and the
+        failure path would delete the user's only unredacted copy."""
+        pdf = _make_pdf(tmp_path / "report.pdf", "Joe Bloggs attended.")
+        original_bytes = pdf.read_bytes()
+
+        results = RedactionService().execute(self._request(
+            tmp_path, [pdf],
+            custom_output_path=tmp_path,          # same folder as the source
+            custom_output_filename="report.pdf",  # ...and the same name
+        ))
+
+        doc_result = results.document_results[0]
+        assert doc_result.success is False
+        assert doc_result.output_path is None
+        assert "over the original document" in doc_result.error_message
+        # The source must be untouched — this is the whole point.
+        assert pdf.exists()
+        assert pdf.read_bytes() == original_bytes
+
+    def test_saving_beside_the_source_under_another_name_still_works(self, tmp_path):
+        """The guard must reject only the source file itself, not its folder."""
+        pdf = _make_pdf(tmp_path / "report.pdf")
+
+        results = RedactionService().execute(self._request(
+            tmp_path, [pdf],
+            custom_output_path=tmp_path,
+            custom_output_filename="report redacted.pdf",
+        ))
+
+        assert results.document_results[0].success is True
+        assert (tmp_path / "report redacted.pdf").exists()
+        assert pdf.exists()
+
     def test_default_naming_still_applies_without_an_override(self, tmp_path):
         pdf = _make_pdf(tmp_path / "Joe Bloggs Report.pdf")
 
@@ -197,3 +233,54 @@ class TestCustomOutputFilename:
 
         # PII stripped from the filename, as before
         assert results.document_results[0].output_path.name == "Report_redacted.pdf"
+
+
+# ── Last line of defence in the redactor itself ──────────────────────────
+
+class TestRedactorNeverDeletesItsInput:
+    def test_failed_in_place_redaction_leaves_the_source_intact(self, tmp_path):
+        """redact_pdf's failure cleanup deletes partial output. If a caller ever
+        passes input == output, that cleanup must not delete the source."""
+        pdf = _make_pdf(tmp_path / "report.pdf", "Joe Bloggs attended.")
+        original_bytes = pdf.read_bytes()
+
+        ok, message = PDFRedactor().redact_pdf(
+            pdf, pdf, [RedactionItem(page_num=1, text="Joe Bloggs", bbox=None)]
+        )
+
+        assert ok is False
+        assert pdf.exists(), "redact_pdf deleted the document it was reading"
+        assert pdf.read_bytes() == original_bytes
+
+    def test_partial_output_is_still_cleaned_up_on_failure(self, tmp_path):
+        """The original cleanup behaviour must survive: a genuinely separate
+        output file from a failed run is still removed."""
+        missing = tmp_path / "does-not-exist.pdf"
+        out = tmp_path / "out.pdf"
+        out.write_bytes(b"stale partial output")
+
+        ok, _ = PDFRedactor().redact_pdf(missing, out, [])
+
+        assert ok is False
+        assert not out.exists()
+
+
+class TestIsSameFile:
+    def test_detects_the_same_file_through_different_paths(self, tmp_path):
+        pdf = _make_pdf(tmp_path / "report.pdf")
+        indirect = tmp_path / "sub" / ".." / "report.pdf"
+        (tmp_path / "sub").mkdir()
+
+        assert is_same_file(pdf, indirect) is True
+
+    def test_distinguishes_different_files_in_the_same_folder(self, tmp_path):
+        a = _make_pdf(tmp_path / "a.pdf")
+        b = tmp_path / "b.pdf"
+
+        assert is_same_file(a, b) is False
+
+    def test_handles_an_output_path_that_does_not_exist_yet(self, tmp_path):
+        pdf = _make_pdf(tmp_path / "report.pdf")
+        not_yet = tmp_path / "redacted" / "report.pdf"
+
+        assert is_same_file(not_yet, pdf) is False

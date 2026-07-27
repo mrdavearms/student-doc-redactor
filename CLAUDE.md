@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (396 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (403 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -389,7 +389,7 @@ When `REDACTION_API_TOKEN` is set (Electron sets it at spawn), every endpoint ex
 Step 1 offers two equal choices: one document or a whole folder (`inputMode` in the store). Single-document mode is not a separate pipeline — `ConversionService.process_file()` returns the same `ConversionResults` shape as `process_folder()`, so detection, review and redaction are byte-for-byte the same code path afterwards.
 
 Three things hold it together:
-- **`setFilePath` also sets `folderPath`** to the file's parent folder. Redaction still works in folders (audit log location, default `redacted/` output), so nothing downstream needs to know which mode is active.
+- **`setFilePath` also sets `folderPath`** to the file's parent folder. Redaction still works in folders (audit log location, default `redacted/` output), so nothing downstream needs to know which mode is active. It also clears `folderValid`, because `folderPath` has just moved to a folder the user never validated — without that, switching back to folder mode shows a green "Folder found" and Start Processing would redact every document in the chosen file's folder. `FolderSelection` re-validates when the user switches back.
 - **`conversionFolderPath` stores the *file* path in file mode**, not the folder. Storing the folder would let a second file in the same folder reuse the first file's conversion results.
 - **The conversion screen auto-advances in file mode** when exactly one file came through clean (`processable_count === 1 && flagged_count === 0`), guarded by `autoAdvancedKey`. Without that guard, any screen navigating back to `conversion_status` would be bounced straight forward again and the user could never reach step 1.
 
@@ -398,6 +398,8 @@ Three things hold it together:
 The Save As dialog (file mode) names a single file. `RedactionService.execute()` ignores `custom_output_filename` unless `len(request.documents) == 1` — several documents would all collide on the one name. `_sanitise_output_filename()` strips any directory component (so a crafted name can't write outside the chosen folder) and forces a `.pdf` suffix.
 
 An explicit filename also **skips the collision counter** — the native Save dialog has already asked the user about replacing an existing file. Without an override, the existing PII-stripping (`strip_pii_from_filename`) and `_2`/`_3` collision suffixes apply exactly as before.
+
+**The output must never be the source document.** The Save As dialog opens in the source document's own folder, so the original is one click away, and redacting in place cannot work: PyMuPDF raises `save to original must be incremental`, and `redact_pdf()`'s failure cleanup would then `unlink()` what is actually the user's only unredacted copy. `_process_document()` refuses via `is_same_file()` before any file operation; `redact_pdf()` additionally never unlinks a path equal to its input; and `FinalConfirmation.handleSaveAs` rejects the choice in the UI. Do not remove any of the three — `is_same_file()` uses `os.path.samefile` so it catches the case-insensitive-filesystem variants (`Report.pdf` vs `report.pdf`) that a string compare misses.
 
 `desktop/src/lib/filename.ts` only *suggests* the name that pre-fills the dialog; the backend stays authoritative for the default name.
 
@@ -499,7 +501,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 396 tests total
+tests/                                # 403 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -513,7 +515,7 @@ tests/                                # 396 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_single_document.py           # 18 tests: single-file conversion, /api/file/* endpoints, custom output filename
+├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
 ├── test_cleanup_api.py               # 16 tests: cleanup endpoint path-traversal guards
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
