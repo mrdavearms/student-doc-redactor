@@ -12,6 +12,8 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/folder processing failed/i, "Something went wrong while processing that folder. Please try again."],
   [/file processing failed/i, "Something went wrong while preparing that document. Please try again."],
   [/redaction failed/i, "Something went wrong while redacting the documents. Please try again."],
+  [/de-identification failed/i, "Something went wrong while de-identifying the documents. Please try again."],
+  [/no extracted text available/i, "That document's text couldn't be read. Please go back one step and try again."],
   [/api token/i, "The app couldn't authenticate with its redaction engine. Please restart the app."],
 ];
 

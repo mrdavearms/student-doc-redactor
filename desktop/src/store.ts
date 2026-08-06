@@ -8,15 +8,21 @@ import { dirname } from './lib/paths';
 import type {
   Screen,
   InputMode,
+  WorkflowMode,
   ConversionResults,
   DetectionResults,
   RedactionResults,
+  DeidentifyResults,
 } from './types';
 
 interface AppState {
   // Navigation
   currentScreen: Screen;
   navigateTo: (screen: Screen) => void;
+
+  // Step 0: Which pathway — black out, or replace with labels for AI
+  workflowMode: WorkflowMode;
+  setWorkflowMode: (mode: WorkflowMode) => void;
 
   // Step 1: What to redact — one document or a whole folder
   inputMode: InputMode;
@@ -78,6 +84,8 @@ interface AppState {
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
   setRedactionResults: (results: RedactionResults) => void;
+  deidentifyResults: DeidentifyResults | null;
+  setDeidentifyResults: (results: DeidentifyResults) => void;
   lastOutputPath: string;
   setLastOutputPath: (path: string) => void;
 
@@ -99,7 +107,8 @@ interface AppState {
 }
 
 const initialState = {
-  currentScreen: 'folder_selection' as Screen,
+  currentScreen: 'mode_selection' as Screen,
+  workflowMode: 'redact' as WorkflowMode,
   inputMode: 'folder' as InputMode,
   filePath: '',
   fileValid: false,
@@ -116,6 +125,7 @@ const initialState = {
   currentDocIndex: 0,
   userSelections: {} as Record<string, boolean>,
   redactionResults: null,
+  deidentifyResults: null,
   lastOutputPath: '',
   loading: false,
   loadingMessage: '',
@@ -129,6 +139,12 @@ export const useStore = create<AppState>((set) => ({
   ...initialState,
 
   navigateTo: (screen) => set({ currentScreen: screen, error: null }),
+
+  // Switching pathway invalidates any finished run, but deliberately NOT
+  // detectionParamsKey: detection inputs are identical in both modes, so a user
+  // who changes their mind after reviewing should not have to detect again.
+  setWorkflowMode: (mode) =>
+    set({ workflowMode: mode, redactionResults: null, deidentifyResults: null }),
 
   setInputMode: (mode) => set({ inputMode: mode }),
 
@@ -175,6 +191,7 @@ export const useStore = create<AppState>((set) => ({
       userSelections: selections,
       currentDocIndex: 0,
       redactionResults: null,
+      deidentifyResults: null,
     });
   },
 
@@ -217,6 +234,8 @@ export const useStore = create<AppState>((set) => ({
   setDetectionParamsKey: (key) => set({ detectionParamsKey: key }),
 
   setRedactionResults: (results) => set({ redactionResults: results }),
+
+  setDeidentifyResults: (results) => set({ deidentifyResults: results }),
 
   setLastOutputPath: (path) => set({ lastOutputPath: path }),
 

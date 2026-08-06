@@ -615,13 +615,22 @@ def validate_file(req: ProcessFileRequest):
 
 # ── Cleanup ──────────────────────────────────────────────────────────────
 
+# Only files this app generates may be deleted. Both the list and the delete
+# endpoint enforce it independently — the delete endpoint must never trust that
+# a path came from the list. The de-identify key file is deliberately absent:
+# it never lives in an output folder, and must not be deletable through here.
+_CLEANUP_GLOBS = ("*_redacted.pdf", "*.UNVERIFIED.pdf",
+                  "*_deidentified.txt", "*.UNVERIFIED.txt")
+_CLEANUP_SUFFIXES = ("_redacted.pdf", ".UNVERIFIED.pdf",
+                     "_deidentified.txt", ".UNVERIFIED.txt")
+
+
 @app.post("/api/cleanup/list", response_model=CleanupListResponse)
 def cleanup_list(req: CleanupListRequest):
     folder = Path(req.output_path)
     if not folder.exists() or not folder.is_dir():
         return CleanupListResponse(files=[])
-    files = [str(p) for p in folder.glob("*_redacted.pdf")]
-    files += [str(p) for p in folder.glob("*.UNVERIFIED.pdf")]
+    files = [str(p) for pattern in _CLEANUP_GLOBS for p in folder.glob(pattern)]
     return CleanupListResponse(files=sorted(files))
 
 
@@ -639,10 +648,10 @@ def cleanup(req: CleanupRequest):
         if not path.is_relative_to(folder):
             failed.append(CleanupFailure(path=p, reason="outside output folder"))
             continue
-        if path.suffix != ".pdf":
-            failed.append(CleanupFailure(path=p, reason="not a PDF"))
+        if path.suffix not in (".pdf", ".txt"):
+            failed.append(CleanupFailure(path=p, reason="not a PDF or text file"))
             continue
-        if not (path.name.endswith("_redacted.pdf") or path.name.endswith(".UNVERIFIED.pdf")):
+        if not path.name.endswith(_CLEANUP_SUFFIXES):
             failed.append(CleanupFailure(path=p, reason="not a redaction output file"))
             continue
         if not path.exists():

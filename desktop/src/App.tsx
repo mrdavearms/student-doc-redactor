@@ -5,11 +5,13 @@ import { useStore } from './store';
 import { useUpdater } from './hooks/useUpdater';
 import { api, BackendUnreachableError } from './api';
 import Setup from './pages/Setup';
+import ModeSelection from './pages/ModeSelection';
 import FolderSelection from './pages/FolderSelection';
 import ConversionStatus from './pages/ConversionStatus';
 import DocumentReview from './pages/DocumentReview';
 import FinalConfirmation from './pages/FinalConfirmation';
 import Completion from './pages/Completion';
+import DeidentifyCompletion from './pages/DeidentifyCompletion';
 import NoPiiFound from './pages/NoPiiFound';
 
 function App() {
@@ -21,12 +23,14 @@ function App() {
   const [depsChecked, setDepsChecked] = useState(false);
   const backendReachable = useStore((s) => s.backendReachable);
   const setBackendReachable = useStore((s) => s.setBackendReachable);
+  const workflowMode = useStore((s) => s.workflowMode);
 
   // On mount: check dependencies and redirect to setup if LibreOffice is missing
   useEffect(() => {
     api.checkDependencies()
       .then((deps) => {
-        if (!deps.libreoffice_ok && currentScreen === 'folder_selection') {
+        if (!deps.libreoffice_ok
+            && (currentScreen === 'mode_selection' || currentScreen === 'folder_selection')) {
           navigateTo('setup');
         }
       })
@@ -57,12 +61,14 @@ function App() {
   const renderScreen = () => {
     switch (currentScreen) {
       case 'setup':              return <Setup />;
+      case 'mode_selection':     return <ModeSelection />;
       case 'folder_selection':   return <FolderSelection />;
       case 'conversion_status':  return <ConversionStatus />;
       case 'document_review':    return <DocumentReview />;
       case 'no_pii_found':       return <NoPiiFound />;
       case 'final_confirmation': return <FinalConfirmation />;
-      case 'completion':         return <Completion />;
+      case 'completion':
+        return workflowMode === 'deidentify' ? <DeidentifyCompletion /> : <Completion />;
     }
   };
 

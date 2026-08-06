@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, FileText, User, Users, Building, ArrowRight, Search } from 'lucide-react';
+import { FolderOpen, FileText, User, Users, Building, ArrowLeft, ArrowRight, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { api, BackendUnreachableError } from '../api';
 import HelpTip from '../components/HelpTip';
@@ -8,11 +8,13 @@ import HelpTip from '../components/HelpTip';
 export default function FolderSelection() {
   const {
     inputMode, filePath, fileValid, folderPath, studentName, parentNames, familyNames,
-    organisationNames, redactHeaderFooter, folderValid,
+    organisationNames, redactHeaderFooter, folderValid, workflowMode,
     setInputMode, setFilePath, setFileValid,
     setFolderPath, setStudentName, setParentNames, setFamilyNames,
     setOrganisationNames, setRedactHeaderFooter, setFolderValid, navigateTo,
   } = useStore();
+
+  const isDeidentify = workflowMode === 'deidentify';
 
   const [validating, setValidating] = useState(false);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
@@ -295,8 +297,14 @@ export default function FolderSelection() {
                        focus:ring-primary-200 focus:ring-offset-0"
           />
           <span className="text-sm text-slate-600 flex items-center gap-1.5">
-            Redact headers & footers (blanks top/bottom of every page — removes letterheads and addresses)
-            <HelpTip text="Blanks the top and bottom of every page. Useful for removing school letterheads, clinic logos, and addresses that appear in page margins." />
+            {isDeidentify
+              ? 'Leave out headers & footers (removes letterheads and addresses)'
+              : 'Redact headers & footers (blanks top/bottom of every page — removes letterheads and addresses)'}
+            <HelpTip
+              text={isDeidentify
+                ? "Leaves the top and bottom of every page out of the text file. Useful for removing school letterheads, clinic logos, and addresses in page margins. Scanned pages can't be filtered this way — you'll be told if any were skipped."
+                : 'Blanks the top and bottom of every page. Useful for removing school letterheads, clinic logos, and addresses that appear in page margins.'}
+            />
           </span>
         </label>
       </motion.section>
@@ -308,7 +316,13 @@ export default function FolderSelection() {
         </p>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        <button
+          onClick={() => navigateTo('mode_selection')}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors btn-press"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
         <button
           disabled={!canProceed}
           onClick={() => navigateTo('conversion_status')}

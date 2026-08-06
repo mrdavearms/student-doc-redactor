@@ -170,3 +170,52 @@ class TestCleanup:
         })
         assert r.status_code == 200
         assert not f.exists()
+
+
+class TestDeidentifyOutputCleanup:
+    """De-identify mode writes .txt output, so cleanup must cover it too —
+    without widening the allowlist to arbitrary text files."""
+
+    def test_lists_deidentified_text_files(self, tmp_path):
+        (tmp_path / "report_deidentified.txt").write_text("x")
+        (tmp_path / "report.UNVERIFIED.txt").write_text("x")
+        r = client.post("/api/cleanup/list", json={"output_path": str(tmp_path)})
+        names = [Path(p).name for p in r.json()["files"]]
+        assert "report_deidentified.txt" in names
+        assert "report.UNVERIFIED.txt" in names
+
+    def test_deletes_deidentified_text_file(self, tmp_path):
+        f = tmp_path / "report_deidentified.txt"
+        f.write_text("x")
+        r = client.post("/api/cleanup", json={
+            "output_folder": str(tmp_path), "file_paths": [str(f)],
+        })
+        assert r.status_code == 200
+        assert not f.exists()
+
+    def test_rejects_unrelated_text_file(self, tmp_path):
+        f = tmp_path / "my notes.txt"
+        f.write_text("important")
+        r = client.post("/api/cleanup", json={
+            "output_folder": str(tmp_path), "file_paths": [str(f)],
+        })
+        assert r.status_code == 200
+        assert f.exists()
+        assert "not a redaction output file" in r.json()["failed"][0]["reason"]
+
+    def test_key_file_can_never_be_deleted(self, tmp_path):
+        """The key file is the one artifact that re-identifies everyone. It
+        never lives in an output folder — and even if it did, cleanup must
+        refuse it."""
+        f = tmp_path / "DO-NOT-UPLOAD-name-key.txt"
+        f.write_text("[Student] -> Billy Bob")
+        r = client.post("/api/cleanup", json={
+            "output_folder": str(tmp_path), "file_paths": [str(f)],
+        })
+        assert r.status_code == 200
+        assert f.exists()
+
+    def test_key_file_is_not_listed_for_cleanup(self, tmp_path):
+        (tmp_path / "DO-NOT-UPLOAD-name-key.txt").write_text("x")
+        r = client.post("/api/cleanup/list", json={"output_path": str(tmp_path)})
+        assert r.json()["files"] == []

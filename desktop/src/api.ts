@@ -136,6 +136,25 @@ export const api = {
       ...options,
     }, 30 * 60_000),
 
+  deidentify: (params: {
+    folder_path: string;
+    student_name: string;
+    parent_names: string[];
+    family_names: string[];
+    organisation_names: string[];
+    redact_header_footer: boolean;
+    documents: string[];
+    selected_keys: string[];
+    folder_action: string | null;
+    custom_output_path?: string | null;
+    custom_output_filename?: string | null;
+  }, options?: RequestInit) =>
+    request<import('./types').DeidentifyResults>('/api/deidentify', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }, 30 * 60_000),
+
   cancelRedaction: () =>
     request<{ status: string }>('/api/redact/cancel', { method: 'POST' }),
 

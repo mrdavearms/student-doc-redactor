@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info, BookOpen } from 'lucide-react';
+import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info, BookOpen, Bot } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { SCREENS, type Screen } from '../types';
@@ -11,6 +11,7 @@ const WALKTHROUGH_STORAGE_KEY = 'walkthrough_dismissed';
 
 const ICONS: Record<Screen, React.ReactNode> = {
   setup: <RefreshCw size={18} />,
+  mode_selection: <ShieldCheck size={18} />,
   folder_selection: <FolderOpen size={18} />,
   conversion_status: <RefreshCw size={18} />,
   document_review: <Search size={18} />,
@@ -26,8 +27,14 @@ interface SidebarProps {
 
 export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps) {
   const currentScreen = useStore((s) => s.currentScreen);
+  const workflowMode = useStore((s) => s.workflowMode);
+  const navigateTo = useStore((s) => s.navigateTo);
   const effectiveScreen: Screen = currentScreen === 'no_pii_found' ? 'document_review' : currentScreen;
   const currentIdx = SCREENS.findIndex((s) => s.key === effectiveScreen);
+  const isDeidentify = workflowMode === 'deidentify';
+  // The chosen pathway is easy to forget once you're three steps in, and the
+  // two produce very different files — so keep it visible and changeable.
+  const showModeBadge = currentScreen !== 'mode_selection' && currentScreen !== 'setup';
   const [aboutOpen, setAboutOpen] = useState(false);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -52,6 +59,26 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
         </h1>
         <p className="text-[10px] text-slate-400 mt-1 tracking-widest uppercase">Protect student privacy</p>
       </div>
+
+      {/* Chosen pathway */}
+      {showModeBadge && (
+        <div className="px-4 pt-4">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">
+            <span className={isDeidentify ? 'text-primary-500' : 'text-emerald-500'}>
+              {isDeidentify ? <Bot size={14} /> : <ShieldCheck size={14} />}
+            </span>
+            <span className="text-[11px] text-slate-500 flex-1 leading-tight">
+              {isDeidentify ? 'De-identify for AI' : 'Redact documents'}
+            </span>
+            <button
+              onClick={() => navigateTo('mode_selection')}
+              className="text-[10px] text-slate-400 hover:text-primary-500 underline transition-colors"
+            >
+              change
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Steps */}
       <nav className="flex-1 px-4 py-6">

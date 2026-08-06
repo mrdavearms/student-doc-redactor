@@ -12,6 +12,11 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export function suggestDeidentifiedFilename(rawStem: string, names: string[]): string {
+  return suggestRedactedFilename(rawStem, names)
+    .replace(/_redacted\.pdf$/, '_deidentified.txt');
+}
+
 export function suggestRedactedFilename(rawStem: string, names: string[]): string {
   // Underscores → spaces so word boundaries work on "Surname_First_Report"
   let result = rawStem.replace(/_/g, ' ');

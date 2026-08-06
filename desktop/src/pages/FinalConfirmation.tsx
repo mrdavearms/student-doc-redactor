@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, FolderOpen, FileText, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Bot, FolderOpen, FileText, Search, Trash2 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
 import { basename, dirname, isSamePath, joinPath, stem } from '../lib/paths';
-import { suggestRedactedFilename } from '../lib/filename';
+import { suggestRedactedFilename, suggestDeidentifiedFilename } from '../lib/filename';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
 
@@ -13,10 +13,13 @@ export default function FinalConfirmation() {
   const {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
-    inputMode, filePath,
-    navigateTo, setRedactionResults, setError,
+    inputMode, filePath, workflowMode,
+    navigateTo, setRedactionResults, setDeidentifyResults, setError,
     lastOutputPath, setLastOutputPath,
   } = useStore();
+
+  const isDeidentify = workflowMode === 'deidentify';
+  const outputSubfolder = isDeidentify ? 'deidentified' : 'redacted';
 
   const [outputMode, setOutputMode] = useState<'default' | 'custom'>('default');
   const [customPath, setCustomPath] = useState('');
@@ -53,13 +56,15 @@ export default function FinalConfirmation() {
       ...familyNames.split(','),
       ...organisationNames.split(','),
     ].map((n) => n.trim()).filter(Boolean);
-    const suggestedName = suggestRedactedFilename(stem(filePath), names);
+    const suggestedName = isDeidentify
+      ? suggestDeidentifiedFilename(stem(filePath), names)
+      : suggestRedactedFilename(stem(filePath), names);
     const selected = await window.electronAPI?.saveFileAs?.(
       joinPath(folderPath, suggestedName)
     );
     if (!selected) return;
     // The dialog opens in the source document's own folder, so the original is
-    // right there to be picked. Redacting over it would destroy the only
+    // right there to be picked. Writing over it would destroy the only
     // unredacted copy, so refuse here rather than let the run fail.
     if (isSamePath(selected, filePath)) {
       setError(
@@ -70,7 +75,7 @@ export default function FinalConfirmation() {
     }
     setSavePath(selected);
   }, [filePath, folderPath, studentName, parentNames, familyNames,
-      organisationNames, setError]);
+      organisationNames, isDeidentify, setError]);
 
   if (!detectionResults) return null;
 
@@ -89,7 +94,7 @@ export default function FinalConfirmation() {
   }
 
   // Derive the default output path for display
-  const defaultOutputDisplay = `${folderPath}/redacted/`;
+  const defaultOutputDisplay = `${folderPath}/${outputSubfolder}/`;
 
   // A custom folder was chosen in folder mode but no path picked yet.
   const outputIncomplete = !isFileMode && outputMode === 'custom' && !customPath;
@@ -104,7 +109,7 @@ export default function FinalConfirmation() {
       ? (savePath ? dirname(savePath) : null)
       : (outputMode === 'custom' && customPath ? customPath : null);
     const chosenFilename = isFileMode && savePath ? basename(savePath) : null;
-    const resolvedOutputPath = chosenFolder ?? joinPath(folderPath, 'redacted');
+    const resolvedOutputPath = chosenFolder ?? joinPath(folderPath, outputSubfolder);
     setLastOutputPath(resolvedOutputPath);
     try {
       const selectedKeys: string[] = [];
@@ -119,7 +124,7 @@ export default function FinalConfirmation() {
       const familyList = familyNames.split(',').map((n) => n.trim()).filter(Boolean);
       const orgList = organisationNames.split(',').map((n) => n.trim()).filter(Boolean);
 
-      const results = await api.redact({
+      const common = {
         folder_path: folderPath,
         student_name: studentName,
         parent_names: parentList,
@@ -127,13 +132,34 @@ export default function FinalConfirmation() {
         organisation_names: orgList,
         redact_header_footer: redactHeaderFooter,
         documents: detectionResults.documents.map((d) => d.path),
-        detected_pii: Object.fromEntries(
-          detectionResults.documents.map((d) => [d.path, d.matches])
-        ),
         selected_keys: selectedKeys,
         folder_action: null,
         custom_output_path: chosenFolder,
         custom_output_filename: chosenFilename,
+      };
+
+      if (isDeidentify) {
+        const results = await api.deidentify(common);
+        if (results.cancelled) {
+          setPartialFiles(
+            results.document_results
+              .map((d) => d.output_path || d.quarantine_path)
+              .filter((p): p is string => Boolean(p))
+          );
+          setDeidentifyResults(results);
+          setCancelled(true);
+          return;
+        }
+        setDeidentifyResults(results);
+        navigateTo('completion');
+        return;
+      }
+
+      const results = await api.redact({
+        ...common,
+        detected_pii: Object.fromEntries(
+          detectionResults.documents.map((d) => [d.path, d.matches])
+        ),
       });
 
       // Trust the backend's authoritative signal, NOT whether Cancel was
@@ -193,8 +219,8 @@ export default function FinalConfirmation() {
             {isLoading
               ? "Checking what was written..."
               : fileCount === 0
-              ? "Redaction was cancelled before any files were written."
-              : `${fileCount} file${fileCount === 1 ? '' : 's'} ${fileCount === 1 ? 'was' : 'were'} redacted before stopping.`}
+              ? `${isDeidentify ? 'De-identification' : 'Redaction'} was cancelled before any files were written.`
+              : `${fileCount} file${fileCount === 1 ? '' : 's'} ${fileCount === 1 ? 'was' : 'were'} ${isDeidentify ? 'de-identified' : 'redacted'} before stopping.`}
           </p>
         </div>
 
@@ -266,7 +292,7 @@ export default function FinalConfirmation() {
           <button
             onClick={async () => {
               if (cancelPending) return;
-              if (!confirm('Stop after the current document finishes? Documents already redacted will remain in the output folder.')) {
+              if (!confirm(`Stop after the current document finishes? Documents already ${isDeidentify ? 'de-identified' : 'redacted'} will remain in the output folder.`)) {
                 return;
               }
               cancelRequestedRef.current = true;
@@ -292,7 +318,11 @@ export default function FinalConfirmation() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Final Confirmation</h2>
-        <p className="text-sm text-slate-400 mt-1">Review your selections before creating redacted documents.</p>
+        <p className="text-sm text-slate-400 mt-1">
+          {isDeidentify
+            ? 'Review your selections before creating the de-identified text files.'
+            : 'Review your selections before creating redacted documents.'}
+        </p>
       </div>
 
       {/* Summary metrics */}
@@ -303,7 +333,9 @@ export default function FinalConfirmation() {
       >
         <div className="bg-white rounded-xl border border-slate-200 p-5 text-center">
           <p className="text-3xl font-semibold text-primary-600">{totalSelected}</p>
-          <p className="text-xs text-slate-400 mt-1 uppercase tracking-wide">Items to Redact</p>
+          <p className="text-xs text-slate-400 mt-1 uppercase tracking-wide">
+            {isDeidentify ? 'Items to Replace' : 'Items to Redact'}
+          </p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-5 text-center">
           <p className="text-3xl font-semibold text-slate-700">{detectionResults.documents.length}</p>
@@ -349,9 +381,15 @@ export default function FinalConfirmation() {
             ? <FileText size={16} className="text-primary-500" />
             : <FolderOpen size={16} className="text-primary-500" />}
           <h3 className="text-sm font-medium text-slate-600">
-            {isFileMode ? 'Save Redacted Document As' : 'Save Redacted Files To'}
+            {isDeidentify
+              ? (isFileMode ? 'Save De-identified Text As' : 'Save De-identified Files To')
+              : (isFileMode ? 'Save Redacted Document As' : 'Save Redacted Files To')}
           </h3>
-          <HelpTip text="Redacted copies are saved separately — your original files are never modified. By default they go in a 'redacted' folder inside your source folder." />
+          <HelpTip
+            text={isDeidentify
+              ? "De-identified text files are saved separately — your original files are never modified. By default they go in a 'deidentified' folder inside your source folder."
+              : "Redacted copies are saved separately — your original files are never modified. By default they go in a 'redacted' folder inside your source folder."}
+          />
         </div>
 
         {isFileMode ? (
@@ -367,11 +405,11 @@ export default function FinalConfirmation() {
                   <>
                     <span className="text-sm text-slate-700 font-medium">Default location</span>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">redacted</code> folder
+                      A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">{outputSubfolder}</code> folder
                       inside the document's own folder. The filename has the student's details stripped out automatically.
                     </p>
                     <code className="text-[11px] text-slate-400 mt-1.5 block break-all">
-                      {joinPath(folderPath, 'redacted')}
+                      {joinPath(folderPath, outputSubfolder)}
                     </code>
                   </>
                 )}
@@ -419,7 +457,7 @@ export default function FinalConfirmation() {
             <div className="flex-1 min-w-0">
               <span className="text-sm text-slate-700 font-medium">Inside the source folder</span>
               <p className="text-xs text-slate-400 mt-0.5">
-                A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">redacted</code> subfolder
+                A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">{outputSubfolder}</code> subfolder
                 will be created alongside your original files
               </p>
               <code className="text-[11px] text-slate-400 mt-1.5 block truncate">
@@ -445,7 +483,7 @@ export default function FinalConfirmation() {
             <div className="flex-1 min-w-0">
               <span className="text-sm text-slate-700 font-medium">Choose a different location</span>
               <p className="text-xs text-slate-400 mt-0.5">
-                Save the redacted files to any folder on your computer
+                Save the {isDeidentify ? 'de-identified' : 'redacted'} files to any folder on your computer
               </p>
               {outputMode === 'custom' && (
                 <div className="flex gap-2 mt-2.5">
@@ -474,9 +512,21 @@ export default function FinalConfirmation() {
       <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
         <ShieldCheck size={18} className="text-emerald-500 shrink-0 mt-0.5" />
         <p className="text-sm text-emerald-700">
-          Your original files will <span className="font-medium">not</span> be modified. Redacted copies will be created in the output folder above.
+          Your original files will <span className="font-medium">not</span> be modified.{' '}
+          {isDeidentify ? 'De-identified text files' : 'Redacted copies'} will be created in the output folder above.
         </p>
       </div>
+
+      {isDeidentify && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+          <Bot size={18} className="text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-700">
+            A private key file will also be saved <span className="font-medium">with your originals</span>,
+            so you can turn the labels back into names later. It is kept out of the output
+            folder on purpose — never upload it.
+          </p>
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex justify-between pt-2">
@@ -499,7 +549,10 @@ export default function FinalConfirmation() {
               }
             `}
           >
-            <ShieldCheck size={16} /> Create Redacted {isFileMode ? 'Document' : 'Documents'}
+            {isDeidentify ? <Bot size={16} /> : <ShieldCheck size={16} />}
+            {isDeidentify
+              ? `Create De-identified ${isFileMode ? 'File' : 'Files'}`
+              : `Create Redacted ${isFileMode ? 'Document' : 'Documents'}`}
           </button>
         </div>
       </div>
