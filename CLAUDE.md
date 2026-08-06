@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (613 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (631 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 87 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 95 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -482,9 +482,9 @@ Deciding two names are the same person is only half the job. The merge branch us
 
 The branch now claims any genuinely new form for the merged owner and rebuilds. It claims **only forms nobody else already owns**: re-claiming a shared token would flip `_rebuild`'s all-surnames test and silently turn `[Family name]` back into `[Student]`. It also upgrades the owner's display name to the fullest written form (`_name_fullness`), so the key file says "Sarah Williams" rather than whichever abbreviation happened to appear first.
 
-### 49. Header/footer dropping is counted and side-aware, never a bare string match
+### 49. Output formatting: substitute and verify BEFORE decorating
 
-`_page_text` drops only as many occurrences of a line as actually sat in the zone, taking header lines from the top of the page and footer lines from the bottom. Matching by bare string across the whole page deleted body content that merely repeated a letterhead line — a template report whose header block contains "Comments" lost every "Comments" heading in the body too, silently and with no warning. `_zone_lines` therefore returns `{'header': Counter, 'footer': Counter}` per page, not a flat set.
+Native pages are rebuilt from line geometry (`_format_native_page`): wrapped prose reflows into paragraphs, lines sharing a row become table cells, header/footer lines are dropped by POSITION (never by string — string matching deleted body lines that merely repeated a letterhead line). Cells are assembled with `_CELL_SEP` (U+2028 — whitespace to the regex engine) and only decorated into `" | "` AFTER replacement and verification have run. Decorating first lets a multi-word PII value straddle a cell join where neither the replace pass nor the symmetric verify pass can bridge it — a silent false pass. AcroForm widget values are re-appended after the rebuild (they live outside the content stream); any formatting failure falls back to the cached raw text.
 
 ### 51. Roles are PROPOSED, never assumed
 
@@ -499,6 +499,18 @@ A user-typed role goes straight into a label, so "Billy's mum" would smuggle a r
 `_assign_role_labels()` buckets owners by their final bracket text, not by role key. Bucketing per key would let two people who both typed "Speech pathologist" — or one assigned `[Health professional]` while another typed that exact text — emit identical bare labels and become indistinguishable in the output: the rule #44 meaning failure, user-induced. Numbering appears only when 2+ owners share a stem, so one teacher is `[Teacher]` and three are `[Teacher 1..3]`. Reassigning one person can therefore renumber others — which is why `/api/deidentify/labels` returns the whole set and the UI re-renders every card.
 
 `_rebuild()` runs `_assign_role_labels()` and `_resolve_shared_tokens()` as two separate passes on purpose: role numbering must not be able to corrupt the priority logic that rule #44's identity resolution depends on.
+
+### 54a. Selection defaults are per-pathway, and mode-switch re-derives them
+
+"Select everything" is right for redaction (over-removal = a black box) and wrong for de-identification (over-removal destroys the content the AI needs — spaCy tags "Working Memory" as ORGANIZATION). `lib/categories.ts`: a category is pre-unticked ONLY when a false positive is likelier than a true one AND removal costs meaning — `ORGANIZATION (NER)`, `NRP (NER)`, unknown `* (NER)` fallbacks, de-identify mode only. The builder writes an EXPLICIT false for every unticked key (DocumentReview renders `?? true`; an omitted key displays ticked while submitting unticked). `setWorkflowMode` re-derives selections for the new mode when detection results exist — in BOTH directions — because the sidebar's change link is reachable mid-flow and stale defaults reintroduce the bug sideways. `detectionParamsKey` stays untouched (rule 41).
+
+### 54b. The Who's-who screen commits what it displays
+
+The dropdown renders `explicit answer ?? suggestion`; Continue commits exactly that via `effectiveRoleMap`, and the label preview is requested with the same effective map — the screen must never show a role the run won't use. Its zero-people auto-skip uses `peopleAutoSkippedKey`, a SEPARATE field from `autoAdvancedKey`: sharing one field let PeopleReview's stamp erase ConversionStatus's and re-arm the forward-bounce trap rule 38 fixed.
+
+### 54c. The NER sweep and the read endpoint
+
+After a successful write, the output (labels stripped) is swept with the shared spaCy engine; surviving PERSON entities become `leftover_name_warnings` — warnings, not quarantine (NER false positives would block correct output), excluding strings the user deliberately deselected. The warnings carry REAL NAMES: UI response only, never the audit log, never disk. `/api/output/read` serves preview/copy and is deliberately narrower than cleanup: only `*_deidentified.txt` — never `.UNVERIFIED.txt` (may contain PII) and never the key file.
 
 ### 54. People-review answers die with any selection change
 
@@ -613,7 +625,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 613 tests total
+tests/                                # 631 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
