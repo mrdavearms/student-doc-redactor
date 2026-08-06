@@ -50,6 +50,8 @@ from backend.schemas import (
     PIIMatchResponse,
     PreviewRequest,
     PreviewResponse,
+    ReadOutputRequest,
+    ReadOutputResponse,
     ProcessFileRequest,
     ProcessFolderRequest,
     RedactRequest,
@@ -574,6 +576,36 @@ def deidentify_documents(req: DeidentifyRequestBody):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"De-identification failed: {e}") from e
+
+
+_READ_OUTPUT_MAX_BYTES = 2 * 1024 * 1024
+
+
+@app.post("/api/output/read", response_model=ReadOutputResponse)
+def read_output(req: ReadOutputRequest):
+    """
+    Return a de-identified output file's text for in-app preview/copy.
+
+    Narrower than the cleanup allowlist on purpose: only *_deidentified.txt.
+    Quarantined .UNVERIFIED.txt may still contain PII and must be opened in an
+    editor deliberately, not surfaced casually; the key file matches neither
+    pattern and can never be read through here.
+    """
+    folder = Path(req.output_folder).resolve()
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Folder not found: {req.output_folder}")
+
+    path = Path(req.file_path).resolve()
+    if not path.is_relative_to(folder):
+        raise HTTPException(status_code=400, detail="File is outside the output folder")
+    if not path.name.endswith("_deidentified.txt"):
+        raise HTTPException(status_code=400, detail="Not a de-identified output file")
+    if not path.exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {req.file_path}")
+    if path.stat().st_size > _READ_OUTPUT_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Output file too large to preview")
+
+    return ReadOutputResponse(content=path.read_text(encoding="utf-8", errors="replace"))
 
 
 # ── Preview ──────────────────────────────────────────────────────────────

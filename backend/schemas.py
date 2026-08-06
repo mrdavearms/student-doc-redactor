@@ -232,6 +232,15 @@ class DeidentifyResultsResponse(BaseModel):
     cancelled: bool = False
 
 
+class ReadOutputRequest(BaseModel):
+    output_folder: str
+    file_path: str
+
+
+class ReadOutputResponse(BaseModel):
+    content: str
+
+
 # ── Preview ──────────────────────────────────────────────────────────────
 
 class PreviewRequest(BaseModel):
