@@ -174,7 +174,9 @@ class DeidentificationService:
         # The key file goes next to the ORIGINALS, never into the output folder:
         # the originals are already sensitive, so it adds no new exposure there,
         # and it leaves every file in the output folder safe to upload.
-        results.key_file_path = self._write_key_file(request.folder_path, pmap)
+        results.key_file_path = self._write_key_file(
+            request.folder_path, pmap, results.document_results
+        )
 
         logger.set_totals(len(request.documents), results.successfully_deidentified)
         if results.cancelled:
@@ -328,6 +330,13 @@ class DeidentificationService:
         drop_header_footer: bool,
         output_filename_override: Optional[str],
     ) -> DeidentifyDocumentResult:
+        # The result's document_name is the source filename because the UI shows
+        # it to the user locally. Everything written to DISK uses safe_name —
+        # documents are routinely called "Billy Bob Support Report.pdf", so the
+        # source filename in a shareable artifact leaks the very name being
+        # removed.
+        safe_name = f"{strip_pii_from_filename(doc.stem, name_variations or [])}.pdf"
+
         result = DeidentifyDocumentResult(
             document_name=doc.name,
             output_path=None,
@@ -340,7 +349,7 @@ class DeidentificationService:
             result.error_message = (
                 "No extracted text available for this document. Run detection again."
             )
-            logger.add_flagged_file(doc.name, result.error_message)
+            logger.add_flagged_file(safe_name, result.error_message)
             return result
 
         ocr_pages = set(text_data.get('ocr_pages', []))
@@ -363,7 +372,7 @@ class DeidentificationService:
                 "Cannot save the de-identified copy over the original document. "
                 "Choose a different filename or folder."
             )
-            logger.add_flagged_file(doc.name, message)
+            logger.add_flagged_file(safe_name, message)
             result.error_message = message
             return result
 
@@ -420,7 +429,9 @@ class DeidentificationService:
 
         for match in selected_matches:
             logger.add_entry(LogEntry(
-                document_name=doc.name,
+                # The stripped output name, never the source filename: documents
+                # are routinely named after the student.
+                document_name=output_filename,
                 output_name=output_filename,
                 page_num=match.page_num,
                 line_num=match.line_num,
@@ -433,23 +444,23 @@ class DeidentificationService:
 
         if leftovers:
             quarantine = output_folder / f"{PurePath(output_filename).stem}.UNVERIFIED.txt"
-            self._write_text(quarantine, full_output, doc.name)
+            self._write_text(quarantine, full_output)
             result.quarantine_path = quarantine
             result.verification_failures = [
                 f"Possible remaining reference to \"{item}\"" for item in leftovers
             ]
             logger.add_flagged_file(
-                doc.name,
+                quarantine.name,
                 f"Verification found {len(leftovers)} possible remaining reference(s); "
                 f"saved as {quarantine.name} for manual review",
             )
             return result
 
         try:
-            self._write_text(output_path, full_output, doc.name)
+            self._write_text(output_path, full_output)
         except Exception as e:
             result.error_message = f"Could not write output file: {e}"
-            logger.add_flagged_file(doc.name, result.error_message)
+            logger.add_flagged_file(safe_name, result.error_message)
             return result
 
         result.output_path = output_path
@@ -457,11 +468,14 @@ class DeidentificationService:
         return result
 
     @staticmethod
-    def _write_text(path: Path, body: str, source_name: str) -> None:
+    def _write_text(path: Path, body: str) -> None:
+        # Deliberately no source filename: documents are routinely named after
+        # the student ("Billy Bob Support Report.pdf"), so naming the original
+        # here would print the very name the rest of the file removed. The
+        # original-to-output mapping lives in the key file instead.
         header = (
-            f"De-identified copy of: {source_name}\n"
-            f"Names and personal details have been replaced with labels such as "
-            f"[Student] and [Parent 1].\n"
+            "De-identified copy — names and personal details have been replaced "
+            "with labels such as [Student] and [Parent 1].\n"
             f"{'=' * 70}\n\n"
         )
         path.write_text(header + body, encoding='utf-8')
@@ -469,7 +483,9 @@ class DeidentificationService:
     # ── Key file ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _write_key_file(folder_path: Path, pmap: PseudonymMap) -> Optional[Path]:
+    def _write_key_file(folder_path: Path, pmap: PseudonymMap,
+                        document_results: List[DeidentifyDocumentResult] = None
+                        ) -> Optional[Path]:
         entries = pmap.key_entries()
         if not entries:
             return None
@@ -501,6 +517,25 @@ class DeidentificationService:
                 "",
             ])
             lines.extend(f"- {note}" for note in notes)
+
+        # The output filenames have the student's details stripped, so this is
+        # the only place the two can be matched up — and it belongs here, in the
+        # file that is already private, rather than in the shareable audit log.
+        rows = [
+            (r.document_name,
+             (r.output_path or r.quarantine_path).name if (r.output_path or r.quarantine_path)
+             else "(not produced)")
+            for r in (document_results or [])
+        ]
+        if rows:
+            lines.extend([
+                "",
+                "WHICH FILE CAME FROM WHICH",
+                "-" * 70,
+            ])
+            width = max(len(original) for original, _ in rows)
+            for original, produced in rows:
+                lines.append(f"{original.ljust(width)}  ->  {produced}")
 
         lines.append("")
         lines.append("END OF KEY")

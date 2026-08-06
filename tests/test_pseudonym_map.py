@@ -5,6 +5,7 @@ import re
 
 import pytest
 from pseudonym_map import (
+    clean_person_name,
     PseudonymMap,
     STUDENT_LABEL,
     SHARED_SURNAME_LABEL,
@@ -252,3 +253,59 @@ class TestIsPersonCategory:
     ])
     def test_non_person_categories(self, category):
         assert not is_person_category(category)
+
+
+# ---------------------------------------------------------------------------
+# Junk candidates from real PDF extraction (regression: found by e2e run)
+# ---------------------------------------------------------------------------
+
+class TestJunkPersonCandidates:
+    """
+    PDF text extraction hands NER run-together spans, and form labels get
+    flagged as names. Registering those invents bogus [Person N] entries and
+    gives one child two different labels in the same document.
+    """
+
+    def test_extraction_span_is_not_a_person(self):
+        assert clean_person_name("Billy Bob        Date of Birth") is None
+
+    def test_form_label_is_not_a_person(self):
+        for label in ["Email", "Phone", "Date of Birth", "Student", "Contact"]:
+            assert clean_person_name(label) is None, label
+
+    def test_name_with_digits_is_not_a_person(self):
+        assert clean_person_name("Billy Bob 2024") is None
+
+    def test_long_span_is_not_a_person(self):
+        assert clean_person_name("Billy Bob and his mother Mary Bob") is None
+
+    def test_ordinary_names_survive(self):
+        assert clean_person_name("Billy Bob") == "Billy Bob"
+        assert clean_person_name("  Sarah   Williams ") == "Sarah Williams"
+        assert clean_person_name("O'Brien") == "O'Brien"
+        assert clean_person_name("Smith-Jones") == "Smith-Jones"
+
+    def test_honorific_is_stripped(self):
+        assert clean_person_name("Ms Williams") == "Williams"
+        assert clean_person_name("Dr. Sarah Williams") == "Sarah Williams"
+
+    def test_honorific_form_merges_with_full_name(self):
+        """'Ms Williams' and 'Sarah Williams' are one teacher, not two."""
+        pmap = PseudonymMap(student_name="Billy Bob")
+        first = pmap.register_person("Sarah Williams")
+        assert pmap.register_person("Ms Williams") == first
+
+    def test_junk_span_mints_no_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Billy Bob        Date of Birth")
+        assert not any(l.startswith("[Person ") for l, _ in pmap.key_entries())
+
+    def test_span_containing_a_known_name_resolves_to_that_person(self):
+        """The student must not become [name] on the one line NER over-grabbed."""
+        pmap = PseudonymMap(student_name="Billy Bob")
+        label = pmap.label_for("Billy Bob        Date of Birth", "Person name (NER)")
+        assert label == STUDENT_LABEL
+
+    def test_unknown_span_still_falls_back_safely(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.label_for("Someone Entirely Else", "Person name (NER)") == "[name]"

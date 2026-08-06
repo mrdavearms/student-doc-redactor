@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (522 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (537 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest, 72 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -460,6 +460,18 @@ Both verifiers strip the inserted labels first (`strip_labels`). Without that, a
 
 `text_deidentifier._pattern_for` deliberately mirrors `redactor._pii_visible_in_text`'s token handling. If they drift apart, the verifier starts flagging text the replacer never had a chance to match.
 
+### 46. In de-identify mode the SOURCE FILENAME is PII
+
+Assessment documents are routinely named after the student ("Billy Bob Support Report.pdf"). Writing `doc.name` into the output file's header or into `LogEntry.document_name` printed the very name every other line had removed — caught only by an end-to-end run on a realistically-named file, because every unit test used `report.pdf`.
+
+Everything written to disk uses `safe_name` / `output_filename` (already `strip_pii_from_filename`'d). `DeidentifyDocumentResult.document_name` deliberately keeps the real name — it is shown in the local UI so the user can recognise their file. The original→output mapping lives in the key file's "WHICH FILE CAME FROM WHICH" section, which is already private.
+
+### 47. Not every NER "person" is a person
+
+PDF extraction hands NER run-together spans (`"Billy Bob        Date of Birth"`) and form labels (`"Email"`). Registering those as people invented bogus `[Person N]` key entries and — worse — gave the student *two different labels in one document*, because the long span won longest-first replacement.
+
+`clean_person_name()` rejects candidates with digits, >4 tokens, non-alphabetic tokens, or any token in `_NOT_A_PERSON_TOKEN` (a set chosen to avoid plausible Australian surnames), and strips leading honorifics so "Ms Williams" merges with "Sarah Williams" instead of becoming a second teacher. A rejected span still gets replaced — `label_for()` falls back to `_label_from_contained()`, resolving it to the longest real name inside it, so the student stays `[Student]` on that line.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -556,7 +568,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 522 tests total
+tests/                                # 537 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -570,9 +582,9 @@ tests/                                # 522 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_pseudonym_map.py             # 51 tests: label privacy invariant, person-identity merge, shared tokens, key entries
+├── test_pseudonym_map.py             # 61 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans
 ├── test_text_deidentifier.py         # 30 tests: longest-first replacement, label re-match guard, exact + fuzzy verification
-├── test_deidentification_service.py  # 23 tests: end-to-end text output, key file location, label-only audit log, zones, cancel
+├── test_deidentification_service.py  # 28 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
 ├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
 ├── test_cleanup_api.py               # 21 tests: cleanup path-traversal guards, .txt patterns, key file undeletable

@@ -468,3 +468,78 @@ class TestCustomOutput:
             ))
             assert not results.document_results[0].success
             assert "detection" in results.document_results[0].error_message.lower()
+
+
+class TestSourceFilenameNeverLeaks:
+    """
+    Regression: assessment documents are routinely NAMED after the student
+    ("Billy Bob Support Report.pdf"). Writing that filename into the output
+    header or the audit log printed the very name everything else removed.
+    """
+
+    def test_output_file_does_not_name_the_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Billy Bob Support Report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            body = results.document_results[0].output_path.read_text(encoding='utf-8')
+            assert "Billy" not in body
+            assert "Bob" not in body
+
+    def test_audit_log_does_not_name_the_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Billy Bob Support Report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert "Billy" not in results.log_content
+            assert "Bob" not in results.log_content
+
+    def test_quarantine_log_entry_does_not_name_the_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Sarah Williams Report.pdf"
+            _make_pdf(doc, ["placeholder"])
+
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Sarah Williams")],
+                         "Sarnh Williams attended today.",
+                         student_name="Sarah Williams", ocr_pages=[1])
+            )
+            assert results.document_results[0].quarantine_path is not None
+            assert "Sarah" not in results.log_content
+
+    def test_ui_still_sees_the_real_document_name(self):
+        """Only what's written to disk is sanitised — the local UI needs the
+        real name so the user can recognise their file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Billy Bob Support Report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert results.document_results[0].document_name == "Billy Bob Support Report.pdf"
+
+    def test_key_file_maps_originals_to_outputs(self):
+        """The only place the two filenames can be matched up — and it belongs
+        in the file that is already private."""
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Billy Bob Support Report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            key = results.key_file_path.read_text(encoding='utf-8')
+            assert "WHICH FILE CAME FROM WHICH" in key
+            assert "Billy Bob Support Report.pdf" in key
+            assert results.document_results[0].output_path.name in key

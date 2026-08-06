@@ -58,10 +58,58 @@ _ORG_GENERIC_WORDS = {
 
 _POSSESSIVE_RE = re.compile(r"['’]s$")
 
+_HONORIFICS = {'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'doctor',
+               'prof', 'professor', 'sir', 'madam'}
+
+# Words that mean a candidate is a form label or a run-together extraction span,
+# not a person. Chosen to avoid plausible Australian surnames.
+_NOT_A_PERSON_TOKEN = {
+    'email', 'phone', 'mobile', 'telephone', 'address', 'date', 'birth', 'dob',
+    'medicare', 'crn', 'ndis', 'abn', 'passport', 'number', 'details',
+    'signature', 'contact', 'guardian', 'parent', 'student', 'teacher',
+    'school', 'report', 'term', 'information', 'assessment',
+}
+
 
 def _norm(text: str) -> str:
     """Casefold and collapse whitespace so variations compare reliably."""
     return ' '.join(str(text).lower().split())
+
+
+def clean_person_name(raw: str):
+    """
+    Normalise a candidate person name, or return None if it isn't one.
+
+    PDF text extraction routinely hands NER a run-together span like
+    "Billy Bob        Date of Birth", and form labels like "Email" get picked up
+    as names. Registering those as people invents bogus [Person N] entries and —
+    worse — makes the same child two different labels on two different lines.
+
+    Leading honorifics are stripped so "Ms Williams" resolves to the same person
+    as "Sarah Williams" rather than becoming a second teacher.
+    """
+    tokens = ' '.join((raw or '').split()).split()
+    while tokens and tokens[0].lower().rstrip('.') in _HONORIFICS:
+        tokens = tokens[1:]
+    if not tokens or len(tokens) > 4:
+        return None
+    for token in tokens:
+        core = token.strip(".'’-")
+        if not core:
+            return None
+        if not core.replace("'", '').replace('’', '').replace('-', '').isalpha():
+            return None
+        if core.lower() in _NOT_A_PERSON_TOKEN:
+            return None
+    return ' '.join(tokens)
+
+
+def _contains_phrase(tokens, phrase_tokens) -> bool:
+    """Whether phrase_tokens appears as a whole-word run inside tokens."""
+    n = len(phrase_tokens)
+    if not n or n > len(tokens):
+        return False
+    return any(tokens[i:i + n] == phrase_tokens for i in range(len(tokens) - n + 1))
 
 
 def is_person_category(category: str) -> bool:
@@ -222,8 +270,10 @@ class PseudonymMap:
         candidate that matches several owners resolves to the highest-priority
         one. A shared token alone never merges two identities.
         """
-        full_name = (full_name or '').strip()
+        full_name = clean_person_name(full_name)
         if not full_name:
+            # Not a person — a form label or an extraction span. label_for()
+            # still resolves it, from whichever real name it contains.
             return FALLBACK_NAME_LABEL
 
         norm = _norm(full_name)
@@ -258,8 +308,26 @@ class PseudonymMap:
         if 'organisation' in cl or 'organization' in cl:
             return '[organisation]'
         if is_person_category(category):
+            # An extraction span like "Billy Bob        Date of Birth" is still
+            # the student — resolve it from the longest real name inside it, so
+            # one child does not end up with two labels in the same document.
+            contained = self._label_from_contained(key)
+            if contained:
+                return contained
             return FALLBACK_NAME_LABEL
         return FALLBACK_LABEL
+
+    def _label_from_contained(self, key: str):
+        """Label of the longest known variation appearing inside `key`."""
+        tokens = key.split()
+        if len(tokens) < 2:
+            return None
+        best_len, best_label = 0, None
+        for variation, label in self._variation_labels.items():
+            phrase = variation.split()
+            if len(phrase) > best_len and _contains_phrase(tokens, phrase):
+                best_len, best_label = len(phrase), label
+        return best_label
 
     def all_labels(self) -> Set[str]:
         """Every label this map can emit — used to guard against re-matching."""
