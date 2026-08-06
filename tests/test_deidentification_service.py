@@ -545,42 +545,115 @@ class TestSourceFilenameNeverLeaks:
             assert results.document_results[0].output_path.name in key
 
 
-class TestHeaderFooterPrecision:
-    """
-    Regression: dropping header/footer lines by bare string match deleted body
-    content that merely repeated a letterhead line. A template report whose
-    header block says "Comments" silently lost every "Comments" heading in the
-    body too.
-    """
+class TestLayoutFormatting:
+    """The output text is rebuilt from block geometry: paragraphs reflowed,
+    table rows reconstructed, header/footer dropped by position not string."""
 
-    def _drop(self, raw, header=None, footer=None):
-        from collections import Counter
-        return DeidentificationService._page_text(
-            raw, {'header': Counter(header or {}), 'footer': Counter(footer or {})}
-        )
+    def _run(self, build, matches=None, student="Billy Bob", **kwargs):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            pdf = fitz.open(); page = pdf.new_page()
+            build(page)
+            pdf.save(str(doc)); pdf.close()
+            # Cached text as detection would have seen it.
+            import sys as _s
+            _s.path.insert(0, 'src/core')
+            from text_extractor import TextExtractor
+            text_data = TextExtractor().extract_text_from_pdf(doc)
+            page_text = text_data['pages'][1]['text']
+            req = _request(tmp, doc, matches or [], page_text,
+                           student_name=student, **kwargs)
+            results = DeidentificationService().execute(req)
+            r = results.document_results[0]
+            return (r.output_path or r.quarantine_path).read_text(encoding='utf-8'), results
 
-    def test_body_line_matching_a_header_line_survives(self):
-        raw = ("Riverside Primary School\nComments\n"
-               "The student engages well.\nComments\nBehaviour improved.")
-        out = self._drop(raw, header={"Riverside Primary School": 1, "Comments": 1})
-        assert "Riverside Primary School" not in out
-        assert out.count("Comments") == 1
-        assert "Behaviour improved." in out
+    def test_hard_wrapped_paragraph_reflows_to_one_line(self):
+        para = ("Results indicate that verbal comprehension skills fall within "
+                "the average range for his age across all assessed domains.")
+        def build(page):
+            page.insert_textbox(fitz.Rect(55, 300, 400, 500), para, fontsize=10)
+        body, _ = self._run(build)
+        assert para in body.replace("\n", " ")
+        # No mid-sentence hard wrap survives.
+        assert "comprehension skills fall" in body
 
-    def test_footer_line_is_dropped_from_the_bottom(self):
-        raw = "Page 1 of 2\nBody text here.\nPage 1 of 2"
-        out = self._drop(raw, footer={"Page 1 of 2": 1})
-        # The surviving occurrence must be the FIRST one, not the footer.
-        assert out == "Page 1 of 2\nBody text here."
+    def test_table_row_reconstructs_with_pipes(self):
+        def build(page):
+            for x, cell in zip([55, 230, 300, 380],
+                               ["Working Memory", "79", "8", "Below average"]):
+                page.insert_text((x, 400), cell, fontsize=10)
+        body, _ = self._run(build)
+        assert "Working Memory | 79 | 8 | Below average" in body
 
-    def test_repeated_header_line_drops_exactly_its_zone_count(self):
-        raw = "Logo\nLogo\nBody\nLogo"
-        out = self._drop(raw, header={"Logo": 2})
-        assert out == "Body\nLogo"
+    def test_header_block_dropped_by_geometry_body_twin_survives(self):
+        """The rule-49 guarantee, now positional: a body line identical to a
+        letterhead line must survive."""
+        def build(page):
+            page.insert_text((55, 30), "Comments", fontsize=9)      # header zone
+            page.insert_text((55, 400), "Comments", fontsize=10)    # body
+            page.insert_text((55, 420), "Behaviour improved.", fontsize=10)
+        body, _ = self._run(build, redact_header_footer=True)
+        assert body.count("Comments") == 1
+        assert "Behaviour improved." in body
 
-    def test_no_zones_leaves_text_untouched(self):
-        raw = "Anything\nat all"
-        assert DeidentificationService._page_text(raw, None) == raw
+    def test_footer_block_dropped_by_geometry(self):
+        def build(page):
+            page.insert_text((55, 400), "Body text here.", fontsize=10)
+            page.insert_text((55, page.rect.height - 20), "Page 1 of 2", fontsize=8)
+        body, _ = self._run(build, redact_header_footer=True)
+        assert "Page 1 of 2" not in body
+        assert "Body text here." in body
+
+    def test_pii_straddling_a_cell_boundary_is_replaced_not_false_passed(self):
+        """The reviewer's finding: decorate AFTER substitution, or a value split
+        across two blocks on one row can neither be replaced nor verified."""
+        def build(page):
+            page.insert_text((55, 400), "42 Smith Street", fontsize=10)
+            page.insert_text((260, 400), "Melbourne VIC 3000", fontsize=10)
+        m = _match("42 Smith Street Melbourne VIC 3000", "Address")
+        body, results = self._run(build, matches=[m])
+        assert "Smith Street" not in body
+        assert "[address]" in body
+        assert results.document_results[0].success, "must not quarantine either"
+
+    def test_widget_values_still_reach_the_output(self):
+        """AcroForm values live outside the content stream; a geometry rebuild
+        alone would silently drop them (reviewer finding 4)."""
+        def build(page):
+            page.insert_text((55, 400), "See form below.", fontsize=10)
+            w = fitz.Widget()
+            w.field_name = "parent"
+            w.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+            w.rect = fitz.Rect(55, 430, 300, 450)
+            w.field_value = "Contact Mary Bloggs on 0412 345 678"
+            page.add_widget(w)
+        m = _match("0412 345 678", "Phone number")
+        body, _ = self._run(build, matches=[m])
+        assert "Mary Bloggs" in body          # widget text made it into output
+        assert "0412 345 678" not in body     # and its PII was replaced
+        assert "[phone]" in body
+
+    def test_unreadable_source_falls_back_to_cached_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+            req = _request(tmp, doc, [_match("Billy Bob")], text)
+            doc.unlink()  # source gone — cached text must still produce output
+            results = DeidentificationService().execute(req)
+            body = results.document_results[0].output_path.read_text(encoding='utf-8')
+            assert "[Student]" in body
+
+    def test_output_header_names_role_labels_not_stale_parent1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text))
+            body = results.document_results[0].output_path.read_text(encoding='utf-8')
+            assert "[Parent 1]" not in body.split("=" * 70)[0]
+            assert "[Teacher 1]" in body.split("=" * 70)[0]
 
 
 class TestOutputFolderCollision:

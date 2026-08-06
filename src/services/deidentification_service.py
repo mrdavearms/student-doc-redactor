@@ -14,7 +14,6 @@ log records labels rather than the names they replaced.
 import os
 import re
 import shutil
-from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePath
@@ -52,6 +51,20 @@ LOG_FILE_NAME = "deidentification_log.txt"
 LOG_STUDENT_PLACEHOLDER = "[Student]"
 
 _PAGE_MARKER = "--- Page {} ---"
+
+# Cell separator used while assembling a native page. It is WHITESPACE to the
+# regex engine, so replacement and verification bridge it exactly like a
+# newline — then it is swapped for " | " only AFTER substitution and
+# verification. Decorating first would let a multi-word PII value straddle a
+# " | " join, where it can neither be replaced nor caught by verification: a
+# silent false pass, the one outcome the verify/quarantine mechanism exists to
+# prevent.
+_CELL_SEP = "\u2028"
+
+# Blocks whose vertical midpoints are within this many points are one row.
+_ROW_TOLERANCE_PT = 4.0
+# A vertical gap this many times the typical row height is a paragraph break.
+_PARAGRAPH_GAP_FACTOR = 1.4
 
 
 @dataclass
@@ -374,48 +387,129 @@ class DeidentificationService:
     # ── Text assembly ────────────────────────────────────────────────────
 
     @staticmethod
-    def _zone_lines(doc_path: Path) -> Dict[int, Dict[str, 'Counter']]:
+    def _format_native_page(page, drop_header_footer: bool) -> str:
         """
-        Header- and footer-zone lines per page, counted.
+        Rebuild a native page's text from LINE geometry ("dict" mode — blocks
+        merge too aggressively to tell a table row from a paragraph).
 
-        Returned as literal strings rather than coordinates so the caller keeps
-        using the same extracted text detection ran against — including AcroForm
-        widget values, which have no page geometry. Counted and split by zone so
-        the caller can drop only as many occurrences as actually sat there, from
-        the correct end of the page.
+        - Lines sharing a row (y-midpoints within tolerance) are table cells:
+          sorted by x, joined with _CELL_SEP (decorated to " | " later).
+        - A single wide line followed closely by another at the same left edge
+          is wrapped prose: joined into a paragraph. Width matters — stacked
+          narrow lines (headings, single-column cells) stay separate.
+        - A vertical gap much larger than the typical line height becomes a
+          blank line.
+        - Header/footer lines are dropped by GEOMETRY when requested — strictly
+          more precise than matching strings, which deleted body lines that
+          merely repeated a letterhead line.
 
-        Image-only pages yield nothing here: their text came from OCR, which
-        carries no block geometry. Those pages keep their header/footer text,
-        and the caller reports that.
+        Known limits (cosmetic only): genuinely multi-column layouts and
+        rotated stamps can get pipe-joined onto shared rows.
         """
-        zones: Dict[int, Dict[str, Counter]] = {}
+        height = page.rect.height
+        header_y = height * HEADER_ZONE_FRACTION
+        footer_y = height * (1 - FOOTER_ZONE_FRACTION)
+
+        items = []
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                x0, y0, x1, y1 = line["bbox"]
+                if drop_header_footer and (y1 <= header_y or y0 >= footer_y):
+                    continue
+                text = " ".join(
+                    "".join(span.get("text", "") for span in line.get("spans", [])).split()
+                )
+                if text:
+                    items.append((y0, y1, x0, x1, text))
+        if not items:
+            return ""
+        items.sort(key=lambda t: (t[0], t[2]))
+
+        rows = []
+        for y0, y1, x0, x1, text in items:
+            mid = (y0 + y1) / 2
+            if rows and abs(mid - rows[-1]["mid"]) <= _ROW_TOLERANCE_PT:
+                rows[-1]["cells"].append((x0, x1, text))
+                rows[-1]["y1"] = max(rows[-1]["y1"], y1)
+            else:
+                rows.append({"mid": mid, "y0": y0, "y1": y1,
+                             "cells": [(x0, x1, text)]})
+
+        heights = sorted(r["y1"] - r["y0"] for r in rows)
+        typical = heights[len(heights) // 2] or 12.0
+        max_width = max(x1 - x0 for _, _, x0, x1, _ in [
+            (0, 0, c[0], c[1], c[2]) for r in rows for c in r["cells"]
+        ]) or 1.0
+
+        # units: list of [text, is_multicell, y0, y1, x0, width_of_last_line]
+        units = []
+        for row in rows:
+            cells = sorted(row["cells"])
+            multi = len(cells) > 1
+            text = _CELL_SEP.join(c[2] for c in cells)
+            x0, x1 = cells[0][0], cells[-1][1]
+            gap = row["y0"] - units[-1][3] if units else None
+
+            # Wrapped prose: previous unit is a single WIDE line, this row is a
+            # single line starting at the same left edge, tightly below it.
+            if (units and not multi and not units[-1][1]
+                    and gap is not None and gap < 0.5 * typical
+                    and abs(x0 - units[-1][4]) < 3
+                    and units[-1][5] > 0.5 * max_width):
+                units[-1][0] += " " + text
+                units[-1][3] = row["y1"]
+                units[-1][5] = x1 - x0
+                continue
+
+            if units and gap is not None and gap > _PARAGRAPH_GAP_FACTOR * typical:
+                units.append(["", False, row["y0"], row["y0"], x0, 0])
+
+            units.append([text, multi, row["y0"], row["y1"], x0, x1 - x0])
+
+        return "\n".join(u[0] for u in units)
+
+    def _formatted_pages(self, doc_path: Path, pages: Dict, ocr_pages: Set[int],
+                         drop_header_footer: bool) -> Dict[int, str]:
+        """
+        Text per page for the OUTPUT file.
+
+        Native pages come from block geometry, with AcroForm widget values
+        appended — they live outside the content stream, so a geometry rebuild
+        alone would silently drop content (and PII) the extractor was
+        specifically taught to catch. OCR pages keep their cached text: no
+        geometry. ANY failure falls back to the cached raw text for that page —
+        formatting must never fail a run.
+        """
+        from src.core.text_extractor import TextExtractor
+        extractor = TextExtractor()
+
+        out: Dict[int, str] = {}
+        pdf = None
         try:
-            with fitz.open(str(doc_path)) as pdf:
-                for page_index in range(len(pdf)):
-                    page = pdf[page_index]
-                    height = page.rect.height
-                    header_y = height * HEADER_ZONE_FRACTION
-                    footer_y = height * (1 - FOOTER_ZONE_FRACTION)
-                    header: Counter = Counter()
-                    footer: Counter = Counter()
-                    for block in page.get_text("blocks"):
-                        y0, y1, text = block[1], block[3], block[4]
-                        if len(block) > 6 and block[6] != 0:
-                            continue
-                        in_header = y1 <= header_y
-                        in_footer = y0 >= footer_y
-                        if not (in_header or in_footer):
-                            continue
-                        bucket = header if in_header else footer
-                        for line in str(text).splitlines():
-                            stripped = line.strip()
-                            if stripped:
-                                bucket[stripped] += 1
-                    if header or footer:
-                        zones[page_index + 1] = {'header': header, 'footer': footer}
+            pdf = fitz.open(str(doc_path))
         except Exception:
-            return {}
-        return zones
+            pdf = None
+        try:
+            for page_num in sorted(pages):
+                cached = pages[page_num].get('text', '') or ''
+                if page_num in ocr_pages or pdf is None or page_num > len(pdf):
+                    out[page_num] = cached
+                    continue
+                try:
+                    page = pdf[page_num - 1]
+                    text = self._format_native_page(page, drop_header_footer)
+                    widget_text = extractor._extract_widget_values(page)
+                    if widget_text:
+                        text = (text.rstrip() + '\n' + widget_text) if text else widget_text
+                    out[page_num] = text if text else cached
+                except Exception:
+                    out[page_num] = cached
+        finally:
+            if pdf is not None:
+                pdf.close()
+        return out
 
     @staticmethod
     def _count_embedded_images(doc_path: Path, native_pages: Set[int]) -> int:
@@ -437,42 +531,6 @@ class DeidentificationService:
         except Exception:
             return 0
         return total
-
-    @staticmethod
-    def _page_text(raw_text: str, zones: Optional[Dict[str, 'Counter']]) -> str:
-        """
-        Drop header/footer-zone lines from a page's text.
-
-        Drops only as many occurrences of a line as actually sat in the zone,
-        and from the right end of the page — header lines from the top, footer
-        lines from the bottom. Matching by bare string across the whole page
-        deleted body content that merely happened to repeat a letterhead line:
-        a template report whose header block contains "Comments" lost every
-        "Comments" heading in the body too, silently.
-        """
-        if not zones:
-            return raw_text
-
-        lines = raw_text.splitlines()
-        drop_idx = set()
-
-        header = Counter(zones.get('header') or {})
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if header.get(stripped, 0) > 0:
-                header[stripped] -= 1
-                drop_idx.add(i)
-
-        footer = Counter(zones.get('footer') or {})
-        for i in range(len(lines) - 1, -1, -1):
-            if i in drop_idx:
-                continue
-            stripped = lines[i].strip()
-            if footer.get(stripped, 0) > 0:
-                footer[stripped] -= 1
-                drop_idx.add(i)
-
-        return "\n".join(l for i, l in enumerate(lines) if i not in drop_idx)
 
     # ── Per-document processing ──────────────────────────────────────────
 
@@ -534,18 +592,15 @@ class DeidentificationService:
             result.error_message = message
             return result
 
-        zones = self._zone_lines(doc) if drop_header_footer else {}
-
-        # Replace page by page so OCR-sourced output can be verified separately.
-        # Every selected match is applied to every page: a name detected on page
-        # one must also go from page five.
+        # Layout-aware text for the output (cells joined with _CELL_SEP for
+        # now). Replace page by page so OCR-sourced output can be verified
+        # separately. Every selected match is applied to every page: a name
+        # detected on page one must also go from page five.
+        formatted = self._formatted_pages(doc, pages, ocr_pages, drop_header_footer)
         page_outputs: Dict[int, str] = {}
         total_replacements = 0
         for page_num in sorted(pages):
-            raw = self._page_text(
-                pages[page_num].get('text', '') or '', zones.get(page_num)
-            )
-            cleaned, count = deidentify_text(raw, selected_matches, pmap)
+            cleaned, count = deidentify_text(formatted[page_num], selected_matches, pmap)
             page_outputs[page_num] = cleaned
             total_replacements += count
 
@@ -579,11 +634,18 @@ class DeidentificationService:
             for n in sorted(page_outputs)
         )
 
+        # Verification runs BEFORE decoration: full_output still uses the
+        # whitespace cell separator, so the verify patterns bridge cell joins
+        # exactly as the replace pass did. Decorating first would blind both
+        # passes to a PII value straddling a table-cell boundary.
         leftovers = verify_deidentified(full_output, selected_texts, labels)
         for page_num in sorted(ocr_pages & set(page_outputs)):
             for item in fuzzy_leftovers(page_outputs[page_num], selected_texts, labels):
                 if item not in leftovers:
                     leftovers.append(item)
+
+        # Only now do cell separators become visible table dividers.
+        full_output = full_output.replace(_CELL_SEP, ' | ')
 
         for match in selected_matches:
             logger.add_entry(LogEntry(
@@ -634,7 +696,7 @@ class DeidentificationService:
         if replacements:
             header = (
                 "De-identified copy — names and personal details have been "
-                "replaced with labels such as [Student] and [Parent 1].\n"
+                "replaced with labels such as [Student] and [Teacher 1].\n"
             )
         else:
             # Claiming a de-identified copy when nothing was replaced would be a
