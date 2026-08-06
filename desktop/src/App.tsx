@@ -13,6 +13,7 @@ import FinalConfirmation from './pages/FinalConfirmation';
 import Completion from './pages/Completion';
 import DeidentifyCompletion from './pages/DeidentifyCompletion';
 import NoPiiFound from './pages/NoPiiFound';
+import PeopleReview from './pages/PeopleReview';
 
 function App() {
   const currentScreen = useStore((s) => s.currentScreen);
@@ -66,6 +67,7 @@ function App() {
       case 'conversion_status':  return <ConversionStatus />;
       case 'document_review':    return <DocumentReview />;
       case 'no_pii_found':       return <NoPiiFound />;
+      case 'people_review':      return <PeopleReview />;
       case 'final_confirmation': return <FinalConfirmation />;
       case 'completion':
         return workflowMode === 'deidentify' ? <DeidentifyCompletion /> : <Completion />;

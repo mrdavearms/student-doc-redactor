@@ -148,12 +148,29 @@ export const api = {
     folder_action: string | null;
     custom_output_path?: string | null;
     custom_output_filename?: string | null;
+    person_roles?: Record<string, string>;
+    person_custom_labels?: Record<string, string>;
+    ignored_people?: string[];
   }, options?: RequestInit) =>
     request<import('./types').DeidentifyResults>('/api/deidentify', {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
     }, 30 * 60_000),
+
+  deidentifyPeople: (params: Record<string, unknown>, options?: RequestInit) =>
+    request<import('./types').PeopleResponse>('/api/deidentify/people', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }),
+
+  deidentifyLabels: (params: Record<string, unknown>, options?: RequestInit) =>
+    request<import('./types').LabelPreviewResponse>('/api/deidentify/labels', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }),
 
   cancelRedaction: () =>
     request<{ status: string }>('/api/redact/cancel', { method: 'POST' }),

@@ -10,6 +10,9 @@ import HelpTip from '../components/HelpTip';
 
 export default function DocumentReview() {
   const isDeidentify = useStore.getState().workflowMode === 'deidentify';
+  // De-identify inserts the "Who's who?" step before the summary. All three
+  // Continue paths below must go through it, not just the button one.
+  const afterReview = isDeidentify ? 'people_review' : 'final_confirmation';
   const {
     detectionResults, currentDocIndex, userSelections,
     setCurrentDocIndex, toggleSelection, selectAll, deselectAll,
@@ -124,7 +127,7 @@ export default function DocumentReview() {
         className="flex justify-end"
       >
         <button
-          onClick={() => navigateTo('final_confirmation')}
+          onClick={() => navigateTo(afterReview)}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
                      bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm hover:shadow transition-all btn-press"
         >
@@ -304,7 +307,7 @@ export default function DocumentReview() {
                 if (next < totalDocs) {
                   setCurrentDocIndex(next);
                 } else {
-                  navigateTo('final_confirmation');
+                  navigateTo(afterReview);
                 }
               }}
               className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
@@ -314,7 +317,7 @@ export default function DocumentReview() {
             </button>
           ) : (
             <button
-              onClick={() => navigateTo('final_confirmation')}
+              onClick={() => navigateTo(afterReview)}
               className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
                          bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
             >

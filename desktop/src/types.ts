@@ -6,6 +6,7 @@ export type Screen =
   | 'conversion_status'
   | 'document_review'
   | 'no_pii_found'
+  | 'people_review'
   | 'final_confirmation'
   | 'completion';
 
@@ -21,13 +22,29 @@ export type InputMode = 'file' | 'folder';
  */
 export type WorkflowMode = 'redact' | 'deidentify';
 
-export const SCREENS: { key: Screen; label: string; step: number }[] = [
-  { key: 'folder_selection', label: 'Select Documents', step: 1 },
-  { key: 'conversion_status', label: 'Convert Docs', step: 2 },
-  { key: 'document_review', label: 'Review PII', step: 3 },
-  { key: 'final_confirmation', label: 'Confirm', step: 4 },
-  { key: 'completion', label: 'Complete', step: 5 },
-];
+export interface StepInfo { key: Screen; label: string; step: number }
+
+/**
+ * The wizard's steps for a given pathway. De-identify has one extra step —
+ * classifying who each person is — so the sidebar must be built per mode
+ * rather than from a fixed array.
+ */
+export function screensFor(mode: WorkflowMode): StepInfo[] {
+  const steps: { key: Screen; label: string }[] = [
+    { key: 'folder_selection', label: 'Select Documents' },
+    { key: 'conversion_status', label: 'Convert Docs' },
+    { key: 'document_review', label: 'Review PII' },
+    ...(mode === 'deidentify'
+      ? [{ key: 'people_review' as Screen, label: "Who's Who" }]
+      : []),
+    { key: 'final_confirmation', label: 'Confirm' },
+    { key: 'completion', label: 'Complete' },
+  ];
+  return steps.map((s, i) => ({ ...s, step: i + 1 }));
+}
+
+/** Redact-mode steps. Prefer screensFor(mode) — this is the default pathway. */
+export const SCREENS: StepInfo[] = screensFor('redact');
 
 /** API response types */
 
@@ -113,6 +130,30 @@ export interface DeidentifyDocumentResult {
   image_warnings: string[];
   error_message: string | null;
   quarantine_path: string | null;
+}
+
+export interface PersonInfo {
+  full_name: string;
+  label: string;
+  role: string;
+  custom_label: string | null;
+  suggested_role: string;
+  /** 'likely' | 'possible' | 'unknown' | 'entered' */
+  confidence: string;
+  evidence: string;
+  snippet: string;
+  occurrences: number;
+  /** 'entered' (typed into the form) | 'detected' */
+  source: string;
+}
+
+export interface PeopleResponse {
+  people: PersonInfo[];
+  roles: { key: string; label: string }[];
+}
+
+export interface LabelPreviewResponse {
+  labels: Record<string, string>;
 }
 
 export interface DeidentifyResults {

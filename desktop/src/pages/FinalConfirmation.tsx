@@ -14,6 +14,7 @@ export default function FinalConfirmation() {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
     inputMode, filePath, workflowMode,
+    personRoles, personCustomLabels, ignoredPeople,
     navigateTo, setRedactionResults, setDeidentifyResults, setError,
     lastOutputPath, setLastOutputPath, setIsProcessing,
   } = useStore();
@@ -106,11 +107,15 @@ export default function FinalConfirmation() {
   const nothingSelected = totalSelected === 0;
   const canProceed = (isDeidentify || !nothingSelected) && !outputIncomplete;
 
-  // Detection found nothing at all, so Back must not land on an empty review.
+  // Back is three-way. Nothing detected at all -> the "nothing found" screen,
+  // never an empty review list. Otherwise de-identify came via "Who's who?"
+  // and should return there, not skip back over it.
   const totalMatches = detectionResults.documents.reduce(
     (sum, d) => sum + d.matches.length, 0,
   );
-  const backTarget = totalMatches === 0 ? 'no_pii_found' : 'document_review';
+  const backTarget = totalMatches === 0
+    ? 'no_pii_found'
+    : isDeidentify ? 'people_review' : 'document_review';
 
   // Only navigate if the user is still here. The pathway-change link can unmount
   // this screen mid-request; the pending promise still resolves, and without
@@ -162,7 +167,12 @@ export default function FinalConfirmation() {
       };
 
       if (isDeidentify) {
-        const results = await api.deidentify(common);
+        const results = await api.deidentify({
+          ...common,
+          person_roles: personRoles,
+          person_custom_labels: personCustomLabels,
+          ignored_people: ignoredPeople,
+        });
         if (results.cancelled) {
           setPartialFiles(
             results.document_results

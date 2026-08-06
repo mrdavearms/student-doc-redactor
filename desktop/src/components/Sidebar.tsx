@@ -1,8 +1,8 @@
 import { motion } from 'framer-motion';
-import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info, BookOpen, Bot } from 'lucide-react';
+import { Check, FolderOpen, RefreshCw, Search, ShieldCheck, PartyPopper, ExternalLink, Info, BookOpen, Bot, UserRound } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useStore } from '../store';
-import { SCREENS, type Screen } from '../types';
+import { screensFor, type Screen } from '../types';
 import AboutModal from './AboutModal';
 import Walkthrough from './Walkthrough';
 import type { UpdateState } from '../hooks/useUpdater';
@@ -15,6 +15,7 @@ const ICONS: Record<Screen, React.ReactNode> = {
   folder_selection: <FolderOpen size={18} />,
   conversion_status: <RefreshCw size={18} />,
   document_review: <Search size={18} />,
+  people_review: <UserRound size={18} />,
   no_pii_found: <Search size={18} />,
   final_confirmation: <ShieldCheck size={18} />,
   completion: <PartyPopper size={18} />,
@@ -31,7 +32,11 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
   const navigateTo = useStore((s) => s.navigateTo);
   const isProcessing = useStore((s) => s.isProcessing);
   const effectiveScreen: Screen = currentScreen === 'no_pii_found' ? 'document_review' : currentScreen;
-  const currentIdx = SCREENS.findIndex((s) => s.key === effectiveScreen);
+  // De-identify has an extra step, so the ladder is built per pathway.
+  const steps = screensFor(workflowMode);
+  // -1 for screens outside the ladder (setup, mode_selection) — every step then
+  // reads as "future", which is correct: none of them has been done yet.
+  const currentIdx = steps.findIndex((s) => s.key === effectiveScreen);
   const isDeidentify = workflowMode === 'deidentify';
   // The chosen pathway is easy to forget once you're three steps in, and the
   // two produce very different files — so keep it visible and changeable.
@@ -86,7 +91,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
       {/* Steps */}
       <nav className="flex-1 px-4 py-6">
         <ul className="space-y-1">
-          {SCREENS.map((screen, idx) => {
+          {steps.map((screen, idx) => {
             const isActive = screen.key === effectiveScreen;
             const isCompleted = idx < currentIdx;
             const isFuture = idx > currentIdx;
@@ -132,7 +137,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
                 </div>
 
                 {/* Connector line */}
-                {idx < SCREENS.length - 1 && (
+                {idx < steps.length - 1 && (
                   <div className="ml-[22px] w-px h-2 my-0.5">
                     <div
                       className={`w-full h-full ${

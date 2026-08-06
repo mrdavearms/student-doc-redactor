@@ -81,6 +81,18 @@ interface AppState {
   detectionParamsKey: string;
   setDetectionParamsKey: (key: string) => void;
 
+  // Step 3b (de-identify only): who each discovered person is. Roles are
+  // PROPOSED by the tool and confirmed by the user — a wrong role is worse
+  // than a vague one, so anything unanswered stays [Other person].
+  personRoles: Record<string, string>;
+  personCustomLabels: Record<string, string>;
+  ignoredPeople: string[];
+  peopleReviewed: boolean;
+  setPersonRole: (fullName: string, role: string, customLabel?: string) => void;
+  setPersonIgnored: (fullName: string, ignored: boolean) => void;
+  acceptSuggestedRoles: (roles: Record<string, string>) => void;
+  setPeopleReviewed: (done: boolean) => void;
+
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
   setRedactionResults: (results: RedactionResults) => void;
@@ -133,6 +145,10 @@ const initialState = {
   userSelections: {} as Record<string, boolean>,
   redactionResults: null,
   deidentifyResults: null,
+  personRoles: {} as Record<string, string>,
+  personCustomLabels: {} as Record<string, string>,
+  ignoredPeople: [] as string[],
+  peopleReviewed: false,
   lastOutputPath: '',
   isProcessing: false,
   loading: false,
@@ -141,6 +157,16 @@ const initialState = {
   backendReachable: true,
   detectionParamsKey: '',
   autoAdvancedKey: '',
+};
+
+// Answers from the "Who's who?" screen are only meaningful for the exact set of
+// people the current selections produce. Changing what's selected can remove a
+// person entirely or introduce a new one, so the answers die with the change.
+const CLEARED_PEOPLE_STATE = {
+  personRoles: {} as Record<string, string>,
+  personCustomLabels: {} as Record<string, string>,
+  ignoredPeople: [] as string[],
+  peopleReviewed: false,
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -152,7 +178,8 @@ export const useStore = create<AppState>((set) => ({
   // detectionParamsKey: detection inputs are identical in both modes, so a user
   // who changes their mind after reviewing should not have to detect again.
   setWorkflowMode: (mode) =>
-    set({ workflowMode: mode, redactionResults: null, deidentifyResults: null }),
+    set({ workflowMode: mode, redactionResults: null, deidentifyResults: null,
+          ...CLEARED_PEOPLE_STATE }),
 
   setInputMode: (mode) => set({ inputMode: mode }),
 
@@ -200,6 +227,7 @@ export const useStore = create<AppState>((set) => ({
       currentDocIndex: 0,
       redactionResults: null,
       deidentifyResults: null,
+      ...CLEARED_PEOPLE_STATE,
     });
   },
 
@@ -211,20 +239,21 @@ export const useStore = create<AppState>((set) => ({
         ...state.userSelections,
         [key]: !state.userSelections[key],
       },
+      ...CLEARED_PEOPLE_STATE,
     })),
 
   selectAll: (docPath, count) =>
     set((state) => {
       const selections = { ...state.userSelections };
       for (let i = 0; i < count; i++) selections[`${docPath}_${i}`] = true;
-      return { userSelections: selections };
+      return { userSelections: selections, ...CLEARED_PEOPLE_STATE };
     }),
 
   deselectAll: (docPath, count) =>
     set((state) => {
       const selections = { ...state.userSelections };
       for (let i = 0; i < count; i++) selections[`${docPath}_${i}`] = false;
-      return { userSelections: selections };
+      return { userSelections: selections, ...CLEARED_PEOPLE_STATE };
     }),
 
   addManualMatch: (docPath, match, index) =>
@@ -236,6 +265,7 @@ export const useStore = create<AppState>((set) => ({
       return {
         detectionResults: { ...state.detectionResults, documents },
         userSelections: { ...state.userSelections, [`${docPath}_${index}`]: true },
+        ...CLEARED_PEOPLE_STATE,
       };
     }),
 
@@ -244,6 +274,30 @@ export const useStore = create<AppState>((set) => ({
   setRedactionResults: (results) => set({ redactionResults: results }),
 
   setDeidentifyResults: (results) => set({ deidentifyResults: results }),
+
+  setPersonRole: (fullName, role, customLabel) =>
+    set((state) => {
+      const custom = { ...state.personCustomLabels };
+      if (customLabel) custom[fullName] = customLabel;
+      else delete custom[fullName];
+      return {
+        personRoles: { ...state.personRoles, [fullName]: role },
+        personCustomLabels: custom,
+        ignoredPeople: state.ignoredPeople.filter((n) => n !== fullName),
+      };
+    }),
+
+  setPersonIgnored: (fullName, ignored) =>
+    set((state) => ({
+      ignoredPeople: ignored
+        ? Array.from(new Set([...state.ignoredPeople, fullName]))
+        : state.ignoredPeople.filter((n) => n !== fullName),
+    })),
+
+  acceptSuggestedRoles: (roles) =>
+    set((state) => ({ personRoles: { ...roles, ...state.personRoles } })),
+
+  setPeopleReviewed: (done) => set({ peopleReviewed: done }),
 
   setLastOutputPath: (path) => set({ lastOutputPath: path }),
 
