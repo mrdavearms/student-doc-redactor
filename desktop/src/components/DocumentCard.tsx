@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { basename } from '../lib/paths';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle, AlertTriangle, XCircle, ArrowRight, ChevronDown, ChevronUp,
@@ -17,7 +18,7 @@ export default function DocumentCard({ result, categoryCounts, hasMediumConfiden
   const [expanded, setExpanded] = useState(false);
 
   const inputName = result.document_name;
-  const outputName = result.output_path ? result.output_path.split('/').pop() || '' : '';
+  const outputName = result.output_path ? basename(result.output_path) : '';
   const renamed = inputName !== outputName;
   const hasWarnings = result.ocr_warnings.length > 0;
   const verificationFailed = result.verification_failures.length > 0;

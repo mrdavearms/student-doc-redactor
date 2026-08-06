@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
-import { friendlyError } from '../lib/errorMessage';
+import { friendlyError, friendlyDocumentError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import { basename, dirname } from '../lib/paths';
 
@@ -132,7 +132,10 @@ export default function DeidentifyCompletion() {
               {r.key_file_path}
             </code>
             <button
-              onClick={() => api.openFolder(dirname(r.key_file_path!))}
+              onClick={async () => {
+                try { await api.openFolder(dirname(r.key_file_path!)); }
+                catch (e) { setError(friendlyError(e)); }
+              }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-red-100 text-red-700 hover:bg-red-200 transition-colors shrink-0 btn-press"
             >
               <FolderOpen size={14} /> Show me
@@ -210,7 +213,7 @@ export default function DeidentifyCompletion() {
           </div>
           {erroredDocs.map((d, i) => (
             <p key={i} className="text-xs text-red-500 py-0.5">
-              {d.document_name}: {d.error_message || 'De-identification did not complete.'}
+              {d.document_name}: {friendlyDocumentError(d.error_message)}
             </p>
           ))}
         </motion.div>
@@ -356,7 +359,10 @@ export default function DeidentifyCompletion() {
             {r.output_folder}
           </code>
           <button
-            onClick={() => api.openFolder(r.output_folder)}
+            onClick={async () => {
+              try { await api.openFolder(r.output_folder); }
+              catch (e) { setError(friendlyError(e)); }
+            }}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shrink-0 btn-press"
           >
             <FolderOpen size={14} /> Open Folder

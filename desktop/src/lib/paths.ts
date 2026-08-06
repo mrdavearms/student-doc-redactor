@@ -24,7 +24,13 @@ export function dirname(path: string): string {
   const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
   if (idx < 0) return '';
   // Keep the root slash for paths like "/file.pdf"
-  return idx === 0 ? path.slice(0, 1) : path.slice(0, idx);
+  if (idx === 0) return path.slice(0, 1);
+  const head = path.slice(0, idx);
+  // "D:\report.pdf" must yield "D:\", not "D:" — a bare drive letter is a
+  // drive-RELATIVE reference on Windows (whatever that drive's cwd happens to
+  // be), not the drive root.
+  if (/^[A-Za-z]:$/.test(head)) return path.slice(0, idx + 1);
+  return head;
 }
 
 /** Filename without its extension ("report.pdf" → "report"). */

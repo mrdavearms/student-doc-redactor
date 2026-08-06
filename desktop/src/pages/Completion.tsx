@@ -6,12 +6,13 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import { friendlyError, friendlyDocumentError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import DocumentCard from '../components/DocumentCard';
 import PreviewSection from '../components/PreviewSection';
 
 export default function Completion() {
-  const { redactionResults, detectionResults, userSelections, reset } = useStore();
+  const { redactionResults, detectionResults, userSelections, reset, setError } = useStore();
   const [logExpanded, setLogExpanded] = useState(false);
 
   // Build per-document category counts from detection results
@@ -33,7 +34,8 @@ export default function Completion() {
         }
       });
       // Map by filename to match against document_results
-      const filename = doc.path.split('/').pop() || doc.path;
+      // doc.path is backslash-separated on Windows — never split on '/'.
+      const filename = doc.filename;
       meta.set(filename, { counts, hasMedium });
     }
     return meta;
@@ -144,7 +146,7 @@ export default function Completion() {
           </div>
           {erroredDocs.map((d, i) => (
             <p key={i} className="text-xs text-red-500 py-0.5">
-              {d.document_name}: {d.error_message || 'Redaction did not complete.'}
+              {d.document_name}: {friendlyDocumentError(d.error_message)}
             </p>
           ))}
         </motion.div>
@@ -216,7 +218,10 @@ export default function Completion() {
             {r.redacted_folder}
           </code>
           <button
-            onClick={() => api.openFolder(r.redacted_folder)}
+            onClick={async () => {
+              try { await api.openFolder(r.redacted_folder); }
+              catch (e) { setError(friendlyError(e)); }
+            }}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shrink-0 btn-press"
           >
             <FolderOpen size={14} /> Open Folder

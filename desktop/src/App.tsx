@@ -4,6 +4,7 @@ import UpdateBanner from './components/UpdateBanner';
 import { useStore } from './store';
 import { useUpdater } from './hooks/useUpdater';
 import { api, BackendUnreachableError } from './api';
+import { buildFaultReportUrl } from './lib/faultReport';
 import Setup from './pages/Setup';
 import ModeSelection from './pages/ModeSelection';
 import FolderSelection from './pages/FolderSelection';
@@ -25,6 +26,20 @@ function App() {
   const backendReachable = useStore((s) => s.backendReachable);
   const setBackendReachable = useStore((s) => s.setBackendReachable);
   const workflowMode = useStore((s) => s.workflowMode);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    window.electronAPI?.getAppVersion?.().then(setAppVersion).catch(() => {});
+  }, []);
+
+  const reportFault = (friendlyMessage: string) => {
+    window.electronAPI?.openExternal(buildFaultReportUrl({
+      appVersion,
+      screen: currentScreen,
+      workflowMode,
+      friendlyMessage,
+    }));
+  };
 
   // On mount: check dependencies and redirect to setup if LibreOffice is missing
   useEffect(() => {
@@ -89,7 +104,13 @@ function App() {
       {!backendReachable && (
         <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
           <p className="text-sm text-amber-800">
-            The redaction engine isn&apos;t responding. Please wait a moment, or restart the app if this persists.
+            The redaction engine isn&apos;t responding. Please wait a moment, or restart the app if this persists.{' '}
+            <button
+              onClick={() => reportFault("The redaction engine isn't responding.")}
+              className="underline text-amber-700 hover:text-amber-900"
+            >
+              Report this problem
+            </button>
           </p>
         </div>
       )}
@@ -98,9 +119,17 @@ function App() {
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start justify-between">
           <p className="text-sm text-red-700">{error}</p>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 text-xs ml-4">
-            Dismiss
-          </button>
+          <span className="flex items-center gap-3 ml-4 shrink-0">
+            <button
+              onClick={() => reportFault(error)}
+              className="text-xs text-red-500 hover:text-red-700 underline"
+            >
+              Report this problem
+            </button>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 text-xs">
+              Dismiss
+            </button>
+          </span>
         </div>
       )}
       {renderScreen()}

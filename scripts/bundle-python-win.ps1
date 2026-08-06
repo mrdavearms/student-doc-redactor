@@ -47,13 +47,6 @@ Write-Host "==> Installing pip dependencies into bundled Python..."
 Write-Host "==> Downloading spaCy model (en_core_web_lg)..."
 & $PythonBin -m spacy download en_core_web_lg --quiet
 
-Write-Host "==> Pre-warming GLiNER model (urchade/gliner_multi_pii-v1)..."
-& $PythonBin -c @"
-from gliner import GLiNER
-model = GLiNER.from_pretrained('urchade/gliner_multi_pii-v1')
-print('GLiNER model cached.')
-"@
-
 # ── Bundle Tesseract ──────────────────────────────────────────────────
 Write-Host "==> Bundling Tesseract..."
 

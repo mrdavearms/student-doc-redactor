@@ -97,7 +97,7 @@ export default function FinalConfirmation() {
   }
 
   // Derive the default output path for display
-  const defaultOutputDisplay = `${folderPath}/${outputSubfolder}/`;
+  const defaultOutputDisplay = joinPath(folderPath, outputSubfolder);
 
   // A custom folder was chosen in folder mode but no path picked yet.
   const outputIncomplete = !isFileMode && outputMode === 'custom' && !customPath;
@@ -267,7 +267,7 @@ export default function FinalConfirmation() {
           <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-2">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Partial output</p>
             <ul className="text-xs text-slate-500 space-y-0.5 max-h-48 overflow-y-auto">
-              {partialFiles.map((f) => <li key={f}>{f.split('/').pop()}</li>)}
+              {partialFiles.map((f) => <li key={f}>{basename(f)}</li>)}
             </ul>
           </div>
         )}
@@ -280,7 +280,10 @@ export default function FinalConfirmation() {
 
         <div className="flex flex-wrap gap-2 pt-2">
           <button
-            onClick={() => api.openFolder(lastOutputPath)}
+            onClick={async () => {
+              try { await api.openFolder(lastOutputPath); }
+              catch (e) { setError(friendlyError(e)); }
+            }}
             disabled={fileCount === 0}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors btn-press"
           >

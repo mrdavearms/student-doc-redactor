@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronUp, Lock, RefreshCw,
 } from 'lucide-react';
 import { useStore } from '../store';
+import { basename } from '../lib/paths';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
 import type { DependencyStatus } from '../types';
@@ -318,7 +319,7 @@ export default function ConversionStatus() {
 /* ── Helpers ──────────────────────────────────────────────────────────── */
 
 function fileName(path: string) {
-  return path.split('/').pop() || path;
+  return basename(path);
 }
 
 function StatusBadge({ ok, label, warn }: { ok: boolean; label: string; warn?: boolean }) {
