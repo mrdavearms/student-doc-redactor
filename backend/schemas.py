@@ -144,6 +144,56 @@ class RedactionResultsResponse(BaseModel):
     cancelled: bool = False
 
 
+# ── De-identification ────────────────────────────────────────────────────
+
+class DeidentifyRequestBody(BaseModel):
+    """
+    Same inputs as a redaction run. redact_header_footer is kept and
+    reinterpreted: it drops header/footer-zone text from the output instead of
+    blanking those zones in a PDF.
+    """
+    folder_path: str
+    student_name: str
+    documents: List[str]
+    selected_keys: List[str]  # ["<doc_path>_<idx>", ...]
+    folder_action: Optional[str] = None
+    custom_output_path: Optional[str] = None
+    custom_output_filename: Optional[str] = None
+    parent_names: List[str] = []
+    family_names: List[str] = []
+    organisation_names: List[str] = []
+    redact_header_footer: bool = False
+
+
+class DeidentifyDocumentResultResponse(BaseModel):
+    document_name: str
+    output_path: Optional[str]
+    success: bool
+    items_replaced: int
+    verification_failures: List[str]
+    ocr_warnings: List[str]
+    # Images can't carry into a text output, so their content is absent rather
+    # than de-identified — surfaced so the omission isn't silent.
+    image_warnings: List[str] = []
+    error_message: Optional[str] = None
+    quarantine_path: Optional[str] = None
+
+
+class DeidentifyResultsResponse(BaseModel):
+    output_folder: str
+    # Written next to the ORIGINALS, never into output_folder — everything in
+    # the output folder must stay safe to upload.
+    key_file_path: Optional[str] = None
+    document_results: List[DeidentifyDocumentResultResponse]
+    log_content: str
+    log_path: Optional[str] = None
+    total_documents: int
+    successfully_deidentified: int
+    verification_failures: List[Dict[str, str]]  # [{filename, message}]
+    ocr_warnings: List[OcrWarning]
+    cancelled: bool = False
+
+
 # ── Preview ──────────────────────────────────────────────────────────────
 
 class PreviewRequest(BaseModel):

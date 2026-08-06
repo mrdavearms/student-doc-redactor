@@ -30,6 +30,16 @@ class TestApiTokenAuth:
                         headers={"X-Api-Token": "sekrit-token"})
         assert r.status_code == 200
 
+    def test_deidentify_requires_a_token(self, monkeypatch):
+        """The de-identify route must be covered by the middleware like any
+        other — it reads the same cache and writes files."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.post("/api/deidentify", json={
+            "folder_path": "/nonexistent", "student_name": "Jane Smith",
+            "documents": [], "selected_keys": [],
+        })
+        assert r.status_code == 401
+
     def test_health_exempt_for_startup_polling(self, monkeypatch):
         """Electron's waitForBackend polls /api/health with no token."""
         monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")

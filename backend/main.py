@@ -24,11 +24,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.services.conversion_service import ConversionService
 from src.services.detection_service import DetectionService
 from src.services.redaction_service import RedactionService, RedactionRequest
+from src.services.deidentification_service import (
+    DeidentificationService,
+    DeidentifyRequest,
+)
 from src.core.pii_detector import PIIMatch
 
 from backend.schemas import (
     ConversionResultsResponse,
     DependencyStatusResponse,
+    DeidentifyDocumentResultResponse,
+    DeidentifyRequestBody,
+    DeidentifyResultsResponse,
     DetectPIIRequest,
     DetectionResultsResponse,
     DocumentPIIResponse,
@@ -358,34 +365,45 @@ def cancel_redaction():
     return {"status": "cancel_requested"}
 
 
+def _resolve_cached_selections(documents: List[str], selected_keys: List[str]):
+    """
+    Rebuild the detected-PII map and per-match selection flags from the
+    server-side detection cache.
+
+    Shared by /api/redact and /api/deidentify so both derive selection keys the
+    same way. Index order is load-bearing — a manual PII item's key is its
+    position in the cached list (see CLAUDE.md rule 31).
+    """
+    detected_pii: Dict[Path, dict] = {}
+    for doc_path_str in documents:
+        cached = _detection_cache.get(doc_path_str)
+        if not cached:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No cached detection data for {doc_path_str}. Run detection first.",
+            )
+        detected_pii[Path(doc_path_str)] = cached
+
+    user_selections: Dict[str, bool] = {}
+    for doc_path_str in documents:
+        doc_path = Path(doc_path_str)
+        matches = detected_pii[doc_path].get("matches", [])
+        for idx in range(len(matches)):
+            # The frontend sends keys as "doc_path_idx"
+            user_selections[f"{doc_path}_{idx}"] = f"{doc_path_str}_{idx}" in selected_keys
+
+    return detected_pii, user_selections
+
+
 @app.post("/api/redact", response_model=RedactionResultsResponse)
 def redact_documents(req: RedactRequest):
     _redaction_control["cancel_requested"] = False
     folder_path = Path(req.folder_path)
     documents = [Path(p) for p in req.documents]
 
-    # Rebuild detected_pii dict from cache
-    detected_pii: Dict[Path, dict] = {}
-    for doc_path_str in req.documents:
-        cached = _detection_cache.get(doc_path_str)
-        if cached:
-            detected_pii[Path(doc_path_str)] = cached
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No cached detection data for {doc_path_str}. Run detection first.",
-            )
-
-    # Build user_selections: mark each frontend-sent selected key as True.
-    user_selections: Dict[str, bool] = {}
-    for doc_path_str in req.documents:
-        doc_path = Path(doc_path_str)
-        matches = detected_pii[doc_path].get("matches", [])
-        for idx in range(len(matches)):
-            key = f"{doc_path}_{idx}"
-            # The frontend sends keys as "doc_path_idx"
-            frontend_key = f"{doc_path_str}_{idx}"
-            user_selections[key] = frontend_key in req.selected_keys
+    detected_pii, user_selections = _resolve_cached_selections(
+        req.documents, req.selected_keys
+    )
 
     try:
         service = RedactionService()
@@ -440,6 +458,78 @@ def redact_documents(req: RedactRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Redaction failed: {e}") from e
+
+
+# ── De-identification ────────────────────────────────────────────────────
+
+@app.post("/api/deidentify", response_model=DeidentifyResultsResponse)
+def deidentify_documents(req: DeidentifyRequestBody):
+    """
+    Replace PII with non-identifying labels and write plain-text output.
+
+    A sibling of /api/redact: same cache, same selections, same cooperative
+    cancel. Only the output differs.
+    """
+    _redaction_control["cancel_requested"] = False
+    detected_pii, user_selections = _resolve_cached_selections(
+        req.documents, req.selected_keys
+    )
+
+    try:
+        service = DeidentificationService()
+        request = DeidentifyRequest(
+            folder_path=Path(req.folder_path),
+            student_name=req.student_name,
+            documents=[Path(p) for p in req.documents],
+            detected_pii=detected_pii,
+            user_selections=user_selections,
+            folder_action=req.folder_action,
+            custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
+            custom_output_filename=req.custom_output_filename,
+            parent_names=req.parent_names,
+            family_names=req.family_names,
+            organisation_names=req.organisation_names,
+            redact_header_footer=req.redact_header_footer,
+        )
+
+        results = service.execute(
+            request,
+            should_cancel=lambda: _redaction_control["cancel_requested"],
+        )
+
+        return DeidentifyResultsResponse(
+            output_folder=str(results.output_folder),
+            key_file_path=str(results.key_file_path) if results.key_file_path else None,
+            document_results=[
+                DeidentifyDocumentResultResponse(
+                    document_name=r.document_name,
+                    output_path=str(r.output_path) if r.output_path else None,
+                    success=r.success,
+                    items_replaced=r.items_replaced,
+                    verification_failures=r.verification_failures,
+                    ocr_warnings=r.ocr_warnings,
+                    image_warnings=r.image_warnings,
+                    error_message=r.error_message,
+                    quarantine_path=str(r.quarantine_path) if r.quarantine_path else None,
+                )
+                for r in results.document_results
+            ],
+            log_content=results.log_content,
+            log_path=str(results.log_path) if results.log_path else None,
+            total_documents=results.total_documents,
+            successfully_deidentified=results.successfully_deidentified,
+            verification_failures=[
+                {"filename": f, "message": m} for f, m in results.verification_failures
+            ],
+            ocr_warnings=[
+                OcrWarning(filename=f, count=c) for f, c in results.ocr_warnings
+            ],
+            cancelled=results.cancelled,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"De-identification failed: {e}") from e
 
 
 # ── Preview ──────────────────────────────────────────────────────────────
