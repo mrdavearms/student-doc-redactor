@@ -4,8 +4,8 @@ import { ArrowLeft, ArrowRight, HelpCircle, UserRound, Check } from 'lucide-reac
 import { useStore } from '../store';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
-import HelpTip from '../components/HelpTip';
 import type { PersonInfo } from '../types';
+import { effectiveRoleMap } from '../lib/peopleRoles';
 
 const IGNORE = '__ignore__';
 const CUSTOM = '__custom__';
@@ -16,7 +16,7 @@ export default function PeopleReview() {
     parentNames, familyNames, organisationNames, redactHeaderFooter,
     personRoles, personCustomLabels, ignoredPeople,
     navigateTo, setError, setPersonRole, setPersonIgnored,
-    acceptSuggestedRoles, setPeopleReviewed, autoAdvancedKey, setAutoAdvancedKey,
+    acceptSuggestedRoles, peopleAutoSkippedKey, setPeopleAutoSkippedKey,
   } = useStore();
 
   const [people, setPeople] = useState<PersonInfo[] | null>(null);
@@ -45,13 +45,17 @@ export default function PeopleReview() {
       documents: (detectionResults?.documents ?? []).map((d) => d.path),
       selected_keys: selectedKeys,
       folder_action: null,
-      person_roles: personRoles,
+      // The preview must show what a run would produce, and a run uses the
+      // DISPLAYED values (suggestions included) — see effectiveRoleMap.
+      person_roles: people
+        ? effectiveRoleMap(people, personRoles, ignoredPeople)
+        : personRoles,
       person_custom_labels: personCustomLabels,
       ignored_people: ignoredPeople,
     };
   }, [detectionResults, userSelections, folderPath, studentName, parentNames,
       familyNames, organisationNames, redactHeaderFooter, personRoles,
-      personCustomLabels, ignoredPeople]);
+      personCustomLabels, ignoredPeople, people]);
 
   // Load the people once on mount.
   useEffect(() => {
@@ -110,12 +114,12 @@ export default function PeopleReview() {
   useEffect(() => {
     if (loading || people === null || people.length > 0) return;
     const key = `people:${folderPath}:${studentName}`;
-    if (autoAdvancedKey === key || skipKey.current === key) return;
+    if (peopleAutoSkippedKey === key || skipKey.current === key) return;
     skipKey.current = key;
-    setAutoAdvancedKey(key);
+    setPeopleAutoSkippedKey(key);
     navigateTo('final_confirmation');
-  }, [loading, people, folderPath, studentName, autoAdvancedKey,
-      setAutoAdvancedKey, navigateTo]);
+  }, [loading, people, folderPath, studentName, peopleAutoSkippedKey,
+      setPeopleAutoSkippedKey, navigateTo]);
 
   if (!detectionResults) return null;
 
@@ -123,6 +127,30 @@ export default function PeopleReview() {
     return (
       <div className="py-16 text-center text-sm text-slate-400">
         Working out who&apos;s who…
+      </div>
+    );
+  }
+
+  if (people !== null && people.length === 0) {
+    return (
+      <div className="py-16 text-center space-y-4">
+        <p className="text-sm text-slate-500">
+          No people to classify in these documents.
+        </p>
+        <div className="flex justify-center gap-2">
+          <button
+            onClick={() => navigateTo('document_review')}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 border border-slate-200 transition-colors btn-press"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          <button
+            onClick={() => navigateTo('final_confirmation')}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 transition-all btn-press"
+          >
+            Continue <ArrowRight size={16} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -263,23 +291,14 @@ export default function PeopleReview() {
         </button>
 
         <div className="flex items-center gap-2">
-          {needsInput > 0 && (
-            <button
-              onClick={() => acceptSuggestedRoles(Object.fromEntries(
-                (people ?? [])
-                  .filter((p) => p.source !== 'entered')
-                  .map((p) => [p.full_name, p.suggested_role]),
-              ))}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm text-slate-600
-                         border border-slate-200 hover:bg-slate-100 transition-colors btn-press"
-            >
-              Accept all suggestions
-              <HelpTip text="Fills in every unanswered person with what we think they are. Anything we couldn't tell stays as Other person." />
-            </button>
-          )}
-
           <button
-            onClick={() => { setPeopleReviewed(true); navigateTo('final_confirmation'); }}
+            onClick={() => {
+              // What the dropdowns SHOW is what the run uses — commit it.
+              acceptSuggestedRoles(
+                effectiveRoleMap(people ?? [], personRoles, ignoredPeople)
+              );
+              navigateTo('final_confirmation');
+            }}
             className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
                        bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow
                        transition-all btn-press"

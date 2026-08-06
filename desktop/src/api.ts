@@ -198,6 +198,12 @@ export const api = {
       body: JSON.stringify({ folder_path }),
     }),
 
+  readOutput: (output_folder: string, file_path: string) =>
+    request<{ content: string }>('/api/output/read', {
+      method: 'POST',
+      body: JSON.stringify({ output_folder, file_path }),
+    }),
+
   cleanupList: (output_path: string) =>
     request<{ files: string[] }>('/api/cleanup/list', {
       method: 'POST',

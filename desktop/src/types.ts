@@ -128,6 +128,9 @@ export interface DeidentifyDocumentResult {
   verification_failures: string[];
   ocr_warnings: string[];
   image_warnings: string[];
+  /** Post-run NER sweep: names still readable in the output. Real names —
+   *  display only, never persisted. */
+  leftover_name_warnings: string[];
   error_message: string | null;
   quarantine_path: string | null;
 }

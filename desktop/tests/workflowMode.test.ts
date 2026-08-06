@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from '../src/store';
 import { suggestDeidentifiedFilename, suggestRedactedFilename } from '../src/lib/filename';
 import { screensFor } from '../src/types';
+import { isPreselected, friendlyCategory } from '../src/lib/categories';
+import { effectiveRoleMap } from '../src/lib/peopleRoles';
 import { friendlyError } from '../src/lib/errorMessage';
 import type { DeidentifyResults, RedactionResults } from '../src/types';
 
@@ -202,7 +204,7 @@ describe('store: people answers die with any selection change', () => {
     });
     useStore.getState().setPersonRole('Sarah Williams', 'teacher');
     useStore.getState().setPersonIgnored('Email', true);
-    useStore.getState().setPeopleReviewed(true);
+    useStore.getState().setPeopleAutoSkippedKey('people:/tmp:Billy Bob');
   });
 
   const assertCleared = () => {
@@ -210,7 +212,7 @@ describe('store: people answers die with any selection change', () => {
     expect(s.personRoles).toEqual({});
     expect(s.personCustomLabels).toEqual({});
     expect(s.ignoredPeople).toEqual([]);
-    expect(s.peopleReviewed).toBe(false);
+    expect(s.peopleAutoSkippedKey).toBe('');
   };
 
   it('cleared by toggling one selection', () => {
@@ -244,5 +246,102 @@ describe('store: people answers die with any selection change', () => {
   it('cleared by a fresh detection run', () => {
     useStore.getState().setDetectionResults({ documents: [], total_matches: 0 });
     assertCleared();
+  });
+});
+
+describe('mode-aware selection defaults', () => {
+  const results = () => ({
+    documents: [{
+      path: '/tmp/a.pdf', filename: 'a.pdf', ocr_pages: [],
+      matches: [
+        { text: 'Billy Bob', category: 'Student name', confidence: 0.95,
+          confidence_label: 'high', page_num: 1, line_num: 1, context: '',
+          source: 'regex', bbox: null },
+        { text: 'Working Memory', category: 'ORGANIZATION (NER)', confidence: 0.9,
+          confidence_label: 'high', page_num: 1, line_num: 2, context: '',
+          source: 'presidio', bbox: null },
+        { text: 'Paediatrician', category: 'NRP (NER)', confidence: 0.9,
+          confidence_label: 'high', page_num: 1, line_num: 3, context: '',
+          source: 'presidio', bbox: null },
+        { text: 'Sarah Williams', category: 'Person name (NER)', confidence: 0.9,
+          confidence_label: 'high', page_num: 1, line_num: 4, context: '',
+          source: 'presidio', bbox: null },
+      ],
+    }],
+    total_matches: 4,
+  });
+
+  beforeEach(() => useStore.getState().reset());
+
+  it('redact mode selects everything (shipped behaviour unchanged)', () => {
+    useStore.getState().setDetectionResults(results());
+    const sel = useStore.getState().userSelections;
+    expect(Object.values(sel).every(Boolean)).toBe(true);
+  });
+
+  it('de-identify mode leaves low-precision NER discoveries EXPLICITLY false', () => {
+    // Explicit false, not merely missing: DocumentReview renders `?? true`,
+    // so an omitted key would display ticked while submitting unticked.
+    useStore.getState().setWorkflowMode('deidentify');
+    useStore.getState().setDetectionResults(results());
+    const sel = useStore.getState().userSelections;
+    expect(sel['/tmp/a.pdf_0']).toBe(true);   // student name
+    expect(sel['/tmp/a.pdf_1']).toBe(false);  // ORGANIZATION (NER) — the Working Memory bug
+    expect(sel['/tmp/a.pdf_2']).toBe(false);  // NRP (NER)
+    expect(sel['/tmp/a.pdf_3']).toBe(true);   // person names stay in
+  });
+
+  it('unknown future NER categories default off in de-identify, on in redact', () => {
+    expect(isPreselected('WIDGET (NER)', 'deidentify')).toBe(false);
+    expect(isPreselected('WIDGET (NER)', 'redact')).toBe(true);
+  });
+
+  it('switching mode AFTER detection re-derives selections for the new mode', () => {
+    // The pathway-change link is reachable mid-flow; carrying redact-mode
+    // defaults into de-identify reintroduces the over-removal bug sideways.
+    useStore.getState().setDetectionResults(results());
+    expect(useStore.getState().userSelections['/tmp/a.pdf_1']).toBe(true);
+    useStore.getState().setWorkflowMode('deidentify');
+    expect(useStore.getState().userSelections['/tmp/a.pdf_1']).toBe(false);
+    // ...and symmetrically back.
+    useStore.getState().setWorkflowMode('redact');
+    expect(useStore.getState().userSelections['/tmp/a.pdf_1']).toBe(true);
+    // The detection fingerprint is untouched either way (rule 41).
+  });
+
+  it('friendly names cover the engine jargon a teacher cannot judge', () => {
+    expect(friendlyCategory('ORGANIZATION (NER)')).toMatch(/organisation/i);
+    expect(friendlyCategory('NRP (NER)')).toMatch(/profession/i);
+    expect(friendlyCategory('Student name')).toBe('Student name');
+  });
+});
+
+describe('effectiveRoleMap: the screen commits what it displays', () => {
+  const people = [
+    { full_name: 'Sarah Williams', label: '', role: 'other', custom_label: null,
+      suggested_role: 'teacher', confidence: 'likely', evidence: 'teacher',
+      snippet: '', occurrences: 2, source: 'detected' },
+    { full_name: 'Mary Bob', label: '', role: 'parent', custom_label: null,
+      suggested_role: 'parent', confidence: 'entered', evidence: '',
+      snippet: '', occurrences: 1, source: 'entered' },
+    { full_name: 'Email', label: '', role: 'other', custom_label: null,
+      suggested_role: 'other', confidence: 'unknown', evidence: '',
+      snippet: '', occurrences: 1, source: 'detected' },
+  ];
+
+  it('unanswered people get their displayed suggestion', () => {
+    const map = effectiveRoleMap(people, {}, []);
+    expect(map['Sarah Williams']).toBe('teacher');
+    expect(map['Mary Bob']).toBe('parent');
+  });
+
+  it('an explicit answer beats the suggestion', () => {
+    const map = effectiveRoleMap(people, { 'Sarah Williams': 'health' }, []);
+    expect(map['Sarah Williams']).toBe('health');
+  });
+
+  it('ignored people are excluded entirely', () => {
+    const map = effectiveRoleMap(people, {}, ['Email']);
+    expect(map['Email']).toBeUndefined();
   });
 });

@@ -6,6 +6,7 @@ import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
 import { basename, dirname, isSamePath, joinPath, stem } from '../lib/paths';
 import { suggestRedactedFilename, suggestDeidentifiedFilename } from '../lib/filename';
+import { friendlyCategory } from '../lib/categories';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
 
@@ -14,7 +15,7 @@ export default function FinalConfirmation() {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
     inputMode, filePath, workflowMode,
-    personRoles, personCustomLabels, ignoredPeople,
+    personRoles, personCustomLabels, ignoredPeople, peopleAutoSkippedKey,
     navigateTo, setRedactionResults, setDeidentifyResults, setError,
     lastOutputPath, setLastOutputPath, setIsProcessing,
   } = useStore();
@@ -113,9 +114,13 @@ export default function FinalConfirmation() {
   const totalMatches = detectionResults.documents.reduce(
     (sum, d) => sum + d.matches.length, 0,
   );
+  // If the people screen auto-skipped (nobody to classify), going Back to it
+  // would land on an empty screen — go to the review instead.
+  const peopleSkipped =
+    peopleAutoSkippedKey === `people:${folderPath}:${studentName}`;
   const backTarget = totalMatches === 0
     ? 'no_pii_found'
-    : isDeidentify ? 'people_review' : 'document_review';
+    : isDeidentify && !peopleSkipped ? 'people_review' : 'document_review';
 
   // Only navigate if the user is still here. The pathway-change link can unmount
   // this screen mid-request; the pending promise still resolves, and without
@@ -391,7 +396,7 @@ export default function FinalConfirmation() {
               .sort(([, a], [, b]) => b - a)
               .map(([category, count]) => (
                 <div key={category} className="flex items-center justify-between text-sm">
-                  <span className="text-slate-600">{category}</span>
+                  <span className="text-slate-600">{friendlyCategory(category)}</span>
                   <span className="text-xs font-medium bg-primary-50 text-primary-600 px-2 py-0.5 rounded-full">
                     {count}
                   </span>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, AlertTriangle, XCircle, FolderOpen, FileText, RotateCcw,
-  ChevronDown, ChevronUp, KeyRound, ImageOff, Trash2,
+  ChevronDown, ChevronUp, KeyRound, ImageOff, Trash2, Copy, Eye, EyeOff,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
@@ -15,6 +15,11 @@ export default function DeidentifyCompletion() {
   const [logExpanded, setLogExpanded] = useState(false);
   const [deletingFlagged, setDeletingFlagged] = useState(false);
   const [flaggedDeleted, setFlaggedDeleted] = useState(false);
+  // Output text lives in COMPONENT state only (rule 24's principle): it is
+  // de-identified, but the store should not accumulate document bodies.
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [openPreview, setOpenPreview] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState<string | null>(null);
 
   if (!deidentifyResults) {
     return (
@@ -35,6 +40,27 @@ export default function DeidentifyCompletion() {
     .map((d) => d.quarantine_path)
     .filter((p): p is string => Boolean(p));
   const ocrWarnings = r.document_results.filter((d) => d.ocr_warnings.length > 0);
+  const nameWarnings = r.document_results.filter(
+    (d) => (d.leftover_name_warnings?.length ?? 0) > 0);
+  const allClear = !hasFailures && nameWarnings.length === 0;
+
+  const fetchText = async (path: string) => {
+    if (previews[path]) return previews[path];
+    const res = await api.readOutput(r.output_folder, path);
+    setPreviews((prev) => ({ ...prev, [path]: res.content }));
+    return res.content;
+  };
+
+  const copyText = async (path: string) => {
+    try {
+      const content = await fetchText(path);
+      await navigator.clipboard.writeText(content);
+      setCopied(path);
+      setTimeout(() => setCopied((c) => (c === path ? null : c)), 2000);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -67,7 +93,9 @@ export default function DeidentifyCompletion() {
         <p className="text-sm mt-1 text-slate-500">
           {hasFailures
             ? 'Do not upload anything listed as needing review.'
-            : 'These text files are ready to paste into an AI tool.'}
+            : allClear
+            ? 'These text files are ready to paste into an AI tool.'
+            : 'Check the warnings below before sharing.'}
         </p>
       </motion.div>
 
@@ -231,6 +259,27 @@ export default function DeidentifyCompletion() {
         </motion.div>
       )}
 
+      {/* Names the sweep still sees */}
+      {nameWarnings.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-amber-50 border border-amber-200 rounded-xl p-5"
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-700 mb-2">
+            <AlertTriangle size={16} />
+            These may still contain a name
+            <HelpTip text="After replacing everything you selected, the tool re-reads the output looking for anything that still resembles a person's name — usually someone the detection step missed. Open the file and check before sharing." />
+          </div>
+          {nameWarnings.map((d, i) => (
+            <p key={i} className="text-xs text-amber-700 py-0.5">
+              {d.document_name}: still contains{' '}
+              {d.leftover_name_warnings.map((n) => `"${n}"`).join(', ')}
+            </p>
+          ))}
+        </motion.div>
+      )}
+
       {/* Per-document summary */}
       {r.document_results.length > 0 && (
         <motion.section
@@ -257,8 +306,39 @@ export default function DeidentifyCompletion() {
                 >
                   {d.success ? `${d.items_replaced} replaced` : 'needs review'}
                 </span>
+                {d.success && d.output_path && (
+                  <span className="flex gap-1 shrink-0">
+                    <button
+                      onClick={() => copyText(d.output_path!)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-primary-50 text-primary-600 hover:bg-primary-100 transition-colors btn-press"
+                    >
+                      <Copy size={12} />
+                      {copied === d.output_path ? 'Copied ✓' : 'Copy text'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const open = !openPreview[d.output_path!];
+                        if (open) await fetchText(d.output_path!).catch((e) => setError(friendlyError(e)));
+                        setOpenPreview((prev) => ({ ...prev, [d.output_path!]: open }));
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors btn-press"
+                    >
+                      {openPreview[d.output_path] ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </span>
+                )}
               </div>
             ))}
+            {r.document_results.map((d) =>
+              d.output_path && openPreview[d.output_path] && previews[d.output_path] ? (
+                <pre
+                  key={`prev-${d.output_path}`}
+                  className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed"
+                >
+                  {previews[d.output_path]}
+                </pre>
+              ) : null
+            )}
           </div>
         </motion.section>
       )}

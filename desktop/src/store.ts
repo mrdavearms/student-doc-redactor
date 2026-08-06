@@ -5,6 +5,7 @@
 
 import { create } from 'zustand';
 import { dirname } from './lib/paths';
+import { buildDefaultSelections } from './lib/categories';
 import type {
   Screen,
   InputMode,
@@ -63,6 +64,12 @@ interface AppState {
   autoAdvancedKey: string;
   setAutoAdvancedKey: (key: string) => void;
 
+  // Same guard pattern, separate field: PeopleReview's zero-people auto-skip.
+  // Sharing autoAdvancedKey would erase ConversionStatus's stamp and re-arm
+  // the forward-bounce trap rule #38 fixed.
+  peopleAutoSkippedKey: string;
+  setPeopleAutoSkippedKey: (key: string) => void;
+
   // Step 3: Detection & Review
   detectionResults: DetectionResults | null;
   currentDocIndex: number;
@@ -87,11 +94,9 @@ interface AppState {
   personRoles: Record<string, string>;
   personCustomLabels: Record<string, string>;
   ignoredPeople: string[];
-  peopleReviewed: boolean;
   setPersonRole: (fullName: string, role: string, customLabel?: string) => void;
   setPersonIgnored: (fullName: string, ignored: boolean) => void;
   acceptSuggestedRoles: (roles: Record<string, string>) => void;
-  setPeopleReviewed: (done: boolean) => void;
 
   // Step 4 & 5: Redaction
   redactionResults: RedactionResults | null;
@@ -148,7 +153,6 @@ const initialState = {
   personRoles: {} as Record<string, string>,
   personCustomLabels: {} as Record<string, string>,
   ignoredPeople: [] as string[],
-  peopleReviewed: false,
   lastOutputPath: '',
   isProcessing: false,
   loading: false,
@@ -157,6 +161,7 @@ const initialState = {
   backendReachable: true,
   detectionParamsKey: '',
   autoAdvancedKey: '',
+  peopleAutoSkippedKey: '',
 };
 
 // Answers from the "Who's who?" screen are only meaningful for the exact set of
@@ -166,7 +171,9 @@ const CLEARED_PEOPLE_STATE = {
   personRoles: {} as Record<string, string>,
   personCustomLabels: {} as Record<string, string>,
   ignoredPeople: [] as string[],
-  peopleReviewed: false,
+  // The zero-people auto-skip stamp must die too: changed selections can
+  // change whether there is anyone to classify.
+  peopleAutoSkippedKey: '',
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -178,8 +185,19 @@ export const useStore = create<AppState>((set) => ({
   // detectionParamsKey: detection inputs are identical in both modes, so a user
   // who changes their mind after reviewing should not have to detect again.
   setWorkflowMode: (mode) =>
-    set({ workflowMode: mode, redactionResults: null, deidentifyResults: null,
-          ...CLEARED_PEOPLE_STATE }),
+    set((state) => ({
+      workflowMode: mode,
+      redactionResults: null,
+      deidentifyResults: null,
+      // Selections were initialised under the OLD mode's safety assumptions.
+      // Re-derive for the new mode (detection itself is NOT re-run — rule 41's
+      // fingerprint stays). Discards hand-toggles; safer than carrying over
+      // defaults computed under the wrong mode.
+      ...(state.detectionResults && state.workflowMode !== mode
+        ? { userSelections: buildDefaultSelections(state.detectionResults, mode) }
+        : {}),
+      ...CLEARED_PEOPLE_STATE,
+    })),
 
   setInputMode: (mode) => set({ inputMode: mode }),
 
@@ -213,23 +231,19 @@ export const useStore = create<AppState>((set) => ({
 
   setAutoAdvancedKey: (key) => set({ autoAdvancedKey: key }),
 
-  setDetectionResults: (results) => {
-    // Initialise all selections to true (pre-selected)
-    const selections: Record<string, boolean> = {};
-    for (const doc of results.documents) {
-      doc.matches.forEach((_, idx) => {
-        selections[`${doc.path}_${idx}`] = true;
-      });
-    }
-    set({
+  setPeopleAutoSkippedKey: (key) => set({ peopleAutoSkippedKey: key }),
+
+  setDetectionResults: (results) =>
+    set((state) => ({
       detectionResults: results,
-      userSelections: selections,
+      // Mode-aware defaults: everything in redact mode; low-precision NER
+      // discoveries pre-unticked in de-identify mode (see lib/categories.ts).
+      userSelections: buildDefaultSelections(results, state.workflowMode),
       currentDocIndex: 0,
       redactionResults: null,
       deidentifyResults: null,
       ...CLEARED_PEOPLE_STATE,
-    });
-  },
+    })),
 
   setCurrentDocIndex: (idx) => set({ currentDocIndex: idx }),
 
@@ -296,8 +310,6 @@ export const useStore = create<AppState>((set) => ({
 
   acceptSuggestedRoles: (roles) =>
     set((state) => ({ personRoles: { ...roles, ...state.personRoles } })),
-
-  setPeopleReviewed: (done) => set({ peopleReviewed: done }),
 
   setLastOutputPath: (path) => set({ lastOutputPath: path }),
 

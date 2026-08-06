@@ -589,6 +589,11 @@ class DeidentificationService:
             output_filename = output_filename_override
         else:
             safe_stem = strip_pii_from_filename(doc.stem, name_variations or [])
+            # Files named purely after the student ("Billy Bob.pdf") strip to
+            # the generic 'document'. Say whose document it is instead — the
+            # label vocabulary already made "Student" safe to write.
+            if safe_stem == 'document':
+                safe_stem = 'Student document'
             output_filename = f"{safe_stem}_deidentified.txt"
             counter = 2
             while (output_folder / output_filename).exists():

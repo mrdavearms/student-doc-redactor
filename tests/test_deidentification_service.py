@@ -789,3 +789,28 @@ class TestNerSweep:
             )
             assert "Jacinta" not in results.log_content
             assert "Nguyen" not in results.log_content
+
+
+class TestFilenameFallback:
+
+    def test_name_only_filename_becomes_student_document(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Billy Bob.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert results.document_results[0].output_path.name == \
+                "Student document_deidentified.txt"
+
+    def test_surviving_document_words_still_win(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Billy Bob Support Plan.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert results.document_results[0].output_path.name == \
+                "Support Plan_deidentified.txt"

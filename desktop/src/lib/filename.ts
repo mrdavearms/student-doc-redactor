@@ -13,7 +13,10 @@ function escapeRegExp(s: string): string {
 }
 
 export function suggestDeidentifiedFilename(rawStem: string, names: string[]): string {
+  // Mirror the backend's nicer fallback for name-only filenames; the backend
+  // stays authoritative for the real default.
   return suggestRedactedFilename(rawStem, names)
+    .replace(/^document_redacted\.pdf$/, 'Student document_redacted.pdf')
     .replace(/_redacted\.pdf$/, '_deidentified.txt');
 }
 

@@ -7,6 +7,7 @@ import { useStore } from '../store';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
+import { friendlyCategory, isPreselected } from '../lib/categories';
 
 export default function DocumentReview() {
   const isDeidentify = useStore.getState().workflowMode === 'deidentify';
@@ -131,7 +132,9 @@ export default function DocumentReview() {
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
                      bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm hover:shadow transition-all btn-press"
         >
-          <CheckCircle2 size={16} /> Accept All & Continue to Summary
+          <CheckCircle2 size={16} /> {isDeidentify
+              ? 'Continue with these selections'
+              : 'Accept All & Continue to Summary'}
         </button>
       </motion.div>
 
@@ -216,8 +219,13 @@ export default function DocumentReview() {
                           {match.confidence_label}
                         </span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                          {match.category}
+                          {friendlyCategory(match.category)}
                         </span>
+                        {isDeidentify && !isPreselected(match.category, 'deidentify') && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600">
+                            left out by default — tick to remove
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-slate-600 mt-1 leading-relaxed">{match.context}</p>
                     </div>
