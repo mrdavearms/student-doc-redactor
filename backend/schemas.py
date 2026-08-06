@@ -184,6 +184,10 @@ class DeidentifyResultsResponse(BaseModel):
     # Written next to the ORIGINALS, never into output_folder — everything in
     # the output folder must stay safe to upload.
     key_file_path: Optional[str] = None
+    # True when the user chose to write output into the folder holding the
+    # originals. The folder then contains the originals and the key too, so the
+    # UI must warn instead of reassuring.
+    output_folder_holds_originals: bool = False
     document_results: List[DeidentifyDocumentResultResponse]
     log_content: str
     log_path: Optional[str] = None

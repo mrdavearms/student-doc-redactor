@@ -119,6 +119,9 @@ export interface DeidentifyResults {
   output_folder: string;
   /** Written next to the ORIGINALS — never inside output_folder. */
   key_file_path: string | null;
+  /** The user pointed output at the folder holding the originals, so that
+   *  folder is NOT safe to share wholesale. */
+  output_folder_holds_originals: boolean;
   document_results: DeidentifyDocumentResult[];
   log_content: string;
   log_path: string | null;

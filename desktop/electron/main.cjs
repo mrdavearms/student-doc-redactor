@@ -251,11 +251,17 @@ ipcMain.handle('select-file', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('save-file-as', async (_event, defaultPath) => {
+ipcMain.handle('save-file-as', async (_event, defaultPath, kind) => {
+  // De-identify mode writes plain text. A PDF-only filter here would rewrite
+  // the .txt name the renderer suggested back to .pdf, contradicting the label
+  // the user just read on screen.
+  const isText = kind === 'txt';
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save Redacted Document As',
+    title: isText ? 'Save De-identified Text As' : 'Save Redacted Document As',
     defaultPath: defaultPath || undefined,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    filters: isText
+      ? [{ name: 'Text', extensions: ['txt'] }]
+      : [{ name: 'PDF', extensions: ['pdf'] }],
   });
   if (result.canceled || !result.filePath) return null;
   return result.filePath;

@@ -11,8 +11,10 @@ anyone: the key file is written next to the ORIGINALS instead, and the audit
 log records labels rather than the names they replaced.
 """
 
+import os
 import re
 import shutil
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePath
@@ -84,6 +86,11 @@ class DeidentifyResults:
     """Complete results from a de-identification run."""
     output_folder: Path
     key_file_path: Optional[Path] = None
+    # True when the user chose to write output into the folder that holds the
+    # originals. The key file lands there too — but so do the unredacted source
+    # documents, so the folder was never shareable wholesale. The UI must warn
+    # instead of reassuring; see _output_shares_source_folder().
+    output_folder_holds_originals: bool = False
     document_results: List[DeidentifyDocumentResult] = field(default_factory=list)
     log_content: str = ""
     log_path: Optional[Path] = None
@@ -174,8 +181,12 @@ class DeidentificationService:
         # The key file goes next to the ORIGINALS, never into the output folder:
         # the originals are already sensitive, so it adds no new exposure there,
         # and it leaves every file in the output folder safe to upload.
+        results.output_folder_holds_originals = self._same_folder(
+            output_folder, request.folder_path
+        )
         results.key_file_path = self._write_key_file(
-            request.folder_path, pmap, results.document_results
+            request.folder_path, pmap, results.document_results,
+            shares_output_folder=results.output_folder_holds_originals,
         )
 
         logger.set_totals(len(request.documents), results.successfully_deidentified)
@@ -208,6 +219,20 @@ class DeidentificationService:
                 variations.append(org.strip())
                 variations.extend(w for w in org.split() if len(w) >= 3)
         return list(dict.fromkeys(variations))
+
+    @staticmethod
+    def _same_folder(a: Path, b: Path) -> bool:
+        """
+        Whether two paths are the same directory.
+
+        Uses os.path.samefile so it catches the case-insensitive-filesystem and
+        symlink variants a string compare misses — the same reasoning as
+        is_same_file() in redactor.py.
+        """
+        try:
+            return a.exists() and b.exists() and os.path.samefile(str(a), str(b))
+        except OSError:
+            return False
 
     @staticmethod
     def _sanitise_output_filename(name: str) -> Optional[str]:
@@ -251,19 +276,21 @@ class DeidentificationService:
     # ── Text assembly ────────────────────────────────────────────────────
 
     @staticmethod
-    def _zone_lines(doc_path: Path) -> Dict[int, Set[str]]:
+    def _zone_lines(doc_path: Path) -> Dict[int, Dict[str, 'Counter']]:
         """
-        Text lines sitting in each page's header/footer zone.
+        Header- and footer-zone lines per page, counted.
 
-        Returned as literal strings to drop rather than coordinates, so the
-        caller keeps using the same extracted text detection ran against —
-        including AcroForm widget values, which have no page geometry.
+        Returned as literal strings rather than coordinates so the caller keeps
+        using the same extracted text detection ran against — including AcroForm
+        widget values, which have no page geometry. Counted and split by zone so
+        the caller can drop only as many occurrences as actually sat there, from
+        the correct end of the page.
 
         Image-only pages yield nothing here: their text came from OCR, which
         carries no block geometry. Those pages keep their header/footer text,
         and the caller reports that.
         """
-        zones: Dict[int, Set[str]] = {}
+        zones: Dict[int, Dict[str, Counter]] = {}
         try:
             with fitz.open(str(doc_path)) as pdf:
                 for page_index in range(len(pdf)):
@@ -271,18 +298,23 @@ class DeidentificationService:
                     height = page.rect.height
                     header_y = height * HEADER_ZONE_FRACTION
                     footer_y = height * (1 - FOOTER_ZONE_FRACTION)
-                    drop: Set[str] = set()
+                    header: Counter = Counter()
+                    footer: Counter = Counter()
                     for block in page.get_text("blocks"):
-                        x0, y0, x1, y1, text = block[0], block[1], block[2], block[3], block[4]
+                        y0, y1, text = block[1], block[3], block[4]
                         if len(block) > 6 and block[6] != 0:
                             continue
-                        if y1 <= header_y or y0 >= footer_y:
-                            for line in str(text).splitlines():
-                                stripped = line.strip()
-                                if stripped:
-                                    drop.add(stripped)
-                    if drop:
-                        zones[page_index + 1] = drop
+                        in_header = y1 <= header_y
+                        in_footer = y0 >= footer_y
+                        if not (in_header or in_footer):
+                            continue
+                        bucket = header if in_header else footer
+                        for line in str(text).splitlines():
+                            stripped = line.strip()
+                            if stripped:
+                                bucket[stripped] += 1
+                    if header or footer:
+                        zones[page_index + 1] = {'header': header, 'footer': footer}
         except Exception:
             return {}
         return zones
@@ -309,12 +341,40 @@ class DeidentificationService:
         return total
 
     @staticmethod
-    def _page_text(raw_text: str, drop_lines: Optional[Set[str]]) -> str:
-        if not drop_lines:
+    def _page_text(raw_text: str, zones: Optional[Dict[str, 'Counter']]) -> str:
+        """
+        Drop header/footer-zone lines from a page's text.
+
+        Drops only as many occurrences of a line as actually sat in the zone,
+        and from the right end of the page — header lines from the top, footer
+        lines from the bottom. Matching by bare string across the whole page
+        deleted body content that merely happened to repeat a letterhead line:
+        a template report whose header block contains "Comments" lost every
+        "Comments" heading in the body too, silently.
+        """
+        if not zones:
             return raw_text
-        kept = [line for line in raw_text.splitlines()
-                if line.strip() not in drop_lines]
-        return "\n".join(kept)
+
+        lines = raw_text.splitlines()
+        drop_idx = set()
+
+        header = Counter(zones.get('header') or {})
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if header.get(stripped, 0) > 0:
+                header[stripped] -= 1
+                drop_idx.add(i)
+
+        footer = Counter(zones.get('footer') or {})
+        for i in range(len(lines) - 1, -1, -1):
+            if i in drop_idx:
+                continue
+            stripped = lines[i].strip()
+            if footer.get(stripped, 0) > 0:
+                footer[stripped] -= 1
+                drop_idx.add(i)
+
+        return "\n".join(l for i, l in enumerate(lines) if i not in drop_idx)
 
     # ── Per-document processing ──────────────────────────────────────────
 
@@ -444,7 +504,7 @@ class DeidentificationService:
 
         if leftovers:
             quarantine = output_folder / f"{PurePath(output_filename).stem}.UNVERIFIED.txt"
-            self._write_text(quarantine, full_output)
+            self._write_text(quarantine, full_output, total_replacements)
             result.quarantine_path = quarantine
             result.verification_failures = [
                 f"Possible remaining reference to \"{item}\"" for item in leftovers
@@ -457,7 +517,7 @@ class DeidentificationService:
             return result
 
         try:
-            self._write_text(output_path, full_output)
+            self._write_text(output_path, full_output, total_replacements)
         except Exception as e:
             result.error_message = f"Could not write output file: {e}"
             logger.add_flagged_file(safe_name, result.error_message)
@@ -468,23 +528,34 @@ class DeidentificationService:
         return result
 
     @staticmethod
-    def _write_text(path: Path, body: str) -> None:
+    def _write_text(path: Path, body: str, replacements: int = 0) -> None:
         # Deliberately no source filename: documents are routinely named after
         # the student ("Billy Bob Support Report.pdf"), so naming the original
         # here would print the very name the rest of the file removed. The
         # original-to-output mapping lives in the key file instead.
-        header = (
-            "De-identified copy — names and personal details have been replaced "
-            "with labels such as [Student] and [Parent 1].\n"
-            f"{'=' * 70}\n\n"
-        )
+        if replacements:
+            header = (
+                "De-identified copy — names and personal details have been "
+                "replaced with labels such as [Student] and [Parent 1].\n"
+            )
+        else:
+            # Claiming a de-identified copy when nothing was replaced would be a
+            # lie the filename already half-tells. Say so plainly instead.
+            header = (
+                "WARNING — NOTHING WAS REPLACED IN THIS FILE.\n"
+                "No personal information was detected, so this is the document's "
+                "text exactly as it was.\n"
+                "Read it before sharing it or pasting it anywhere.\n"
+            )
+        header += f"{'=' * 70}\n\n"
         path.write_text(header + body, encoding='utf-8')
 
     # ── Key file ─────────────────────────────────────────────────────────
 
     @staticmethod
     def _write_key_file(folder_path: Path, pmap: PseudonymMap,
-                        document_results: List[DeidentifyDocumentResult] = None
+                        document_results: List[DeidentifyDocumentResult] = None,
+                        shares_output_folder: bool = False,
                         ) -> Optional[Path]:
         entries = pmap.key_entries()
         if not entries:
@@ -497,11 +568,23 @@ class DeidentificationService:
             "real names. Keep it private. Never upload it, paste it into an AI",
             "tool, or store it with the de-identified copies.",
             "",
+        ]
+
+        if shares_output_folder:
+            lines.extend([
+                "!! You chose to save the de-identified files into this same",
+                "!! folder, which also holds your ORIGINAL documents and this",
+                "!! key. Do not share the folder itself.",
+                "!! Send the individual .txt files instead.",
+                "",
+            ])
+
+        lines.extend([
             f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
             "LABEL  ->  REAL NAME",
             "-" * 70,
-        ]
+        ])
         width = max(len(label) for label, _ in entries)
         for label, real_name in entries:
             lines.append(f"{label.ljust(width)}  ->  {real_name}")

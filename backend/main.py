@@ -500,6 +500,7 @@ def deidentify_documents(req: DeidentifyRequestBody):
         return DeidentifyResultsResponse(
             output_folder=str(results.output_folder),
             key_file_path=str(results.key_file_path) if results.key_file_path else None,
+            output_folder_holds_originals=results.output_folder_holds_originals,
             document_results=[
                 DeidentifyDocumentResultResponse(
                     document_name=r.document_name,

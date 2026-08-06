@@ -309,3 +309,57 @@ class TestJunkPersonCandidates:
     def test_unknown_span_still_falls_back_safely(self):
         pmap = PseudonymMap(student_name="Billy Bob")
         assert pmap.label_for("Someone Entirely Else", "Person name (NER)") == "[name]"
+
+
+class TestMergeBookkeeping:
+    """
+    Regression: a merge used to be forgotten the moment it returned. The new
+    surface form was never recorded against the owner, so a later variation of
+    it minted a SECOND [Person N] for the same human — two labels in the output
+    and two rows in the key file.
+    """
+
+    def test_three_written_forms_of_one_person_share_a_label(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        a = pmap.register_person("S. Williams")
+        b = pmap.register_person("Sarah Williams")
+        c = pmap.register_person("Sarah W.")
+        assert a == b == c
+
+    def test_label_for_agrees_across_all_forms(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("S. Williams")
+        pmap.register_person("Sarah Williams")
+        pmap.register_person("Sarah W.")
+        labels = {
+            pmap.label_for(t, "Person name (NER)")
+            for t in ["S. Williams", "Sarah Williams", "Sarah W.", "Sarah", "Williams"]
+        }
+        assert len(labels) == 1, f"one person resolved to several labels: {labels}"
+
+    def test_one_person_is_one_key_entry(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("S. Williams")
+        pmap.register_person("Sarah Williams")
+        pmap.register_person("Sarah W.")
+        people = [l for l, _ in pmap.key_entries() if l.startswith("[Person ")]
+        assert people == ["[Person 1]"]
+
+    def test_key_file_shows_the_fullest_form_of_the_name(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("S. Williams")
+        pmap.register_person("Sarah Williams")
+        assert dict(pmap.key_entries())["[Person 1]"] == "Sarah Williams"
+
+    def test_merging_does_not_break_the_shared_surname_rule(self):
+        """The merge must not claim a token someone else already owns."""
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mrs Bob"])
+        pmap.register_person("Bob")
+        assert pmap.label_for("Bob", "Student name") == SHARED_SURNAME_LABEL
+
+    def test_distinct_people_still_stay_distinct_after_merging(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("S. Williams")
+        pmap.register_person("Sarah Williams")
+        other = pmap.register_person("John Citizen")
+        assert other == "[Person 2]"

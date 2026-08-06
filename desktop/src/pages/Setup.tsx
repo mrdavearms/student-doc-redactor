@@ -21,7 +21,7 @@ export default function Setup() {
       setDeps(result);
       if (result.libreoffice_ok && result.ner_ok !== false) {
         setAllReady(true);
-        setTimeout(() => navigateTo('folder_selection'), 2000);
+        setTimeout(() => navigateTo('mode_selection'), 2000);
       }
     } catch (e) {
       setCheckError(friendlyError(e));
@@ -57,7 +57,7 @@ export default function Setup() {
           </div>
         </div>
         <button
-          onClick={() => navigateTo('folder_selection')}
+          onClick={() => navigateTo('mode_selection')}
           className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
                      bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow transition-all btn-press"
         >
@@ -139,7 +139,7 @@ export default function Setup() {
       {/* Actions */}
       <div className="flex items-center justify-between pt-2">
         <button
-          onClick={() => navigateTo('folder_selection')}
+          onClick={() => navigateTo('mode_selection')}
           className="text-sm text-slate-400 hover:text-slate-600 transition-colors"
         >
           Skip for now — I only have PDFs

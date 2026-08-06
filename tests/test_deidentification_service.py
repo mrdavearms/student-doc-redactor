@@ -543,3 +543,124 @@ class TestSourceFilenameNeverLeaks:
             assert "WHICH FILE CAME FROM WHICH" in key
             assert "Billy Bob Support Report.pdf" in key
             assert results.document_results[0].output_path.name in key
+
+
+class TestHeaderFooterPrecision:
+    """
+    Regression: dropping header/footer lines by bare string match deleted body
+    content that merely repeated a letterhead line. A template report whose
+    header block says "Comments" silently lost every "Comments" heading in the
+    body too.
+    """
+
+    def _drop(self, raw, header=None, footer=None):
+        from collections import Counter
+        return DeidentificationService._page_text(
+            raw, {'header': Counter(header or {}), 'footer': Counter(footer or {})}
+        )
+
+    def test_body_line_matching_a_header_line_survives(self):
+        raw = ("Riverside Primary School\nComments\n"
+               "The student engages well.\nComments\nBehaviour improved.")
+        out = self._drop(raw, header={"Riverside Primary School": 1, "Comments": 1})
+        assert "Riverside Primary School" not in out
+        assert out.count("Comments") == 1
+        assert "Behaviour improved." in out
+
+    def test_footer_line_is_dropped_from_the_bottom(self):
+        raw = "Page 1 of 2\nBody text here.\nPage 1 of 2"
+        out = self._drop(raw, footer={"Page 1 of 2": 1})
+        # The surviving occurrence must be the FIRST one, not the footer.
+        assert out == "Page 1 of 2\nBody text here."
+
+    def test_repeated_header_line_drops_exactly_its_zone_count(self):
+        raw = "Logo\nLogo\nBody\nLogo"
+        out = self._drop(raw, header={"Logo": 2})
+        assert out == "Body\nLogo"
+
+    def test_no_zones_leaves_text_untouched(self):
+        raw = "Anything\nat all"
+        assert DeidentificationService._page_text(raw, None) == raw
+
+
+class TestOutputFolderCollision:
+    """
+    The UI promises the output folder is safe to share. That is only true when
+    it is a separate folder — pointing output at the source folder puts the
+    originals and the key file right beside the de-identified copies. The Save
+    As dialog opens in the source folder, so this is the DEFAULT path in
+    single-document mode, not an edge case.
+    """
+
+    def test_flag_false_for_the_default_subfolder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is here."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert results.output_folder_holds_originals is False
+
+    def test_flag_true_when_output_is_the_source_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is here."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text,
+                         custom_output_path=Path(tmp))
+            )
+            assert results.output_folder_holds_originals is True
+
+    def test_key_file_says_so_when_folders_collide(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is here."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text,
+                         custom_output_path=Path(tmp))
+            )
+            key = results.key_file_path.read_text(encoding='utf-8')
+            assert "do not share the folder" in key.lower()
+
+    def test_output_is_still_correctly_deidentified_when_folders_collide(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is here."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text,
+                         custom_output_path=Path(tmp))
+            )
+            body = results.document_results[0].output_path.read_text(encoding='utf-8')
+            assert "[Student]" in body and "Billy" not in body
+
+
+class TestNothingReplacedIsSaidPlainly:
+    """A file with no replacements is the document verbatim. Calling it a
+    de-identified copy would be a lie the filename already half-tells."""
+
+    def test_zero_replacements_carries_a_warning_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Nothing personal in here at all."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [], text)
+            )
+            body = results.document_results[0].output_path.read_text(encoding='utf-8')
+            assert "NOTHING WAS REPLACED" in body
+            assert "Read it before sharing" in body
+
+    def test_normal_run_does_not_carry_that_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is here."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            body = results.document_results[0].output_path.read_text(encoding='utf-8')
+            assert "NOTHING WAS REPLACED" not in body

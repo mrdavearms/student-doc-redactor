@@ -29,6 +29,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
   const currentScreen = useStore((s) => s.currentScreen);
   const workflowMode = useStore((s) => s.workflowMode);
   const navigateTo = useStore((s) => s.navigateTo);
+  const isProcessing = useStore((s) => s.isProcessing);
   const effectiveScreen: Screen = currentScreen === 'no_pii_found' ? 'document_review' : currentScreen;
   const currentIdx = SCREENS.findIndex((s) => s.key === effectiveScreen);
   const isDeidentify = workflowMode === 'deidentify';
@@ -70,12 +71,14 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
             <span className="text-[11px] text-slate-500 flex-1 leading-tight">
               {isDeidentify ? 'De-identify for AI' : 'Redact documents'}
             </span>
-            <button
-              onClick={() => navigateTo('mode_selection')}
-              className="text-[10px] text-slate-400 hover:text-primary-500 underline transition-colors"
-            >
-              change
-            </button>
+            {!isProcessing && (
+              <button
+                onClick={() => navigateTo('mode_selection')}
+                className="text-[10px] text-slate-400 hover:text-primary-500 underline transition-colors"
+              >
+                change
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -48,9 +48,15 @@ export default function Walkthrough({ forceOpen, onClose }: WalkthroughProps) {
       content: (
         <div className="space-y-4">
           <p className="text-sm text-slate-500 leading-relaxed">
-            This tool finds and removes personally identifiable information (PII) from student
-            documents — names, phone numbers, addresses, emails, and more. It creates redacted
-            copies. Your originals are never modified.
+            This tool finds personally identifiable information (PII) in student
+            documents — names, phone numbers, addresses, emails, and more — and
+            gets rid of it. Your originals are never modified.
+          </p>
+          <p className="text-sm text-slate-500 leading-relaxed">
+            You choose what you want at the start: <span className="font-medium">redact</span>{' '}
+            to black it out and get PDFs you can share or file, or{' '}
+            <span className="font-medium">de-identify for AI</span> to swap names for
+            labels like [Student] and get text you can safely paste into an AI tool.
           </p>
           <p className="text-sm text-slate-500 leading-relaxed">
             Everything runs locally on your computer. No data is sent anywhere.
@@ -85,7 +91,7 @@ export default function Walkthrough({ forceOpen, onClose }: WalkthroughProps) {
           {[
             { icon: <FolderOpen size={16} />, label: 'Choose a folder', desc: 'Select a folder containing student documents — PDFs and Word files.' },
             { icon: <Eye size={16} />, label: 'Review what was found', desc: 'The tool scans every document and shows you what it detected. Accept or reject each item.' },
-            { icon: <ShieldCheck size={16} />, label: 'Get redacted copies', desc: 'Redacted documents are saved in a new folder. Originals stay untouched.' },
+            { icon: <ShieldCheck size={16} />, label: 'Get your files', desc: 'Redacted PDFs, or de-identified text plus a private key file. Originals stay untouched.' },
           ].map((item, i) => (
             <div key={i} className="flex gap-3 items-start">
               <div className="w-8 h-8 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center shrink-0 mt-0.5">

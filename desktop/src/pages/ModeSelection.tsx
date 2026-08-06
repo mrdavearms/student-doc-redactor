@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowRight, Bot, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, ShieldCheck } from 'lucide-react';
 import { useStore } from '../store';
 import type { WorkflowMode } from '../types';
 
@@ -35,6 +35,9 @@ export default function ModeSelection() {
   const workflowMode = useStore((s) => s.workflowMode);
   const setWorkflowMode = useStore((s) => s.setWorkflowMode);
   const navigateTo = useStore((s) => s.navigateTo);
+  // Reached via the sidebar's "change" link mid-wizard? Offer a way back, so
+  // peeking at the other option isn't a one-way trip through the whole flow.
+  const canGoBack = useStore((s) => s.detectionResults !== null);
 
   const choose = (mode: WorkflowMode) => {
     setWorkflowMode(mode);
@@ -100,6 +103,16 @@ export default function ModeSelection() {
           and your original files are never changed.
         </p>
       </div>
+
+      {canGoBack && (
+        <button
+          onClick={() => navigateTo('document_review')}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-500
+                     hover:bg-slate-100 transition-colors btn-press"
+        >
+          <ArrowLeft size={16} /> Never mind — go back
+        </button>
+      )}
     </div>
   );
 }

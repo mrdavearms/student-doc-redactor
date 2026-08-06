@@ -2,16 +2,19 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, AlertTriangle, XCircle, FolderOpen, FileText, RotateCcw,
-  ChevronDown, ChevronUp, KeyRound, ImageOff,
+  ChevronDown, ChevronUp, KeyRound, ImageOff, Trash2,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
+import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import { basename, dirname } from '../lib/paths';
 
 export default function DeidentifyCompletion() {
-  const { deidentifyResults, reset } = useStore();
+  const { deidentifyResults, reset, setError } = useStore();
   const [logExpanded, setLogExpanded] = useState(false);
+  const [deletingFlagged, setDeletingFlagged] = useState(false);
+  const [flaggedDeleted, setFlaggedDeleted] = useState(false);
 
   if (!deidentifyResults) {
     return (
@@ -28,6 +31,9 @@ export default function DeidentifyCompletion() {
   const hasVerificationFailures = r.verification_failures.length > 0;
   const hasFailures = hasVerificationFailures || erroredDocs.length > 0;
   const imageWarnings = r.document_results.filter((d) => d.image_warnings.length > 0);
+  const quarantined = r.document_results
+    .map((d) => d.quarantine_path)
+    .filter((p): p is string => Boolean(p));
   const ocrWarnings = r.document_results.filter((d) => d.ocr_warnings.length > 0);
 
   return (
@@ -79,8 +85,19 @@ export default function DeidentifyCompletion() {
           <p className="text-xs text-red-600 mb-3 leading-relaxed">
             A file named <span className="font-semibold">{basename(r.key_file_path)}</span> was
             saved with your original documents. It turns the labels back into real names, so
-            never upload it or paste it into an AI tool. It is deliberately kept out of the
-            folder below so everything you are about to share stays safe.
+            never upload it or paste it into an AI tool.{' '}
+            {r.output_folder_holds_originals ? (
+              <>
+                <span className="font-semibold">
+                  You chose to save the text files into that same folder
+                </span>
+                , so it also holds your original documents and this key. Don&apos;t
+                share the folder itself — send the individual text files.
+              </>
+            ) : (
+              <>It is deliberately kept out of the folder below, so everything
+              you are about to share stays safe.</>
+            )}
           </p>
           <div className="flex items-center gap-3">
             <code className="text-xs bg-white/70 px-3 py-2 rounded-lg text-red-600 flex-1 overflow-x-auto">
@@ -117,6 +134,38 @@ export default function DeidentifyCompletion() {
               {f.filename}: {f.message}
             </p>
           ))}
+
+          {/* These files hold text that was NOT fully de-identified, sitting in
+              the folder the user is about to share. Make removing them one
+              click, rather than relying on them reading the warning. */}
+          {quarantined.length > 0 && !flaggedDeleted && (
+            <button
+              onClick={async () => {
+                setDeletingFlagged(true);
+                try {
+                  await api.cleanup(r.output_folder, quarantined);
+                  setFlaggedDeleted(true);
+                } catch (e) {
+                  setError(friendlyError(e));
+                } finally {
+                  setDeletingFlagged(false);
+                }
+              }}
+              disabled={deletingFlagged}
+              className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-red-100 text-red-700
+                         hover:bg-red-200 disabled:opacity-50 transition-colors btn-press"
+            >
+              <Trash2 size={14} />
+              {deletingFlagged
+                ? 'Deleting…'
+                : `Delete ${quarantined.length === 1 ? 'this file' : 'these files'}`}
+            </button>
+          )}
+          {flaggedDeleted && (
+            <p className="mt-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              Deleted. The remaining files in the output folder passed checking.
+            </p>
+          )}
         </motion.div>
       )}
 

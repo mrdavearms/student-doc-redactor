@@ -221,7 +221,7 @@ function TabHowToUse({ onShowWalkthrough }: { onShowWalkthrough: () => void }) {
           {[
             { icon: <FolderOpen size={14} />, step: '1', text: 'Select a folder containing student documents (PDFs and Word files) and enter the student\'s name.' },
             { icon: <Eye size={14} />, step: '2', text: 'Enter parent, family, and organisation names — the more you provide, the more thorough the detection.' },
-            { icon: <ShieldCheck size={14} />, step: '3', text: 'Review detected PII, accept or reject each item, then create redacted copies in a new folder.' },
+            { icon: <ShieldCheck size={14} />, step: '3', text: 'Review detected PII, accept or reject each item, then create your files in a new folder.' },
           ].map((item) => (
             <div key={item.step} className="flex gap-3 items-start">
               <div className="w-6 h-6 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold shrink-0 mt-0.5">
@@ -271,6 +271,8 @@ function TabFeatures() {
         <ul className="space-y-1.5 text-sm text-slate-500">
           {[
             'Detects names, phone numbers, emails, addresses, Medicare numbers, dates of birth, student IDs, and more',
+            'Two pathways: black out the information, or replace it with labels like [Student] for use with AI tools',
+            'De-identified output is plain text, with a private key file kept alongside your originals so you can turn the labels back into names',
             'Redacts both text-layer and scanned/OCR pages in PDFs',
             'Automatic Word to PDF conversion',
             'Header/footer zone blanking for school letterheads',

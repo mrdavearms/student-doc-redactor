@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (537 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (553 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest, 72 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -472,6 +472,22 @@ PDF extraction hands NER run-together spans (`"Billy Bob        Date of Birth"`)
 
 `clean_person_name()` rejects candidates with digits, >4 tokens, non-alphabetic tokens, or any token in `_NOT_A_PERSON_TOKEN` (a set chosen to avoid plausible Australian surnames), and strips leading honorifics so "Ms Williams" merges with "Sarah Williams" instead of becoming a second teacher. A rejected span still gets replaced — `label_for()` falls back to `_label_from_contained()`, resolving it to the longest real name inside it, so the student stays `[Student]` on that line.
 
+### 48. A merge in `register_person` must write the new surface form back
+
+Deciding two names are the same person is only half the job. The merge branch used to `return owner.label` without recording the candidate's variations, so the merge was forgotten immediately: registering "S. Williams" then "Sarah Williams" merged correctly, but "Sarah W." was then unrecognised and minted a **second** `[Person N]` for the same human — two labels in the output and two rows in the key file, which is precisely the meaning failure rule #44 exists to prevent.
+
+The branch now claims any genuinely new form for the merged owner and rebuilds. It claims **only forms nobody else already owns**: re-claiming a shared token would flip `_rebuild`'s all-surnames test and silently turn `[Family name]` back into `[Student]`. It also upgrades the owner's display name to the fullest written form (`_name_fullness`), so the key file says "Sarah Williams" rather than whichever abbreviation happened to appear first.
+
+### 49. Header/footer dropping is counted and side-aware, never a bare string match
+
+`_page_text` drops only as many occurrences of a line as actually sat in the zone, taking header lines from the top of the page and footer lines from the bottom. Matching by bare string across the whole page deleted body content that merely repeated a letterhead line — a template report whose header block contains "Comments" lost every "Comments" heading in the body too, silently and with no warning. `_zone_lines` therefore returns `{'header': Counter, 'footer': Counter}` per page, not a flat set.
+
+### 50. The output folder is only safe to share when it is a SEPARATE folder
+
+The UI promises everything in the output folder is safe to upload. That holds for the default `deidentified/` subfolder, but not when the user points output at the folder holding the originals — where the unredacted source documents and the key file sit alongside the output. In single-document mode this is the **default** path, because the Save As dialog opens in the source document's own folder.
+
+`DeidentifyResults.output_folder_holds_originals` (via `_same_folder`, which uses `os.path.samefile` for the case-insensitive-filesystem and symlink variants) flows to the completion screen and the key file, both of which then warn instead of reassuring. The run is deliberately **not** blocked — the user is entitled to that choice; they are just not told a falsehood about it.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -568,7 +584,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 537 tests total
+tests/                                # 553 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -582,9 +598,9 @@ tests/                                # 537 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_pseudonym_map.py             # 61 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans
+├── test_pseudonym_map.py             # 67 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans
 ├── test_text_deidentifier.py         # 30 tests: longest-first replacement, label re-match guard, exact + fuzzy verification
-├── test_deidentification_service.py  # 28 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
+├── test_deidentification_service.py  # 42 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
 ├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
 ├── test_cleanup_api.py               # 21 tests: cleanup path-traversal guards, .txt patterns, key file undeletable

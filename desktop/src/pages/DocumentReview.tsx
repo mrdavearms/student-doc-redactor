@@ -9,6 +9,7 @@ import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 
 export default function DocumentReview() {
+  const isDeidentify = useStore.getState().workflowMode === 'deidentify';
   const {
     detectionResults, currentDocIndex, userSelections,
     setCurrentDocIndex, toggleSelection, selectAll, deselectAll,
@@ -97,7 +98,7 @@ export default function DocumentReview() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Review Detected PII</h2>
-        <p className="text-sm text-slate-400 mt-1">Review and select which items to redact from each document.</p>
+        <p className="text-sm text-slate-400 mt-1">{isDeidentify ? 'Review and select which items to replace with labels.' : 'Review and select which items to redact from each document.'}</p>
       </div>
 
       {/* Progress bar */}
@@ -140,7 +141,7 @@ export default function DocumentReview() {
           </div>
           <span className="text-xs text-slate-400 flex items-center gap-1.5">
             {selectedCount}/{matches.length} selected
-            <HelpTip text="High confidence means the tool is very sure this is personal information. Medium means it's likely but worth checking. Items are pre-selected for redaction — uncheck any you want to keep." />
+            <HelpTip text="High confidence means the tool is very sure this is personal information. Medium means it's likely but worth checking. Items are pre-selected — uncheck any you want to keep." />
           </span>
         </div>
 
@@ -230,7 +231,7 @@ export default function DocumentReview() {
         <div className="flex items-center gap-2">
           <Plus size={16} className="text-primary-500" />
           <h3 className="text-sm font-medium text-slate-600">Add a Missed Item</h3>
-          <HelpTip text="If you spot something the tool didn't catch — a name, ID, or anything else — add it here and it will be redacted along with everything else." />
+          <HelpTip text="If you spot something the tool didn't catch — a name, ID, or anything else — add it here and it will be handled along with everything else." />
         </div>
         <div className="flex flex-wrap items-end gap-2 mt-3">
           <div className="flex-1 min-w-[200px]">

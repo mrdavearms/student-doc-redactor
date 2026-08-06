@@ -105,10 +105,11 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 interface RedactionProgressProps {
+  isDeidentify?: boolean;
   totalDocuments: number;
 }
 
-export default function RedactionProgress({ totalDocuments }: RedactionProgressProps) {
+export default function RedactionProgress({ totalDocuments, isDeidentify = false }: RedactionProgressProps) {
   const [commentIndex, setCommentIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const startTime = useRef(Date.now());
@@ -155,7 +156,7 @@ export default function RedactionProgress({ totalDocuments }: RedactionProgressP
             <ShieldCheck size={28} className="text-primary-600" />
           </motion.div>
         </div>
-        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Redacting Documents</h2>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{isDeidentify ? 'De-identifying Documents' : 'Redacting Documents'}</h2>
         <p className="text-sm text-slate-400 mt-1">
           Processing {totalDocuments} document{totalDocuments === 1 ? '' : 's'}...
         </p>
@@ -172,7 +173,7 @@ export default function RedactionProgress({ totalDocuments }: RedactionProgressP
           />
         </div>
         <div className="flex justify-between text-xs text-slate-400">
-          <span>Redacting PII...</span>
+          <span>{isDeidentify ? 'Replacing personal information…' : 'Redacting PII...'}</span>
           <span>{progress}%</span>
         </div>
       </div>

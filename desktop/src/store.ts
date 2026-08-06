@@ -89,6 +89,13 @@ interface AppState {
   lastOutputPath: string;
   setLastOutputPath: (path: string) => void;
 
+  // True while a redact/de-identify request is in flight. The Sidebar hides the
+  // pathway-change link while set: that link unmounts FinalConfirmation without
+  // aborting the request, which then navigates the user to completion from
+  // wherever they had moved to.
+  isProcessing: boolean;
+  setIsProcessing: (busy: boolean) => void;
+
   // Loading state
   loading: boolean;
   loadingMessage: string;
@@ -127,6 +134,7 @@ const initialState = {
   redactionResults: null,
   deidentifyResults: null,
   lastOutputPath: '',
+  isProcessing: false,
   loading: false,
   loadingMessage: '',
   error: null,
@@ -238,6 +246,8 @@ export const useStore = create<AppState>((set) => ({
   setDeidentifyResults: (results) => set({ deidentifyResults: results }),
 
   setLastOutputPath: (path) => set({ lastOutputPath: path }),
+
+  setIsProcessing: (busy) => set({ isProcessing: busy }),
 
   setLoading: (loading, message = '') => set({ loading, loadingMessage: message }),
 

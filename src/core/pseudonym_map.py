@@ -104,6 +104,17 @@ def clean_person_name(raw: str):
     return ' '.join(tokens)
 
 
+def _name_fullness(name: str):
+    """
+    How complete a written form of a name is, for choosing the one to show in
+    the key file. More words wins; ties go to whichever spells more of them out,
+    so "Sarah Williams" beats "S. Williams".
+    """
+    tokens = name.split()
+    spelled_out = sum(1 for t in tokens if len(t.strip(".'’-")) > 1)
+    return (len(tokens), spelled_out)
+
+
 def _contains_phrase(tokens, phrase_tokens) -> bool:
     """Whether phrase_tokens appears as a whole-word run inside tokens."""
     n = len(phrase_tokens)
@@ -282,13 +293,36 @@ class PseudonymMap:
         cand_norms.add(norm)
 
         matched = [
-            owner for owner in self._owners
+            (index, owner) for index, owner in enumerate(self._owners)
             if not owner.is_org
             and (norm in owner.variations or _norm(owner.full_name) in cand_norms)
         ]
         if matched:
-            matched.sort(key=lambda o: (o.priority, o.seq))
-            return matched[0].label
+            matched.sort(key=lambda pair: (pair[1].priority, pair[1].seq))
+            index, owner = matched[0]
+
+            # Record the surface forms this candidate introduces. Without this,
+            # a merge is forgotten the moment it returns: registering
+            # "S. Williams" then "Sarah Williams" merges correctly, but
+            # "Sarah W." is then unrecognised and mints a SECOND [Person N] for
+            # the same human — two labels for one person, and two rows in the
+            # key file. Only genuinely new forms are claimed; a form someone
+            # else already claims keeps its existing resolution, or adding it
+            # here would quietly break the shared-surname rule.
+            for variation in cand_norms:
+                if variation and variation not in self._claims:
+                    owner.variations.add(variation)
+                    kind = ('surname' if owner.surname and variation == owner.surname
+                            else 'other')
+                    self._claims[variation] = [(index, kind)]
+
+            # Prefer the fullest form as the display name, so the key file says
+            # "Sarah Williams" rather than whichever abbreviation appeared first.
+            if _name_fullness(full_name) > _name_fullness(owner.full_name):
+                owner.full_name = full_name
+
+            self._rebuild()
+            return owner.label
 
         self._person_counter += 1
         self._add_person(full_name, f'[Person {self._person_counter}]', _PRIORITY_PERSON)

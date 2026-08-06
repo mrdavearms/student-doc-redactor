@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, Bot, FolderOpen, FileText, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Bot, FolderOpen, FileText, Search, Trash2, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
@@ -15,7 +15,7 @@ export default function FinalConfirmation() {
     parentNames, familyNames, organisationNames, redactHeaderFooter,
     inputMode, filePath, workflowMode,
     navigateTo, setRedactionResults, setDeidentifyResults, setError,
-    lastOutputPath, setLastOutputPath,
+    lastOutputPath, setLastOutputPath, setIsProcessing,
   } = useStore();
 
   const isDeidentify = workflowMode === 'deidentify';
@@ -60,7 +60,8 @@ export default function FinalConfirmation() {
       ? suggestDeidentifiedFilename(stem(filePath), names)
       : suggestRedactedFilename(stem(filePath), names);
     const selected = await window.electronAPI?.saveFileAs?.(
-      joinPath(folderPath, suggestedName)
+      joinPath(folderPath, suggestedName),
+      isDeidentify ? 'txt' : 'pdf',
     );
     if (!selected) return;
     // The dialog opens in the source document's own folder, so the original is
@@ -99,8 +100,30 @@ export default function FinalConfirmation() {
   // A custom folder was chosen in folder mode but no path picked yet.
   const outputIncomplete = !isFileMode && outputMode === 'custom' && !customPath;
 
+  // De-identify can legitimately run with nothing selected: the user came from
+  // the "nothing found" screen and still wants the plain-text conversion.
+  // Redaction with nothing selected would just copy the file, so stays blocked.
+  const nothingSelected = totalSelected === 0;
+  const canProceed = (isDeidentify || !nothingSelected) && !outputIncomplete;
+
+  // Detection found nothing at all, so Back must not land on an empty review.
+  const totalMatches = detectionResults.documents.reduce(
+    (sum, d) => sum + d.matches.length, 0,
+  );
+  const backTarget = totalMatches === 0 ? 'no_pii_found' : 'document_review';
+
+  // Only navigate if the user is still here. The pathway-change link can unmount
+  // this screen mid-request; the pending promise still resolves, and without
+  // this guard it would yank them to completion from wherever they had gone.
+  const goToCompletionIfStillHere = () => {
+    if (useStore.getState().currentScreen === 'final_confirmation') {
+      navigateTo('completion');
+    }
+  };
+
   const handleRedact = async () => {
     setRedacting(true);
+    setIsProcessing(true);
     cancelRequestedRef.current = false;
     setCancelPending(false);
     // Single-document mode uses the Save As choice (folder + filename);
@@ -151,7 +174,7 @@ export default function FinalConfirmation() {
           return;
         }
         setDeidentifyResults(results);
-        navigateTo('completion');
+        goToCompletionIfStillHere();
         return;
       }
 
@@ -183,7 +206,7 @@ export default function FinalConfirmation() {
       }
 
       setRedactionResults(results);
-      navigateTo('completion');
+      goToCompletionIfStillHere();
     } catch (e: any) {
       if (cancelRequestedRef.current) {
         // Cancel was requested but the request itself failed — fall back to
@@ -205,6 +228,7 @@ export default function FinalConfirmation() {
       }
     } finally {
       setRedacting(false);
+      setIsProcessing(false);
     }
   };
 
@@ -287,7 +311,7 @@ export default function FinalConfirmation() {
   if (redacting) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
-        <RedactionProgress totalDocuments={detectionResults.documents.length} />
+        <RedactionProgress totalDocuments={detectionResults.documents.length} isDeidentify={isDeidentify} />
         <div className="mt-8">
           <button
             onClick={async () => {
@@ -517,6 +541,17 @@ export default function FinalConfirmation() {
         </p>
       </div>
 
+      {isDeidentify && nothingSelected && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+          <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">
+            Nothing is selected, so <span className="font-medium">nothing will be replaced</span>.
+            You will get the document&apos;s text exactly as it is. Read it before
+            sharing it or pasting it into an AI tool.
+          </p>
+        </div>
+      )}
+
       {isDeidentify && (
         <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
           <Bot size={18} className="text-amber-500 shrink-0 mt-0.5" />
@@ -531,19 +566,19 @@ export default function FinalConfirmation() {
       {/* Navigation */}
       <div className="flex justify-between pt-2">
         <button
-          onClick={() => navigateTo('document_review')}
+          onClick={() => navigateTo(backTarget)}
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors btn-press"
         >
-          <ArrowLeft size={16} /> Back to Review
+          <ArrowLeft size={16} /> Back
         </button>
 
         <div className="flex gap-2">
           <button
             onClick={handleRedact}
-            disabled={totalSelected === 0 || outputIncomplete}
+            disabled={!canProceed}
             className={`
               flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
-              ${totalSelected > 0 && !outputIncomplete
+              ${canProceed
                 ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm hover:shadow btn-press'
                 : 'bg-slate-100 text-slate-300 cursor-not-allowed'
               }

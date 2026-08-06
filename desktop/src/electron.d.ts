@@ -8,7 +8,7 @@ declare global {
       getApiToken?: () => Promise<string>;
       selectFolder: () => Promise<string | null>;
       selectFile?: () => Promise<string | null>;
-      saveFileAs?: (defaultPath?: string) => Promise<string | null>;
+      saveFileAs?: (defaultPath?: string, kind?: 'pdf' | 'txt') => Promise<string | null>;
       openExternal: (url: string) => Promise<void>;
 
       // Each returns a cleanup function for useEffect
