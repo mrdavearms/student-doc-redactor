@@ -206,6 +206,9 @@ class DeidentifyDocumentResultResponse(BaseModel):
     # Images can't carry into a text output, so their content is absent rather
     # than de-identified — surfaced so the omission isn't silent.
     image_warnings: List[str] = []
+    # Real names by construction (post-run NER sweep) — response-only, never
+    # logged or written to any file.
+    leftover_name_warnings: List[str] = []
     error_message: Optional[str] = None
     quarantine_path: Optional[str] = None
 

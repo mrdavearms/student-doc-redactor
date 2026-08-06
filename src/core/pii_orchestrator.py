@@ -35,6 +35,36 @@ def _get_shared_nlp_engine():
         return _NLP_ENGINE
 
 
+def find_person_entities(text: str) -> List[str]:
+    """
+    PERSON entities in `text`, via the shared spaCy engine.
+
+    The de-identify safety net: after replacement, the OUTPUT is swept for
+    anything that still looks like a name — catching what detection missed,
+    which the string-based verifier structurally cannot. Returns [] when NER
+    is unavailable (Streamlit degraded mode): the sweep is a net, never a
+    dependency.
+    """
+    if not text or not text.strip():
+        return []
+    try:
+        engine = _get_shared_nlp_engine()
+        nlp = engine.nlp["en"]
+        doc = nlp(text)
+        seen, out = set(), []
+        for ent in doc.ents:
+            if ent.label_ != "PERSON":
+                continue
+            name = " ".join(ent.text.split())
+            key = name.lower()
+            if len(name) >= 3 and key not in seen:
+                seen.add(key)
+                out.append(name)
+        return out
+    except Exception:
+        return []
+
+
 # Presidio entity types that are too broad for this use case.
 # LOCATION/GPE/FAC flag general suburbs/cities that are not student PII.
 # DATE_TIME flags meeting and review dates that must not be redacted.

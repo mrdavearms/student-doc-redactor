@@ -737,3 +737,55 @@ class TestNothingReplacedIsSaidPlainly:
             )
             body = results.document_results[0].output_path.read_text(encoding='utf-8')
             assert "NOTHING WAS REPLACED" not in body
+
+
+class TestNerSweep:
+    """After replacement, the OUTPUT is swept for anything NER still reads as
+    a person — the net under names detection never found."""
+
+    def test_undetected_name_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = ("Billy Bob attended the session. Report prepared by "
+                    "Jacinta Nguyen and reviewed the following week.")
+            _make_pdf(doc, [text])
+            # Only the student was detected/selected — Jacinta was missed.
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            r = results.document_results[0]
+            assert r.success
+            assert any("Jacinta" in w for w in r.leftover_name_warnings)
+
+    def test_clean_output_has_no_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is in Year 3 and enjoys reading."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert results.document_results[0].leftover_name_warnings == []
+
+    def test_deliberately_deselected_name_is_not_nagged_about(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob met with Sarah Williams on Tuesday."
+            _make_pdf(doc, [text])
+            matches = [_match("Billy Bob"), _match("Sarah Williams", "Person name (NER)")]
+            req = _request(tmp, doc, matches, text)
+            req.user_selections[f"{doc}_1"] = False  # user KEEPS Sarah Williams
+            results = DeidentificationService().execute(req)
+            r = results.document_results[0]
+            assert not any("Sarah" in w for w in r.leftover_name_warnings)
+
+    def test_warnings_never_reach_the_audit_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob was seen by Jacinta Nguyen."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Billy Bob")], text)
+            )
+            assert "Jacinta" not in results.log_content
+            assert "Nguyen" not in results.log_content

@@ -29,6 +29,7 @@ from src.core.pseudonym_map import (
     is_person_category,
 )
 from src.core.role_suggester import suggest_role
+from src.core.pii_orchestrator import find_person_entities
 from src.core.redactor import (
     FOOTER_ZONE_FRACTION,
     HEADER_ZONE_FRACTION,
@@ -38,6 +39,7 @@ from src.core.redactor import (
 from src.core.text_deidentifier import (
     deidentify_text,
     fuzzy_leftovers,
+    strip_labels,
     verify_deidentified,
 )
 
@@ -103,6 +105,10 @@ class DeidentifyDocumentResult:
     verification_failures: List[str] = field(default_factory=list)
     ocr_warnings: List[str] = field(default_factory=list)
     image_warnings: List[str] = field(default_factory=list)
+    # Names the post-run NER sweep found still readable in the output — real
+    # names by construction, so UI-response only: never the audit log, never
+    # any file in the output folder.
+    leftover_name_warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
     quarantine_path: Optional[Path] = None
 
@@ -277,9 +283,16 @@ class DeidentificationService:
             if should_cancel is not None and should_cancel():
                 results.cancelled = True
                 break
+            all_matches = request.detected_pii.get(doc, {}).get('matches', [])
+            selected_ids = {id(m) for m in selected_by_doc[doc]}
+            deselected_texts = {
+                (m.text or '').strip().lower()
+                for m in all_matches if id(m) not in selected_ids
+            } - {(m.text or '').strip().lower() for m in selected_by_doc[doc]}
             results.document_results.append(self._process_document(
                 doc=doc,
                 selected_matches=selected_by_doc[doc],
+                deselected_texts=deselected_texts,
                 text_data=request.detected_pii.get(doc, {}).get('text_data', {}),
                 pmap=pmap,
                 output_folder=output_folder,
@@ -538,6 +551,7 @@ class DeidentificationService:
         self,
         doc: Path,
         selected_matches: List,
+        deselected_texts: Set[str],
         text_data: Dict,
         pmap: PseudonymMap,
         output_folder: Path,
@@ -685,6 +699,22 @@ class DeidentificationService:
 
         result.output_path = output_path
         result.success = True
+
+        # The net under everything: sweep the finished output for anything NER
+        # still reads as a person. Catches names DETECTION missed, which the
+        # string verifier structurally cannot. Warnings, not quarantine — NER
+        # false positives are common enough that quarantining correct output
+        # would erode trust; strings the user deliberately deselected are
+        # excluded because their choice stands.
+        sweep_source = strip_labels(
+            "\n".join(page_outputs[n] for n in sorted(page_outputs)), labels
+        )
+        for name in find_person_entities(sweep_source):
+            if name.lower() in deselected_texts:
+                continue
+            result.leftover_name_warnings.append(name)
+            if len(result.leftover_name_warnings) >= 10:
+                break
         return result
 
     @staticmethod

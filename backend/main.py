@@ -552,6 +552,7 @@ def deidentify_documents(req: DeidentifyRequestBody):
                     verification_failures=r.verification_failures,
                     ocr_warnings=r.ocr_warnings,
                     image_warnings=r.image_warnings,
+                    leftover_name_warnings=r.leftover_name_warnings,
                     error_message=r.error_message,
                     quarantine_path=str(r.quarantine_path) if r.quarantine_path else None,
                 )
