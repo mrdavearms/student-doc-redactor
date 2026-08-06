@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (553 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (613 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 72 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 87 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -93,6 +93,8 @@ FastAPI (backend/main.py)
 ├── /api/pii/detect   → returns matches, caches PIIMatch objects server-side
 ├── /api/redact       → uses cached detection data + user selections
 ├── /api/deidentify   → same cache/selections, writes labelled .txt instead
+├── /api/deidentify/people → who was found, with a proposed role + its evidence
+├── /api/deidentify/labels → labels for a proposed assignment (preview)
 └── /api/preview      → renders PDF page at 150 DPI, returns base64 PNG
 ```
 
@@ -109,15 +111,15 @@ De-identification reads the extracted text already in `_detection_cache` rather 
 
 ### Screen Flow
 
-The desktop app has a 7-screen wizard flow (setup + mode choice + 5 workflow steps):
+The desktop app has an 8-screen flow (setup + mode choice + 5 or 6 workflow steps):
 
 ```
-setup → mode_selection → folder_selection → conversion_status → document_review → final_confirmation → completion
+setup → mode_selection → folder_selection → conversion_status → document_review → [people_review] → final_confirmation → completion
 ```
 
 The `setup` screen checks for LibreOffice and Tesseract on first launch, with install guidance and a "Check Again" button. It is skipped on subsequent launches when dependencies are present.
 
-`mode_selection` is the app's landing screen (`initialState.currentScreen`). Like `setup` it is **not** in the `SCREENS` array — step numbering still runs 1–5, and the Sidebar shows the chosen pathway as a badge with a "change" link rather than as a step. `completion` renders `<DeidentifyCompletion />` or `<Completion />` depending on `workflowMode`, which keeps the redact completion screen untouched.
+`people_review` appears in **de-identify mode only** — hence `screensFor(mode)` rather than a fixed `SCREENS` array (6 steps de-identify, 5 redact). `mode_selection` is the app's landing screen (`initialState.currentScreen`). Like `setup` it is **not** in the step ladder — step numbering still runs 1–5, and the Sidebar shows the chosen pathway as a badge with a "change" link rather than as a step. `completion` renders `<DeidentifyCompletion />` or `<Completion />` depending on `workflowMode`, which keeps the redact completion screen untouched.
 
 In the desktop app, `App.tsx` switches on `currentScreen` from the Zustand store. Layout wraps children in `<AnimatePresence mode="wait">` with `key={currentScreen}` for animated transitions.
 
@@ -133,7 +135,8 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `src/core/presidio_recognizers.py` | 6 custom Australian Presidio recognizers |
 | `src/core/nickname_map.py` | Curated ~100-entry Australian nickname dictionary with reverse lookup |
 | `src/core/redactor.py` | **Dual-path redaction** (text-layer + OCR image), widget deletion, metadata stripping |
-| `src/core/pseudonym_map.py` | De-identify mode: builds privacy-safe labels, person-identity merge rules |
+| `src/core/pseudonym_map.py` | De-identify mode: privacy-safe labels, roles, person-identity merge rules |
+| `src/core/role_suggester.py` | Proposes a person's role from surrounding text, with quotable evidence |
 | `src/core/text_deidentifier.py` | De-identify mode: single-pass label replacement + exact/fuzzy verification |
 | `src/core/text_extractor.py` | Text + OCR extraction from PDFs |
 | `src/core/document_converter.py` | LibreOffice Word → PDF conversion |
@@ -163,6 +166,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/components/UpdateBanner.tsx` | Auto-update notification banner |
 | `desktop/src/hooks/useUpdater.ts` | Custom hook for electron-updater integration |
 | `desktop/src/pages/ModeSelection.tsx` | Step 0 — choose redact or de-identify |
+| `desktop/src/pages/PeopleReview.tsx` | "Who's who?" — confirm each person's role (de-identify only) |
 | `desktop/src/pages/DeidentifyCompletion.tsx` | Completion screen for de-identify mode (leads with the key file) |
 | `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
 
@@ -482,6 +486,26 @@ The branch now claims any genuinely new form for the merged owner and rebuilds. 
 
 `_page_text` drops only as many occurrences of a line as actually sat in the zone, taking header lines from the top of the page and footer lines from the bottom. Matching by bare string across the whole page deleted body content that merely repeated a letterhead line — a template report whose header block contains "Comments" lost every "Comments" heading in the body too, silently and with no warning. `_zone_lines` therefore returns `{'header': Counter, 'footer': Counter}` per page, not a flat set.
 
+### 51. Roles are PROPOSED, never assumed
+
+The tool cannot know whether "Sarah Williams" is a classroom teacher or a speech pathologist, and getting it wrong is worse than leaving it vague: `[Teacher 1]` over a paediatrician's advice invites an AI to reason about it as classroom observation. `role_suggester.suggest_role()` therefore returns a role **and the phrase that suggested it**, and never emits `likely` without a quotable keyword. No evidence, or two roles tied, ⇒ `unknown` ⇒ `[Other person]` ⇒ the user is asked. `'guardian'` sits under both `parent` and `carer` deliberately so it ties. The bare word `'student'` is deliberately NOT a keyword — it is near-ubiquitous and almost always means the report's subject, who is excluded from the screen.
+
+### 52. Custom role text is the one place rule #42 can be bypassed
+
+A user-typed role goes straight into a label, so "Billy's mum" would smuggle a real name past the no-names invariant. `PseudonymMap.sanitise_custom_role()` rejects text containing ANY owner's variation — student, parents, family, other discovered people **and organisations** — using `redactor._pii_visible_in_text` so it inherits the whole-word semantics ("Ann" inside "Annual" is not a match) rather than re-deriving them. Rejected text falls back to `[Other person]`.
+
+### 53. Role numbering is keyed on the rendered stem, across built-in AND custom roles
+
+`_assign_role_labels()` buckets owners by their final bracket text, not by role key. Bucketing per key would let two people who both typed "Speech pathologist" — or one assigned `[Health professional]` while another typed that exact text — emit identical bare labels and become indistinguishable in the output: the rule #44 meaning failure, user-induced. Numbering appears only when 2+ owners share a stem, so one teacher is `[Teacher]` and three are `[Teacher 1..3]`. Reassigning one person can therefore renumber others — which is why `/api/deidentify/labels` returns the whole set and the UI re-renders every card.
+
+`_rebuild()` runs `_assign_role_labels()` and `_resolve_shared_tokens()` as two separate passes on purpose: role numbering must not be able to corrupt the priority logic that rule #44's identity resolution depends on.
+
+### 54. People-review answers die with any selection change
+
+`personRoles` / `personCustomLabels` / `ignoredPeople` / `peopleReviewed` are only meaningful for the exact set of people the current selections produce. `document_review` sits BEFORE `people_review`, so the user can always go back and deselect the very person they just classified. Every selection mutation — `toggleSelection`, `selectAll`, `deselectAll`, `addManualMatch` — clears them, as do `setDetectionResults` and `setWorkflowMode`. Same class of staleness rule #41 guards for `detectionParamsKey`; they are deliberately NOT part of that fingerprint.
+
+The people list itself is **response-only**: it carries real names by construction and must never be written to disk or into the audit log.
+
 ### 50. The output folder is only safe to share when it is a SEPARATE folder
 
 The UI promises everything in the output folder is safe to upload. That holds for the default `deidentified/` subfolder, but not when the user points output at the folder holding the originals — where the unredacted source documents and the key file sit alongside the output. In single-document mode this is the **default** path, because the Save As dialog opens in the source document's own folder.
@@ -543,6 +567,11 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | `userSelections` | Record<string, boolean> | `"docPath_matchIdx"` → selected |
 | `redactionResults` | RedactionResults \| null | Final redaction outcomes |
 | `deidentifyResults` | DeidentifyResults \| null | Final de-identification outcomes (incl. `key_file_path`) |
+| `personRoles` | Record<string,string> | Confirmed role per discovered person — dies with any selection change |
+| `personCustomLabels` | Record<string,string> | User-typed role text, sanitised backend-side |
+| `ignoredPeople` | string[] | Names marked "not a person"; text still replaced via category fallback |
+| `peopleReviewed` | boolean | Whether the user has been through the Who's who screen |
+| `isProcessing` | boolean | A redact/de-identify request is in flight — hides the pathway-change link |
 | `loading` | boolean | Generic loading overlay active |
 | `loadingMessage` | string | Loading overlay text |
 | `error` | string \| null | Global error toast message |
@@ -584,7 +613,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 553 tests total
+tests/                                # 613 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -598,10 +627,12 @@ tests/                                # 553 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_pseudonym_map.py             # 67 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans
+├── test_pseudonym_map.py             # 88 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans
 ├── test_text_deidentifier.py         # 30 tests: longest-first replacement, label re-match guard, exact + fuzzy verification
-├── test_deidentification_service.py  # 42 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
+├── test_deidentification_service.py  # 38 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
+├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
+├── test_person_roles_api.py          # 12 tests: /people + /labels contracts, roles reaching output, renumbering
 ├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
 ├── test_cleanup_api.py               # 21 tests: cleanup path-traversal guards, .txt patterns, key file undeletable
 ├── test_session_state.py             # 2 tests: session state key initialisation
@@ -712,6 +743,8 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 - **Auto-update**: Implemented via `electron-updater`. Checks on launch + manual "Check for Updates" in About modal. Uses `latest.yml`/`latest-mac.yml` from GitHub Releases.
 - **Setup screen**: First-run LibreOffice + NER detection (`desktop/src/pages/Setup.tsx`). Shows download link, "Check Again", and "Skip for now". NER failure is now a blocking error.
 - **Fuzzy name matching**: Nickname matching is now implemented via `nickname_map.py`. True fuzzy/edit-distance matching remains a future feature.
+- **spaCy mislabels professions as `NRP (NER)`**: "Paediatrician", "Psychologist" etc. are detected as nationality/religious/political-group entities and so are offered for removal. Harmless in redact mode (a black box over a job title), but in de-identify mode removing the job title costs the AI real context while gaining no privacy — the role label already conveys it. The review screen lets the user deselect them. Not worked around, because changing detection would affect the shipped redact pathway too.
+- **Non-student nicknames aren't tracked**: `include_nicknames=True` is only passed for the student (`pseudonym_map.py`), so `sanitise_custom_role` would not catch a custom role spelling out a *colleague's* nickname ("Genny" for Genevieve). Low likelihood for job titles; documented rather than silently assumed away.
 - **GLiNER removed** (March 2026): GLiNER and PyTorch removed for bundle simplification. Two-engine architecture: regex + Presidio/spaCy.
 - **Batch processing** (multiple students at once): Not implemented.
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words.

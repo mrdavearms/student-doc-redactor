@@ -66,7 +66,13 @@ When you open the app it asks which of these you want. Both work on the same doc
 | **You get** | Redacted PDFs | Plain text files (`.txt`) |
 | **Use it when** | Sharing or filing a document | Pasting a report into an AI tool for help |
 
-**About the labels.** Every person becomes a plain label — `[Student]`, `[Parent 1]`, `[Person 2]` — that contains no part of their real name. Initials like `[Student BB]` are deliberately *not* used: in a small school community, initials identify a child almost as well as the name does. If a report mentions a classmate or sibling, they get their own separate label, so an AI reading it won't confuse one child with another.
+**About the labels.** Every person becomes a plain label — `[Student]`, `[Parent]`, `[Teacher 2]` — that contains no part of their real name. Initials like `[Student BB]` are deliberately *not* used: in a small school community, initials identify a child almost as well as the name does. If a report mentions a classmate or sibling, they get their own separate label, so an AI reading it won't confuse one child with another.
+
+**Telling the tool who people are.** A student file is full of different people — teachers, principals, aides, paediatricians, psychologists, speech pathologists, OTs, NDIS workers, social workers, guardians, carers and parents, often several of each. Which one someone is changes how an AI reads their comments: a paediatrician's medication advice is not a classroom observation.
+
+The tool can't know, so it doesn't pretend to. After you review what it found, a **Who's who?** step lists each person with a suggested role *and the reason for it* — "Looks like a health professional — 'speech pathologist' appears nearby." You can accept the lot with one click, or correct any of them from a dropdown. Where there's no clue in the text it says so plainly and leaves them as `[Other person]` rather than guessing. You can also type your own role, like "Speech pathologist", when the general one loses something that matters — or mark something as "not a person" when the tool has picked up a form label by mistake.
+
+One thing worth knowing: a specific role is more useful to the AI but slightly more identifying in a small community. "[Speech pathologist]" plus the surrounding detail may point at one individual in a way "[Other person]" doesn't. Use a general role if you're unsure — the choice is yours, and either way the real name is gone.
 
 **The key file.** De-identifying also saves a file called `DO-NOT-UPLOAD-name-key.txt` **with your original documents** — never in the output folder. It lists which label stands for which real person, so you can turn an AI's answer back into real names afterwards. Keep it private and never upload it. It is kept out of the output folder on purpose, so everything in there is safe to share.
 
