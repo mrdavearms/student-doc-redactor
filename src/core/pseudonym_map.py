@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from pii_detector import generate_name_variations
+from redactor import _pii_visible_in_text
 
 
 # Structured PII maps straight to a generic token: once the value is gone there
@@ -34,6 +35,32 @@ CATEGORY_LABELS = {
 
 STUDENT_LABEL = '[Student]'
 SHARED_SURNAME_LABEL = '[Family name]'
+
+# Role -> label stem. The user confirms a role per discovered person; the tool
+# proposes but never assumes, because a wrong role (a paediatrician labelled
+# [Teacher]) makes an AI misread clinical advice as classroom observation.
+ROLE_LABELS = {
+    'student': 'Student',          # internal — the subject is never classified
+    'organisation': 'Organisation',
+    'parent': 'Parent',
+    'carer': 'Carer',
+    'family_member': 'Family member',
+    'teacher': 'Teacher',
+    'school_staff': 'School staff',
+    'health': 'Health professional',
+    'support_worker': 'Support worker',
+    'other_student': 'Other student',
+    'other': 'Other person',
+}
+
+# Offered in the UI dropdown, in this order.
+ASSIGNABLE_ROLES = [
+    'parent', 'carer', 'family_member', 'teacher', 'school_staff',
+    'health', 'support_worker', 'other_student', 'other',
+]
+
+DEFAULT_ROLE = 'other'
+MAX_CUSTOM_ROLE_LEN = 30
 FALLBACK_NAME_LABEL = '[name]'
 FALLBACK_LABEL = '[redacted]'
 
@@ -141,13 +168,32 @@ def is_person_category(category: str) -> bool:
 @dataclass
 class _Owner:
     """A real person or organisation and the label standing in for them."""
-    label: str
     full_name: str
     priority: int
     seq: int
+    role: str = DEFAULT_ROLE
+    custom_label: Optional[str] = None
     is_org: bool = False
     variations: Set[str] = field(default_factory=set)
     surname: Optional[str] = None
+    # Derived by _assign_role_labels(); never set directly.
+    label: str = ''
+
+    @property
+    def stem(self) -> str:
+        """The bracket text before any number is added."""
+        return self.custom_label or ROLE_LABELS.get(self.role, ROLE_LABELS[DEFAULT_ROLE])
+
+
+@dataclass
+class PersonInfo:
+    """One discovered person, for the classification screen. Response-only —
+    it carries a real name and must never be written to disk."""
+    full_name: str
+    label: str
+    role: str
+    custom_label: Optional[str]
+    source: str
 
 
 class PseudonymMap:
@@ -176,17 +222,19 @@ class PseudonymMap:
         self._variation_labels: Dict[str, str] = {}
 
         if student_name and student_name.strip():
-            self._add_person(student_name, STUDENT_LABEL, _PRIORITY_STUDENT,
+            self._add_person(student_name, 'student', _PRIORITY_STUDENT,
                              include_nicknames=True)
 
-        for i, name in enumerate(self._clean(parent_names), start=1):
-            self._add_person(name, f'[Parent {i}]', _PRIORITY_PARENT)
+        # Which box the user typed a name into is itself a role statement, so
+        # these start classified. They stay editable on the review screen.
+        for name in self._clean(parent_names):
+            self._add_person(name, 'parent', _PRIORITY_PARENT)
 
-        for i, name in enumerate(self._clean(family_names), start=1):
-            self._add_person(name, f'[Family member {i}]', _PRIORITY_FAMILY)
+        for name in self._clean(family_names):
+            self._add_person(name, 'family_member', _PRIORITY_FAMILY)
 
-        for i, name in enumerate(self._clean(organisation_names), start=1):
-            self._add_org(name, f'[Organisation {i}]')
+        for name in self._clean(organisation_names):
+            self._add_org(name)
 
         self._rebuild()
 
@@ -196,7 +244,7 @@ class PseudonymMap:
     def _clean(names: Optional[List[str]]) -> List[str]:
         return [n.strip() for n in (names or []) if n and n.strip()]
 
-    def _add_person(self, full_name: str, label: str, priority: int,
+    def _add_person(self, full_name: str, role: str, priority: int,
                     include_nicknames: bool = False) -> _Owner:
         variations, nicknames = generate_name_variations(
             full_name, include_nicknames=include_nicknames
@@ -205,8 +253,8 @@ class PseudonymMap:
         surname = _norm(parts[-1]) if len(parts) >= 2 else None
 
         owner = _Owner(
-            label=label, full_name=full_name, priority=priority,
-            seq=self._seq, surname=surname,
+            full_name=full_name, priority=priority, seq=self._seq,
+            role=role, surname=surname,
         )
         self._seq += 1
         self._owners.append(owner)
@@ -224,10 +272,10 @@ class PseudonymMap:
         owner.variations.add(_norm(full_name))
         return owner
 
-    def _add_org(self, org_name: str, label: str) -> _Owner:
+    def _add_org(self, org_name: str) -> _Owner:
         owner = _Owner(
-            label=label, full_name=org_name, priority=_PRIORITY_ORG,
-            seq=self._seq, is_org=True,
+            full_name=org_name, priority=_PRIORITY_ORG, seq=self._seq,
+            role='organisation', is_org=True,
         )
         self._seq += 1
         self._owners.append(owner)
@@ -247,6 +295,37 @@ class PseudonymMap:
         return owner
 
     def _rebuild(self) -> None:
+        """Recompute owner labels, then resolve every claimed variation.
+
+        Two separate passes on purpose. Role numbering and shared-token
+        priority resolution are orthogonal jobs, and fusing them risks a
+        numbering bug silently corrupting the identity logic rule #44 relies on.
+        """
+        self._assign_role_labels()
+        self._resolve_shared_tokens()
+
+    def _assign_role_labels(self) -> None:
+        """Give each owner its label: the role stem, numbered only when shared.
+
+        Numbering is keyed on the FINAL RENDERED STEM across built-in and custom
+        roles together. Bucketing per role key instead would let two people who
+        both typed "Speech pathologist" — or one assigned [Health professional]
+        while another typed that same text — emit identical bare labels and
+        become indistinguishable in the output.
+        """
+        buckets: Dict[str, List[_Owner]] = {}
+        for owner in self._owners:
+            buckets.setdefault(_norm(owner.stem), []).append(owner)
+
+        for group in buckets.values():
+            group.sort(key=lambda o: o.seq)
+            if len(group) == 1:
+                group[0].label = f'[{group[0].stem}]'
+            else:
+                for n, owner in enumerate(group, start=1):
+                    owner.label = f'[{owner.stem} {n}]'
+
+    def _resolve_shared_tokens(self) -> None:
         """Resolve every claimed variation to a single label."""
         resolved: Dict[str, str] = {}
         for key, claims in self._claims.items():
@@ -271,7 +350,7 @@ class PseudonymMap:
 
     # ── Registration ─────────────────────────────────────────────────────
 
-    def register_person(self, full_name: str) -> str:
+    def register_person(self, full_name: str, role: str = None) -> str:
         """
         Return the label for a person discovered during detection, minting a new
         [Person N] only when they are genuinely someone new.
@@ -362,6 +441,88 @@ class PseudonymMap:
             if len(phrase) > best_len and _contains_phrase(tokens, phrase):
                 best_len, best_label = len(phrase), label
         return best_label
+
+    def _find_owner(self, full_name: str) -> Optional['_Owner']:
+        """Locate an owner by any written form of their name."""
+        cleaned = clean_person_name(full_name) or (full_name or '').strip()
+        if not cleaned:
+            return None
+        norm = _norm(cleaned)
+        candidates, _ = generate_name_variations(cleaned, include_nicknames=False)
+        cand_norms = {_norm(v) for v in candidates if v.strip()} | {norm}
+        matched = [
+            owner for owner in self._owners
+            if norm in owner.variations or _norm(owner.full_name) in cand_norms
+        ]
+        if not matched:
+            return None
+        matched.sort(key=lambda o: (o.priority, o.seq))
+        return matched[0]
+
+    def assign_role(self, full_name: str, role_key: str,
+                    custom_label: str = None) -> Optional[str]:
+        """
+        Apply the user's answer from the classification screen.
+
+        Resolves through the same merge rule as everything else, so answering
+        for "Ms Williams" also answers for "Sarah Williams".
+        """
+        owner = self._find_owner(full_name)
+        if owner is None or owner.role == 'student':
+            # The subject of the report is never reclassified.
+            return None
+        if custom_label:
+            safe = self.sanitise_custom_role(custom_label)
+            owner.custom_label = safe
+            owner.role = role_key if role_key in ROLE_LABELS else DEFAULT_ROLE
+            if safe is None:
+                owner.role = DEFAULT_ROLE
+        else:
+            owner.custom_label = None
+            owner.role = role_key if role_key in ROLE_LABELS else DEFAULT_ROLE
+        self._rebuild()
+        return owner.label
+
+    def sanitise_custom_role(self, text: str) -> Optional[str]:
+        """
+        Reduce a user-typed role to a safe label stem, or None if unusable.
+
+        A custom role is free text going straight into a label, so it is the one
+        place rule #42 could be bypassed by an honest mistake — a teacher typing
+        "Billy's mum" or "Sarah's colleague" as a role. Rejected if it contains
+        ANY owner's name variation, checked with the same whole-word helper
+        redaction verification uses so "Ann" inside "Annual" is not a false
+        positive and hyphen/space variants are still caught.
+        """
+        cleaned = ' '.join((text or '').split())
+        if not cleaned or len(cleaned) > MAX_CUSTOM_ROLE_LEN:
+            return None
+        if not re.fullmatch(r"[A-Za-z][A-Za-z '’-]*", cleaned):
+            return None
+
+        haystack = cleaned.lower()
+        for owner in self._owners:
+            for variation in owner.variations:
+                if len(variation) >= 3 and _pii_visible_in_text(variation, haystack):
+                    return None
+        return cleaned[0].upper() + cleaned[1:]
+
+    def people(self) -> List['PersonInfo']:
+        """Discovered and user-entered people, for the classification screen.
+
+        Excludes the student (never reclassified) and organisations.
+        """
+        out = []
+        for owner in sorted(self._owners, key=lambda o: o.seq):
+            if owner.is_org or owner.role == 'student':
+                continue
+            source = ('entered' if owner.priority in (_PRIORITY_PARENT, _PRIORITY_FAMILY)
+                      else 'detected')
+            out.append(PersonInfo(
+                full_name=owner.full_name, label=owner.label, role=owner.role,
+                custom_label=owner.custom_label, source=source,
+            ))
+        return out
 
     def all_labels(self) -> Set[str]:
         """Every label this map can emit — used to guard against re-matching."""

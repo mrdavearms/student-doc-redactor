@@ -5,6 +5,7 @@ import re
 
 import pytest
 from pseudonym_map import (
+    ASSIGNABLE_ROLES,
     clean_person_name,
     PseudonymMap,
     STUDENT_LABEL,
@@ -72,12 +73,12 @@ class TestPersonIdentity:
         pmap = PseudonymMap(student_name="Billy Bob")
         label = pmap.register_person("Billy Chen")
         assert label != STUDENT_LABEL
-        assert label == "[Person 1]"
+        assert label == "[Other person]"
 
     def test_classmate_surname_maps_to_the_classmate(self):
         pmap = PseudonymMap(student_name="Billy Bob")
         pmap.register_person("Billy Chen")
-        assert pmap.label_for("Chen", "Person name (NER variation)") == "[Person 1]"
+        assert pmap.label_for("Chen", "Person name (NER variation)") == "[Other person]"
 
     def test_shared_given_name_resolves_to_the_student(self):
         pmap = PseudonymMap(student_name="Billy Bob")
@@ -88,7 +89,7 @@ class TestPersonIdentity:
         pmap = PseudonymMap(student_name="Billy Bob")
         pmap.register_person("Billy Chen")
         assert pmap.label_for("Billy Bob", "Student name") == STUDENT_LABEL
-        assert pmap.label_for("Billy Chen", "Person name (NER)") == "[Person 1]"
+        assert pmap.label_for("Billy Chen", "Person name (NER)") == "[Other person]"
 
     def test_shared_surname_becomes_neutral_family_label(self):
         pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mrs Bob"])
@@ -97,8 +98,8 @@ class TestPersonIdentity:
     def test_sibling_gets_own_label_but_shares_family_name(self):
         pmap = PseudonymMap(student_name="Billy Bob")
         sibling = pmap.register_person("Sally Bob")
-        assert sibling == "[Person 1]"
-        assert pmap.label_for("Sally", "Person name (NER variation)") == "[Person 1]"
+        assert sibling == "[Other person]"
+        assert pmap.label_for("Sally", "Person name (NER variation)") == "[Other person]"
         assert pmap.label_for("Bob", "Student name") == SHARED_SURNAME_LABEL
 
     def test_initialised_form_merges_with_full_name(self):
@@ -121,7 +122,7 @@ class TestPersonIdentity:
         pmap = PseudonymMap(student_name="Billy Bob", family_names=["Bob"])
         label = pmap.register_person("Bob")
         assert label in (STUDENT_LABEL, "[Family member 1]")
-        assert not any(l.startswith("[Person ") for l, _ in pmap.key_entries())
+        assert not any(l.startswith("[Other person") for l, _ in pmap.key_entries())
 
     def test_unrelated_people_sharing_a_surname_are_distinct(self):
         pmap = PseudonymMap(student_name="Billy Bob")
@@ -132,9 +133,11 @@ class TestPersonIdentity:
 
     def test_person_numbering_is_stable_and_sequential(self):
         pmap = PseudonymMap(student_name="Billy Bob")
-        assert pmap.register_person("Sarah Williams") == "[Person 1]"
-        assert pmap.register_person("John Citizen") == "[Person 2]"
-        assert pmap.register_person("Sarah Williams") == "[Person 1]"
+        assert pmap.register_person("Sarah Williams") == "[Other person]"
+        assert pmap.register_person("John Citizen") == "[Other person 2]"
+        # Labels renumber as people are added; the map is authoritative, not the
+        # return value of an earlier call.
+        assert pmap.label_for("Sarah Williams", "Person name (NER)") == "[Other person 1]"
 
 
 # ---------------------------------------------------------------------------
@@ -152,13 +155,13 @@ class TestLabelAssignment:
     def test_family_members_numbered_in_entry_order(self):
         pmap = PseudonymMap(student_name="Billy Bob",
                             family_names=["Ada Kowalski"])
-        assert pmap.label_for("Ada Kowalski", "Family member (user-provided)") == "[Family member 1]"
+        assert pmap.label_for("Ada Kowalski", "Family member (user-provided)") == "[Family member]"
 
     def test_organisation_full_name_and_significant_words(self):
         pmap = PseudonymMap(student_name="Billy Bob",
                             organisation_names=["Riverside Primary School"])
-        assert pmap.label_for("Riverside Primary School", "Organisation name") == "[Organisation 1]"
-        assert pmap.label_for("Riverside", "Organisation name") == "[Organisation 1]"
+        assert pmap.label_for("Riverside Primary School", "Organisation name") == "[Organisation]"
+        assert pmap.label_for("Riverside", "Organisation name") == "[Organisation]"
 
     def test_generic_org_words_are_not_claimed(self):
         pmap = PseudonymMap(student_name="Billy Bob",
@@ -217,12 +220,12 @@ class TestKeyEntriesAndNotes:
         pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mary Bloggs"])
         entries = dict(pmap.key_entries())
         assert entries[STUDENT_LABEL] == "Billy Bob"
-        assert entries["[Parent 1]"] == "Mary Bloggs"
+        assert entries["[Parent]"] == "Mary Bloggs"
 
     def test_key_entries_include_discovered_people(self):
         pmap = PseudonymMap(student_name="Billy Bob")
         pmap.register_person("Sarah Williams")
-        assert ("[Person 1]", "Sarah Williams") in pmap.key_entries()
+        assert ("[Other person]", "Sarah Williams") in pmap.key_entries()
 
     def test_ambiguity_note_records_shared_first_name(self):
         pmap = PseudonymMap(student_name="Billy Bob")
@@ -298,7 +301,7 @@ class TestJunkPersonCandidates:
     def test_junk_span_mints_no_person(self):
         pmap = PseudonymMap(student_name="Billy Bob")
         pmap.register_person("Billy Bob        Date of Birth")
-        assert not any(l.startswith("[Person ") for l, _ in pmap.key_entries())
+        assert not any(l.startswith("[Other person") for l, _ in pmap.key_entries())
 
     def test_span_containing_a_known_name_resolves_to_that_person(self):
         """The student must not become [name] on the one line NER over-grabbed."""
@@ -342,14 +345,14 @@ class TestMergeBookkeeping:
         pmap.register_person("S. Williams")
         pmap.register_person("Sarah Williams")
         pmap.register_person("Sarah W.")
-        people = [l for l, _ in pmap.key_entries() if l.startswith("[Person ")]
-        assert people == ["[Person 1]"]
+        people = [l for l, _ in pmap.key_entries() if l.startswith("[Other person")]
+        assert people == ["[Other person]"]
 
     def test_key_file_shows_the_fullest_form_of_the_name(self):
         pmap = PseudonymMap(student_name="Billy Bob")
         pmap.register_person("S. Williams")
         pmap.register_person("Sarah Williams")
-        assert dict(pmap.key_entries())["[Person 1]"] == "Sarah Williams"
+        assert dict(pmap.key_entries())["[Other person]"] == "Sarah Williams"
 
     def test_merging_does_not_break_the_shared_surname_rule(self):
         """The merge must not claim a token someone else already owns."""
@@ -362,4 +365,161 @@ class TestMergeBookkeeping:
         pmap.register_person("S. Williams")
         pmap.register_person("Sarah Williams")
         other = pmap.register_person("John Citizen")
-        assert other == "[Person 2]"
+        assert other == "[Other person 2]"
+
+
+# ---------------------------------------------------------------------------
+# Roles: proposed by the tool, confirmed by the user
+# ---------------------------------------------------------------------------
+
+class TestRoleAssignment:
+
+    def test_single_holder_of_a_role_is_unnumbered(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        assert pmap.assign_role("Sarah Williams", "teacher") == "[Teacher]"
+
+    def test_several_holders_are_numbered(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        for name in ["Sarah Williams", "John Citizen", "Ada Kowalski"]:
+            pmap.register_person(name)
+            pmap.assign_role(name, "teacher")
+        labels = [pmap.label_for(n, "Person name (NER)")
+                  for n in ["Sarah Williams", "John Citizen", "Ada Kowalski"]]
+        assert labels == ["[Teacher 1]", "[Teacher 2]", "[Teacher 3]"]
+
+    def test_assignment_through_a_variation_hits_the_right_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        pmap.assign_role("Ms Williams", "health")
+        assert pmap.label_for("Sarah Williams", "Person name (NER)") == "[Health professional]"
+
+    def test_the_student_can_never_be_reclassified(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.assign_role("Billy Bob", "teacher") is None
+        assert pmap.label_for("Billy Bob", "Student name") == STUDENT_LABEL
+
+    def test_reassignment_renumbers_the_people_left_behind(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        for n in ["Sarah Williams", "John Citizen"]:
+            pmap.register_person(n)
+            pmap.assign_role(n, "teacher")
+        assert pmap.label_for("Sarah Williams", "Person name (NER)") == "[Teacher 1]"
+        # Moving one out leaves the other as the sole teacher — unnumbered.
+        pmap.assign_role("John Citizen", "health")
+        assert pmap.label_for("Sarah Williams", "Person name (NER)") == "[Teacher]"
+        assert pmap.label_for("John Citizen", "Person name (NER)") == "[Health professional]"
+
+    def test_discovered_people_default_to_other_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        assert pmap.label_for("Sarah Williams", "Person name (NER)") == "[Other person]"
+
+    def test_entered_parents_start_classified_as_parents(self):
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mary Bloggs"])
+        assert pmap.label_for("Mary Bloggs", "Parent/Guardian (user-provided)") == "[Parent]"
+
+    def test_people_list_excludes_the_student_and_organisations(self):
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mary Bloggs"],
+                            organisation_names=["Riverside Primary School"])
+        pmap.register_person("Sarah Williams")
+        names = [p.full_name for p in pmap.people()]
+        assert "Billy Bob" not in names
+        assert "Riverside Primary School" not in names
+        assert set(names) == {"Mary Bloggs", "Sarah Williams"}
+
+    def test_people_list_reports_where_each_person_came_from(self):
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mary Bloggs"])
+        pmap.register_person("Sarah Williams")
+        sources = {p.full_name: p.source for p in pmap.people()}
+        assert sources == {"Mary Bloggs": "entered", "Sarah Williams": "detected"}
+
+
+class TestCustomRoleNumberingNamespace:
+    """
+    Numbering is keyed on the rendered stem across built-in AND custom roles.
+    Bucketing per role key would let two people emit the same bare label and
+    become indistinguishable — the rule #44 meaning failure, user-induced.
+    """
+
+    def test_two_identical_custom_roles_are_numbered_apart(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        for n in ["Sarah Williams", "John Citizen"]:
+            pmap.register_person(n)
+            pmap.assign_role(n, "health", custom_label="Speech pathologist")
+        a = pmap.label_for("Sarah Williams", "Person name (NER)")
+        b = pmap.label_for("John Citizen", "Person name (NER)")
+        assert a != b
+        assert {a, b} == {"[Speech pathologist 1]", "[Speech pathologist 2]"}
+
+    def test_custom_text_matching_a_builtin_label_shares_its_numbering(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        pmap.register_person("John Citizen")
+        pmap.assign_role("Sarah Williams", "health")                      # [Health professional]
+        pmap.assign_role("John Citizen", "other", custom_label="Health professional")
+        a = pmap.label_for("Sarah Williams", "Person name (NER)")
+        b = pmap.label_for("John Citizen", "Person name (NER)")
+        assert a != b, "identical rendered stems must not collide"
+
+    def test_custom_role_is_case_normalised_for_collision_purposes(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        for n, text in [("Sarah Williams", "speech pathologist"),
+                        ("John Citizen", "Speech Pathologist")]:
+            pmap.register_person(n)
+            pmap.assign_role(n, "other", custom_label=text)
+        a = pmap.label_for("Sarah Williams", "Person name (NER)")
+        b = pmap.label_for("John Citizen", "Person name (NER)")
+        assert a != b
+
+
+class TestCustomRoleSanitisation:
+    """A custom role is free text going straight into a label — the one place
+    rule #42 could be bypassed by an honest mistake."""
+
+    def test_plain_job_title_is_accepted(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.sanitise_custom_role("speech pathologist") == "Speech pathologist"
+
+    def test_role_containing_the_students_name_is_rejected(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.sanitise_custom_role("Billy's mum") is None
+
+    def test_role_containing_a_DIFFERENT_persons_name_is_rejected(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        assert pmap.sanitise_custom_role("Sarah's colleague") is None
+
+    def test_role_containing_an_organisation_name_is_rejected(self):
+        pmap = PseudonymMap(student_name="Billy Bob",
+                            organisation_names=["Riverside Primary School"])
+        assert pmap.sanitise_custom_role("Riverside staff") is None
+
+    def test_whole_word_check_does_not_reject_innocent_text(self):
+        """'Ann' inside 'Annual' is not a leak — same rule as verification."""
+        pmap = PseudonymMap(student_name="Ann Smith")
+        assert pmap.sanitise_custom_role("Annual reviewer") == "Annual reviewer"
+
+    def test_digits_are_rejected(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.sanitise_custom_role("Teacher 2024") is None
+
+    def test_overlong_text_is_rejected(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.sanitise_custom_role("x" * 40) is None
+
+    def test_rejected_custom_role_falls_back_to_other_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        pmap.assign_role("Sarah Williams", "teacher", custom_label="Billy's teacher")
+        assert pmap.label_for("Sarah Williams", "Person name (NER)") == "[Other person]"
+
+    def test_no_role_label_ever_leaks_a_name(self):
+        """Rule #42, extended across every role including customs."""
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mary Bloggs"])
+        pmap.register_person("Sarah Williams")
+        for role in ASSIGNABLE_ROLES:
+            pmap.assign_role("Sarah Williams", role)
+            label = pmap.label_for("Sarah Williams", "Person name (NER)").lower()
+            for word in ["billy", "bob", "mary", "bloggs", "sarah", "williams"]:
+                assert word not in label, f"role {role} leaked {word}"

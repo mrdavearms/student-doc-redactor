@@ -125,7 +125,7 @@ class TestEndToEnd:
 
             bodies = [r.output_path.read_text(encoding='utf-8')
                       for r in results.document_results]
-            assert all("[Person 1]" in b for b in bodies)
+            assert all("[Other person]" in b for b in bodies)
             assert all("Sarah" not in b for b in bodies)
 
     def test_deselected_item_is_not_replaced(self):
@@ -157,7 +157,7 @@ class TestEndToEnd:
             )
             body = results.document_results[0].output_path.read_text(encoding='utf-8')
             assert "[Student]" in body
-            assert "[Person 1]" in body
+            assert "[Other person]" in body
             assert "Chen" not in body
 
 
@@ -198,7 +198,7 @@ class TestKeyFile:
             key = results.key_file_path.read_text(encoding='utf-8')
             assert "DO NOT UPLOAD" in key
             assert "[Student]" in key and "Billy Bob" in key
-            assert "[Parent 1]" in key and "Mary Bloggs" in key
+            assert "[Parent]" in key and "Mary Bloggs" in key
 
     def test_key_file_records_shared_name_ambiguity(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -242,7 +242,7 @@ class TestAuditLogCarriesNoNames:
             for leaked in ("Billy", "Bob", "Mary", "Bloggs", "Riverside"):
                 assert leaked not in log, f"audit log leaked {leaked!r}"
             assert "[Student]" in log
-            assert "[Parent 1]" in log
+            assert "[Parent]" in log
 
     def test_log_saved_under_its_own_name(self):
         with tempfile.TemporaryDirectory() as tmp:

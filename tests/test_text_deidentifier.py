@@ -103,7 +103,7 @@ class TestReplacement:
         pmap.register_person("Billy Chen")
         matches = [match("Billy Bob"), match("Billy Chen", "Person name (NER)")]
         out, _ = deidentify_text("Billy Bob sat with Billy Chen.", matches, pmap)
-        assert out == f"{STUDENT_LABEL} sat with [Person 1]."
+        assert out == f"{STUDENT_LABEL} sat with [Other person]."
 
     def test_labels_are_not_re_matched(self):
         """A student actually named 'Person' must not corrupt '[Person 1]'."""
@@ -111,7 +111,7 @@ class TestReplacement:
         pmap.register_person("Sarah Williams")
         matches = [match("Person"), match("Sarah Williams", "Person name (NER)")]
         out, _ = deidentify_text("Person met Sarah Williams.", matches, pmap)
-        assert out == f"{STUDENT_LABEL} met [Person 1]."
+        assert out == f"{STUDENT_LABEL} met [Other person]."
         assert "[[" not in out
 
     def test_deselected_item_is_left_untouched(self):
@@ -141,7 +141,7 @@ class TestReplacement:
             "Enrolled at Riverside Primary School.",
             [match("Riverside Primary School", "Organisation name")], pmap,
         )
-        assert out == "Enrolled at [Organisation 1]."
+        assert out == "Enrolled at [Organisation]."
 
     def test_very_short_match_is_skipped(self):
         pmap = PseudonymMap(student_name="Billy Bob")
