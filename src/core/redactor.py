@@ -128,6 +128,25 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+def fuzzy_word_match(ocr_clean: str, pii_lower: str) -> bool:
+    """
+    Whether an OCR-read word is likely the same as a PII word, tolerating
+    common OCR misreads. Only ever applies to alphabetic PII of 5+
+    characters — never to emails/URLs/numeric PII (the exact-substring
+    branch already handles those), and never to short words where a
+    1-character tolerance would risk matching an unrelated word.
+
+    Module-level so de-identification verification applies the identical
+    tolerance rule rather than restating the thresholds.
+    """
+    if not pii_lower.isalpha() or len(pii_lower) < 5:
+        return False
+    if abs(len(ocr_clean) - len(pii_lower)) > 2:
+        return False
+    max_distance = 1 if len(pii_lower) <= 7 else 2
+    return _levenshtein(ocr_clean, pii_lower) <= max_distance
+
+
 # Whitespace or any hyphen/dash variant — used to split PII into tokens and to
 # join them when searching, so a name that OCR renders as "Smith - Jones" or
 # "sarah-williams" is still recognised as visible.
@@ -426,19 +445,8 @@ class PDFRedactor:
         return self._tesseract_ok
 
     def _fuzzy_word_match(self, ocr_clean: str, pii_lower: str) -> bool:
-        """
-        Whether an OCR-read word is likely the same as a PII word, tolerating
-        common OCR misreads. Only ever applies to alphabetic PII of 5+
-        characters — never to emails/URLs/numeric PII (the exact-substring
-        branch already handles those), and never to short words where a
-        1-character tolerance would risk matching an unrelated word.
-        """
-        if not pii_lower.isalpha() or len(pii_lower) < 5:
-            return False
-        if abs(len(ocr_clean) - len(pii_lower)) > 2:
-            return False
-        max_distance = 1 if len(pii_lower) <= 7 else 2
-        return _levenshtein(ocr_clean, pii_lower) <= max_distance
+        """See module-level fuzzy_word_match()."""
+        return fuzzy_word_match(ocr_clean, pii_lower)
 
     def _match_and_redact_ocr_words(
         self,
