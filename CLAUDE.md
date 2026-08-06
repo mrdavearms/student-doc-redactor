@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (405 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (522 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 72 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -83,7 +83,7 @@ React (Vite)
 ├── Layout.tsx        → sidebar + animated page transitions (AnimatePresence)
 ├── store.ts          → Zustand single store (mirrors Streamlit session_state)
 ├── api.ts            → fetch wrapper for all backend endpoints
-├── pages/            → 6 wizard pages (setup + 5 workflow steps)
+├── pages/            → 8 wizard pages (setup + mode choice + 5 steps, 2 completion variants)
 └── components/       → reusable UI components
 
 FastAPI (backend/main.py)
@@ -92,22 +92,36 @@ FastAPI (backend/main.py)
 ├── /api/file/process, /api/file/validate   → single-document mode
 ├── /api/pii/detect   → returns matches, caches PIIMatch objects server-side
 ├── /api/redact       → uses cached detection data + user selections
+├── /api/deidentify   → same cache/selections, writes labelled .txt instead
 └── /api/preview      → renders PDF page at 150 DPI, returns base64 PNG
 ```
 
+### Two Pathways
+
+Step 0 asks which output the user wants (`workflowMode` in the store):
+
+- **`redact`** — black out PII, producing redacted PDFs. The original pathway.
+- **`deidentify`** — replace PII with non-identifying labels (`[Student]`, `[Parent 1]`), producing plain text safe to paste into an AI tool.
+
+They are **not** separate pipelines. Conversion, detection, the review screen, manual PII additions and selections are byte-for-byte identical; only the final output step branches. `DeidentificationService` mirrors `RedactionService`'s shape (cooperative cancel, quarantine, filename PII stripping, single-document filename override).
+
+De-identification reads the extracted text already in `_detection_cache` rather than re-extracting, so the text it replaces into is exactly the text detection ran against — and scanned pages work for free, since that cached text is already OCR'd.
+
 ### Screen Flow
 
-The desktop app has a 6-screen wizard flow (setup screen + 5 workflow steps):
+The desktop app has a 7-screen wizard flow (setup + mode choice + 5 workflow steps):
 
 ```
-setup → folder_selection → conversion_status → document_review → final_confirmation → completion
+setup → mode_selection → folder_selection → conversion_status → document_review → final_confirmation → completion
 ```
 
 The `setup` screen checks for LibreOffice and Tesseract on first launch, with install guidance and a "Check Again" button. It is skipped on subsequent launches when dependencies are present.
 
+`mode_selection` is the app's landing screen (`initialState.currentScreen`). Like `setup` it is **not** in the `SCREENS` array — step numbering still runs 1–5, and the Sidebar shows the chosen pathway as a badge with a "change" link rather than as a step. `completion` renders `<DeidentifyCompletion />` or `<Completion />` depending on `workflowMode`, which keeps the redact completion screen untouched.
+
 In the desktop app, `App.tsx` switches on `currentScreen` from the Zustand store. Layout wraps children in `<AnimatePresence mode="wait">` with `key={currentScreen}` for animated transitions.
 
-Streamlit shares the same 5 workflow steps (no setup screen). `app.py` routes based on `st.session_state.current_screen`.
+Streamlit shares the same 5 workflow steps (no setup or mode screen — de-identify mode is desktop-only). `app.py` routes based on `st.session_state.current_screen`.
 
 ### Key Files
 
@@ -119,6 +133,8 @@ Streamlit shares the same 5 workflow steps (no setup screen). `app.py` routes ba
 | `src/core/presidio_recognizers.py` | 6 custom Australian Presidio recognizers |
 | `src/core/nickname_map.py` | Curated ~100-entry Australian nickname dictionary with reverse lookup |
 | `src/core/redactor.py` | **Dual-path redaction** (text-layer + OCR image), widget deletion, metadata stripping |
+| `src/core/pseudonym_map.py` | De-identify mode: builds privacy-safe labels, person-identity merge rules |
+| `src/core/text_deidentifier.py` | De-identify mode: single-pass label replacement + exact/fuzzy verification |
 | `src/core/text_extractor.py` | Text + OCR extraction from PDFs |
 | `src/core/document_converter.py` | LibreOffice Word → PDF conversion |
 | `src/core/binary_resolver.py` | Cross-platform Tesseract/LibreOffice path resolution |
@@ -128,6 +144,7 @@ Streamlit shares the same 5 workflow steps (no setup screen). `app.py` routes ba
 | `src/services/conversion_service.py` | Framework-agnostic conversion business logic |
 | `src/services/detection_service.py` | Framework-agnostic PII detection business logic |
 | `src/services/redaction_service.py` | Framework-agnostic redaction orchestration + custom output path |
+| `src/services/deidentification_service.py` | De-identify orchestration, key file, label-only audit log |
 | `backend/main.py` | FastAPI API layer + server-side detection cache |
 | `backend/schemas.py` | Pydantic request/response models |
 | `desktop/electron/main.cjs` | Electron main process — spawns backend, creates window |
@@ -145,7 +162,9 @@ Streamlit shares the same 5 workflow steps (no setup screen). `app.py` routes ba
 | `desktop/src/components/RedactionProgress.tsx` | Animated progress bar + rotating witty teacher comments |
 | `desktop/src/components/UpdateBanner.tsx` | Auto-update notification banner |
 | `desktop/src/hooks/useUpdater.ts` | Custom hook for electron-updater integration |
-| `desktop/src/types.ts` | `Screen` type, `SCREENS` array, API response interfaces |
+| `desktop/src/pages/ModeSelection.tsx` | Step 0 — choose redact or de-identify |
+| `desktop/src/pages/DeidentifyCompletion.tsx` | Completion screen for de-identify mode (leads with the key file) |
+| `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
 
 ---
 
@@ -413,6 +432,34 @@ An explicit filename also **skips the collision counter** — the native Save di
 
 The frontend skips re-detection when the fingerprint matches, which is only safe while `_detection_cache` holds the same run. Every path that can observe a `no cached detection data` error — and `setBackendReachable(false)` — clears the key. Without that the wizard loops: skip detection → redact 400s → 'go back one step' → skip again.
 
+`setWorkflowMode` deliberately does **not** clear it. Detection inputs are identical in both pathways, so a user who changes their mind after reviewing would otherwise lose all their review work for nothing.
+
+### 42. De-identify labels must never contain any part of a real name
+
+`Student(BB)` for "Billy Bob" is not a pseudonym — initials identify a child in a small school community as surely as the name does. Labels are role + sequence number only (`[Student]`, `[Parent 1]`, `[Person 2]`), assigned by entry/discovery order, which leaks nothing. `tests/test_pseudonym_map.py::TestNoIdentityLeaksIntoLabels` asserts this programmatically for every key entry — no word of 2+ characters and no initials pattern may appear in a label. Do not add a label scheme derived from the name "for readability".
+
+The only re-identifying artifact is the key file, `DO-NOT-UPLOAD-name-key.txt`. The warning is in the **filename** because the likeliest accident is dragging a whole folder into an AI chat, not failing to read a header.
+
+### 43. The de-identify key file goes with the ORIGINALS, never in the output folder
+
+Everything in the output folder must be safe to upload — that is the entire point of the mode. The key file is written to `request.folder_path` (where the unredacted originals already live), so it adds no new exposure there. `tests/test_backend_deidentify.py::test_key_file_is_outside_the_output_folder` enforces it. `/api/cleanup` cannot delete it either: it matches none of the `_CLEANUP_SUFFIXES` patterns.
+
+For the same reason the de-identify audit log records **labels, not values** — it sits alongside the documents and must not become a second copy of the key. `RedactionLogger` is constructed with `'[Student]'` in place of the real name so even its header is clean.
+
+### 44. Two names are the same person only by full name, never by a shared token
+
+Reports routinely name classmates and siblings. The naive merge rule ("this name shares a variation with someone known, so it's them") folds classmate "Billy Chen" into student "Billy Bob" because both yield the variation "Billy". That is not a privacy failure but a **meaning** failure: the AI reading the output would attribute one child's behaviour to another.
+
+`PseudonymMap.register_person()` merges only when the full names match or one full name appears in the other's `generate_name_variations()` output (so "S. Williams" is "Sarah Williams"). Shared tokens then resolve separately: a surname claimed by every claimant → `[Family name]`; a given name → the highest-priority claimant (Student > Parent > Family member > Person). Both are recorded in the key file's ambiguity notes.
+
+### 45. De-identify verification adds a fuzzy pass on OCR text
+
+In redaction a garbled OCR word only means a black box lands slightly off. In de-identify mode the OCR text **is** the deliverable, so "Bi11y" would ship readable. `fuzzy_leftovers()` re-checks OCR-sourced pages using `redactor.fuzzy_word_match` — the same rule as rule #32, lifted to module level precisely so the thresholds are stated once.
+
+Both verifiers strip the inserted labels first (`strip_labels`). Without that, a person genuinely named "Person" would see `[Person 1]` reported as their name still being visible and quarantine a correctly processed file.
+
+`text_deidentifier._pattern_for` deliberately mirrors `redactor._pii_visible_in_text`'s token handling. If they drift apart, the verifier starts flagging text the replacer never had a chance to match.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -450,6 +497,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | Key | Type | Purpose |
 |-----|------|---------|
 | `currentScreen` | Screen | Active wizard step |
+| `workflowMode` | 'redact' \| 'deidentify' | Which pathway (default `redact`) — see rule #41 on why it doesn't reset detection |
 | `inputMode` | 'file' \| 'folder' | One document or a whole folder (default `folder`) |
 | `filePath` | string | Selected single document (file mode) |
 | `fileValid` | boolean | Whether the single document exists and is a supported type |
@@ -466,6 +514,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | `currentDocIndex` | number | Which document is being reviewed |
 | `userSelections` | Record<string, boolean> | `"docPath_matchIdx"` → selected |
 | `redactionResults` | RedactionResults \| null | Final redaction outcomes |
+| `deidentifyResults` | DeidentifyResults \| null | Final de-identification outcomes (incl. `key_file_path`) |
 | `loading` | boolean | Generic loading overlay active |
 | `loadingMessage` | string | Loading overlay text |
 | `error` | string \| null | Global error toast message |
@@ -507,7 +556,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 405 tests total
+tests/                                # 522 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -521,8 +570,12 @@ tests/                                # 405 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
+├── test_pseudonym_map.py             # 51 tests: label privacy invariant, person-identity merge, shared tokens, key entries
+├── test_text_deidentifier.py         # 30 tests: longest-first replacement, label re-match guard, exact + fuzzy verification
+├── test_deidentification_service.py  # 23 tests: end-to-end text output, key file location, label-only audit log, zones, cancel
+├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
 ├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
-├── test_cleanup_api.py               # 16 tests: cleanup endpoint path-traversal guards
+├── test_cleanup_api.py               # 21 tests: cleanup path-traversal guards, .txt patterns, key file undeletable
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing

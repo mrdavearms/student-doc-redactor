@@ -55,6 +55,23 @@ When sharing student assessment reports — with other schools, services, or age
 
 > **Plain English:** It's like using a black marker on paper, except it works on PDFs and Word documents, it finds things you might miss, and it can't be undone by selecting the text.
 
+### Two Things It Can Do
+
+When you open the app it asks which of these you want. Both work on the same documents and find the same personal information — they differ only in what you get at the end.
+
+| | Redact documents | De-identify for AI |
+|--|-----------------|--------------------|
+| **What it does** | Blacks out personal information | Replaces personal information with labels |
+| **Example** | `Billy Bob is in Year 3.` → `██████████ is in Year 3.` | `Billy Bob is in Year 3.` → `[Student] is in Year 3.` |
+| **You get** | Redacted PDFs | Plain text files (`.txt`) |
+| **Use it when** | Sharing or filing a document | Pasting a report into an AI tool for help |
+
+**About the labels.** Every person becomes a plain label — `[Student]`, `[Parent 1]`, `[Person 2]` — that contains no part of their real name. Initials like `[Student BB]` are deliberately *not* used: in a small school community, initials identify a child almost as well as the name does. If a report mentions a classmate or sibling, they get their own separate label, so an AI reading it won't confuse one child with another.
+
+**The key file.** De-identifying also saves a file called `DO-NOT-UPLOAD-name-key.txt` **with your original documents** — never in the output folder. It lists which label stands for which real person, so you can turn an AI's answer back into real names afterwards. Keep it private and never upload it. It is kept out of the output folder on purpose, so everything in there is safe to share.
+
+**What text files can't carry.** Pictures — a screenshot of an email, a scanned chart — can't go into a text file, so their contents are simply left out. Nothing from them leaks, but the AI won't see them either. The app tells you when this happens.
+
 ### Two Ways to Run
 
 | | Desktop App | Streamlit (browser) |
@@ -516,7 +533,15 @@ If LibreOffice is not installed when the app first opens, you land here instead 
 
 Click **Skip for now — I only have PDFs** to bypass this screen entirely if you don't need Word document support.
 
-This screen only appears once. On subsequent launches with LibreOffice present, the app goes straight to Screen 1.
+This screen only appears once. On subsequent launches with LibreOffice present, the app goes straight to the pathway choice.
+
+---
+
+### Choosing what to do
+
+The app opens by asking whether you want to **redact documents** (black boxes, PDFs out) or **de-identify for AI** (labels, text files out). Pick one and the rest of the wizard is the same either way.
+
+You can change your mind at any point — the sidebar shows which one you chose, with a **change** link next to it. Switching part-way through does not lose your review work.
 
 ---
 
@@ -604,6 +629,27 @@ NOTE: Scanned_Report.pdf
 ```
 
 Keep this log. It is your record of what was removed and when.
+
+### De-identify mode output
+
+De-identifying writes plain text files instead, into a `deidentified` subfolder:
+
+```
+your-folder/
+├── original-document.pdf                  <-- never modified
+├── deidentified/
+│   ├── original-document_deidentified.txt <-- safe to paste into an AI tool
+│   └── another-doc_deidentified.txt
+├── DO-NOT-UPLOAD-name-key.txt             <-- PRIVATE: turns labels back into names
+└── deidentification_log.txt               <-- audit trail (labels only, no real names)
+```
+
+Two things to notice:
+
+- **The key file sits with your originals, not in the `deidentified` folder.** That is deliberate: everything inside `deidentified/` is safe to share, so you can select the whole folder without stopping to think about it.
+- **The log contains labels only**, never the real names — so it is safe to keep alongside your documents.
+
+If a file could not be fully checked — most often a scanned page where the OCR misread a name — it is saved as `something.UNVERIFIED.txt` instead, and the app tells you which ones to open and check before sharing.
 
 ---
 
