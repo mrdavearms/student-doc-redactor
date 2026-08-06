@@ -163,6 +163,37 @@ class DeidentifyRequestBody(BaseModel):
     family_names: List[str] = []
     organisation_names: List[str] = []
     redact_header_footer: bool = False
+    # Answers from the "Who's who?" screen, keyed by discovered full name.
+    person_roles: Dict[str, str] = {}
+    person_custom_labels: Dict[str, str] = {}
+    ignored_people: List[str] = []
+
+
+class PersonInfoResponse(BaseModel):
+    """One person for the classification screen.
+
+    Carries a REAL NAME by construction — response only. Never written to disk,
+    never into the audit log.
+    """
+    full_name: str
+    label: str
+    role: str
+    custom_label: Optional[str] = None
+    suggested_role: str
+    confidence: str          # 'likely' | 'possible' | 'unknown' | 'entered'
+    evidence: str = ""
+    snippet: str = ""
+    occurrences: int = 0
+    source: str              # 'entered' | 'detected'
+
+
+class PeopleResponse(BaseModel):
+    people: List[PersonInfoResponse]
+    roles: List[Dict[str, str]]   # [{key, label}] for the dropdown, in order
+
+
+class LabelPreviewResponse(BaseModel):
+    labels: Dict[str, str]        # full_name -> label under the proposal
 
 
 class DeidentifyDocumentResultResponse(BaseModel):

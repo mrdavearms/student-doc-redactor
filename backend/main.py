@@ -28,6 +28,7 @@ from src.services.deidentification_service import (
     DeidentificationService,
     DeidentifyRequest,
 )
+from src.core.pseudonym_map import ASSIGNABLE_ROLES, ROLE_LABELS
 from src.core.pii_detector import PIIMatch
 
 from backend.schemas import (
@@ -36,6 +37,9 @@ from backend.schemas import (
     DeidentifyDocumentResultResponse,
     DeidentifyRequestBody,
     DeidentifyResultsResponse,
+    LabelPreviewResponse,
+    PeopleResponse,
+    PersonInfoResponse,
     DetectPIIRequest,
     DetectionResultsResponse,
     DocumentPIIResponse,
@@ -462,6 +466,61 @@ def redact_documents(req: RedactRequest):
 
 # ── De-identification ────────────────────────────────────────────────────
 
+def _deidentify_request_from(req: DeidentifyRequestBody) -> DeidentifyRequest:
+    """One place that maps the API body onto the service request, so the
+    people/labels endpoints build exactly the map execute() will."""
+    detected_pii, user_selections = _resolve_cached_selections(
+        req.documents, req.selected_keys
+    )
+    return DeidentifyRequest(
+        folder_path=Path(req.folder_path),
+        student_name=req.student_name,
+        documents=[Path(p) for p in req.documents],
+        detected_pii=detected_pii,
+        user_selections=user_selections,
+        folder_action=req.folder_action,
+        custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
+        custom_output_filename=req.custom_output_filename,
+        parent_names=req.parent_names,
+        family_names=req.family_names,
+        organisation_names=req.organisation_names,
+        redact_header_footer=req.redact_header_footer,
+        person_roles=req.person_roles,
+        person_custom_labels=req.person_custom_labels,
+        ignored_people=req.ignored_people,
+    )
+
+
+@app.post("/api/deidentify/people", response_model=PeopleResponse)
+def deidentify_people(req: DeidentifyRequestBody):
+    """Everyone the run will label, with a proposed role and its evidence."""
+    request = _deidentify_request_from(req)
+    try:
+        people = DeidentificationService.describe_people(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reading people failed: {e}") from e
+
+    return PeopleResponse(
+        people=[PersonInfoResponse(**p) for p in people],
+        roles=[{"key": k, "label": ROLE_LABELS[k]} for k in ASSIGNABLE_ROLES],
+    )
+
+
+@app.post("/api/deidentify/labels", response_model=LabelPreviewResponse)
+def deidentify_label_preview(req: DeidentifyRequestBody):
+    """Labels for a proposed assignment, so the screen never reimplements the
+    numbering rules in TypeScript."""
+    request = _deidentify_request_from(req)
+    try:
+        return LabelPreviewResponse(labels=DeidentificationService.preview_labels(request))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Label preview failed: {e}") from e
+
+
 @app.post("/api/deidentify", response_model=DeidentifyResultsResponse)
 def deidentify_documents(req: DeidentifyRequestBody):
     """
@@ -471,27 +530,10 @@ def deidentify_documents(req: DeidentifyRequestBody):
     cancel. Only the output differs.
     """
     _redaction_control["cancel_requested"] = False
-    detected_pii, user_selections = _resolve_cached_selections(
-        req.documents, req.selected_keys
-    )
+    request = _deidentify_request_from(req)
 
     try:
         service = DeidentificationService()
-        request = DeidentifyRequest(
-            folder_path=Path(req.folder_path),
-            student_name=req.student_name,
-            documents=[Path(p) for p in req.documents],
-            detected_pii=detected_pii,
-            user_selections=user_selections,
-            folder_action=req.folder_action,
-            custom_output_path=Path(req.custom_output_path) if req.custom_output_path else None,
-            custom_output_filename=req.custom_output_filename,
-            parent_names=req.parent_names,
-            family_names=req.family_names,
-            organisation_names=req.organisation_names,
-            redact_header_footer=req.redact_header_footer,
-        )
-
         results = service.execute(
             request,
             should_cancel=lambda: _redaction_control["cancel_requested"],

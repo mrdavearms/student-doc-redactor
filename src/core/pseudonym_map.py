@@ -459,6 +459,15 @@ class PseudonymMap:
         matched.sort(key=lambda o: (o.priority, o.seq))
         return matched[0]
 
+    def resolve_owner_name(self, text: str) -> Optional[str]:
+        """The canonical full name of whoever `text` refers to, or None.
+
+        Public because the API layer groups detected occurrences by person to
+        gather the context a role suggestion is drawn from.
+        """
+        owner = self._find_owner(text)
+        return owner.full_name if owner else None
+
     def assign_role(self, full_name: str, role_key: str,
                     custom_label: str = None) -> Optional[str]:
         """

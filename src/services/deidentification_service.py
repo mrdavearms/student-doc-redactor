@@ -23,7 +23,13 @@ from typing import Dict, List, Optional, Set, Tuple
 import fitz  # PyMuPDF
 
 from src.core.logger import RedactionLogger, LogEntry
-from src.core.pseudonym_map import PseudonymMap, is_person_category
+from src.core.pseudonym_map import (
+    ASSIGNABLE_ROLES,
+    PseudonymMap,
+    ROLE_LABELS,
+    is_person_category,
+)
+from src.core.role_suggester import suggest_role
 from src.core.redactor import (
     FOOTER_ZONE_FRACTION,
     HEADER_ZONE_FRACTION,
@@ -65,6 +71,13 @@ class DeidentifyRequest:
     # Reinterpreted for this mode: drop header/footer-zone text from the output
     # rather than blanking those zones in a PDF.
     redact_header_footer: bool = False
+    # The user's answers from the "Who's who?" screen, keyed by discovered full
+    # name. Absent keys keep their default role, which is always safe.
+    person_roles: Dict[str, str] = field(default_factory=dict)
+    person_custom_labels: Dict[str, str] = field(default_factory=dict)
+    # Names the user marked "not a person" (NER junk). Not registered as people;
+    # their text is still replaced via its category fallback.
+    ignored_people: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -122,6 +135,104 @@ class DeidentifyResults:
 class DeidentificationService:
     """Runs the de-identification pipeline over a set of documents."""
 
+    @staticmethod
+    def build_map(request: 'DeidentifyRequest'):
+        """
+        Build the PseudonymMap for a run and apply the user's role answers.
+
+        Shared by execute() and the classification endpoints so all three see
+        the identical set of people and labels. Registers ONLY selected matches:
+        a person whose sole occurrence the user deselected is never replaced, so
+        offering them for classification would be misleading.
+        """
+        pmap = PseudonymMap(
+            student_name=request.student_name,
+            parent_names=request.parent_names,
+            family_names=request.family_names,
+            organisation_names=request.organisation_names,
+        )
+
+        ignored = {' '.join(n.lower().split()) for n in (request.ignored_people or [])}
+
+        selected_by_doc = {
+            doc: DeidentificationService._selected_matches(
+                doc, request.detected_pii, request.user_selections)
+            for doc in request.documents
+        }
+        for doc in request.documents:
+            for match in selected_by_doc[doc]:
+                if not is_person_category(getattr(match, 'category', '')):
+                    continue
+                if ' '.join((match.text or '').lower().split()) in ignored:
+                    continue
+                pmap.register_person(match.text)
+
+        for name, role in (request.person_roles or {}).items():
+            pmap.assign_role(name, role, (request.person_custom_labels or {}).get(name))
+
+        return pmap, selected_by_doc
+
+    @staticmethod
+    def describe_people(request: 'DeidentifyRequest') -> List[dict]:
+        """
+        Everyone the run will label, with a proposed role and the evidence for
+        it, for the "Who's who?" screen.
+
+        Carries real names by construction — response only, never written to
+        disk or into the audit log.
+        """
+        pmap, selected_by_doc = DeidentificationService.build_map(request)
+
+        contexts: Dict[str, List[str]] = {}
+        counts: Dict[str, int] = {}
+        for doc in request.documents:
+            for match in selected_by_doc[doc]:
+                if not is_person_category(getattr(match, 'category', '')):
+                    continue
+                owner_name = pmap.resolve_owner_name(match.text)
+                if not owner_name:
+                    continue
+                counts[owner_name] = counts.get(owner_name, 0) + 1
+                if getattr(match, 'context', ''):
+                    contexts.setdefault(owner_name, []).append(match.context)
+
+        people = []
+        for info in pmap.people():
+            if info.source == 'entered':
+                # Which box the user typed this name into IS the answer; don't
+                # second-guess it with a keyword scan.
+                suggested, confidence, evidence, snippet = info.role, 'entered', '', ''
+            else:
+                s = suggest_role(info.full_name, contexts.get(info.full_name, []))
+                suggested, confidence = s.role_key, s.confidence
+                evidence, snippet = s.evidence, s.snippet
+            people.append({
+                'full_name': info.full_name,
+                'label': info.label,
+                'role': info.role,
+                'custom_label': info.custom_label,
+                'suggested_role': suggested,
+                'confidence': confidence,
+                'evidence': evidence,
+                'snippet': snippet,
+                'occurrences': counts.get(info.full_name, 0),
+                'source': info.source,
+            })
+        return people
+
+    @staticmethod
+    def preview_labels(request: 'DeidentifyRequest') -> Dict[str, str]:
+        """
+        Label each person would get under the proposed assignment.
+
+        Exists so the screen's live preview is computed by this one Python
+        implementation rather than a TypeScript reimplementation of the
+        stem-and-numbering rules, which would drift (see CLAUDE.md rule 45).
+        Returns EVERY person because reassigning one can renumber the others.
+        """
+        pmap, _ = DeidentificationService.build_map(request)
+        return {info.full_name: info.label for info in pmap.people()}
+
     def execute(self, request: DeidentifyRequest, should_cancel=None) -> DeidentifyResults:
         output_folder = self._prepare_output_folder(
             request.folder_path, request.folder_action, request.custom_output_path
@@ -130,24 +241,11 @@ class DeidentificationService:
         # The log header would otherwise carry the real student name.
         logger = RedactionLogger(request.folder_path, LOG_STUDENT_PLACEHOLDER)
 
-        pmap = PseudonymMap(
-            student_name=request.student_name,
-            parent_names=request.parent_names,
-            family_names=request.family_names,
-            organisation_names=request.organisation_names,
-        )
+        # Registering every person up front keeps labels consistent across all
+        # documents in the run — the same teacher must not be [Teacher 2] in one
+        # file and [Teacher 5] in the next.
+        pmap, selected_by_doc = self.build_map(request)
 
-        # Register every discovered person up front so labels are consistent
-        # across all documents in the run — the same teacher must not be
-        # [Person 2] in one file and [Person 5] in the next.
-        selected_by_doc = {
-            doc: self._selected_matches(doc, request.detected_pii, request.user_selections)
-            for doc in request.documents
-        }
-        for doc in request.documents:
-            for match in selected_by_doc[doc]:
-                if is_person_category(getattr(match, 'category', '')):
-                    pmap.register_person(match.text)
 
         filename_override = None
         if request.custom_output_filename and len(request.documents) == 1:
