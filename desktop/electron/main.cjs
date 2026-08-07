@@ -9,6 +9,8 @@ const path = require('path');
 const http = require('http');
 const { autoUpdater } = require('electron-updater');
 const crypto = require('crypto');
+const { pathToFileURL } = require('url');
+const { isAllowedNavigation } = require('./navigation.cjs');
 
 // Per-session shared secret between the renderer and the Python backend.
 // Passed to the backend via env and handed to the renderer over IPC (NOT via
@@ -185,10 +187,34 @@ function createWindow() {
     },
   });
 
+  const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
+  const appUrl = isDev ? DEV_SERVER : pathToFileURL(indexPath).href;
+
+  // Defence in depth. This window renders only its own content, so it has no
+  // legitimate reason to open a second window or navigate anywhere else.
+  // Denying both closes the entire class of popup/navigation escapes — the
+  // class GHSA-9f4c-93c8-jc8g sits in — independently of the Electron version
+  // underneath, which is what makes this worth having on its own.
+  //
+  // Deliberate external links are unaffected: they go through
+  // shell.openExternal via the 'open-external' IPC handler. The page itself
+  // never opens a window and never navigates.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn(`Blocked attempt to open a window: ${url}`);
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // Reloads (and dev-server reloads) resolve to the app's own URL.
+    if (isAllowedNavigation(url, appUrl)) return;
+    console.warn(`Blocked navigation to: ${url}`);
+    event.preventDefault();
+  });
+
   if (isDev) {
     mainWindow.loadURL(DEV_SERVER);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    mainWindow.loadFile(indexPath);
   }
 
   mainWindow.on('closed', () => {
