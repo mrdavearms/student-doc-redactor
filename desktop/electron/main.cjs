@@ -25,6 +25,17 @@ const DAILY_UPDATE_CHECK_MS = 24 * 60 * 60 * 1000;
 let backendProcess = null;
 let mainWindow = null;
 let updateCheckInterval = null;
+// Set once the health check has passed and the window is being created. Before
+// that, a backend exit is a STARTUP failure and is reported by waitForBackend
+// with a more useful message than the generic "engine stopped" dialog.
+let backendReady = false;
+// Why our own backend died during startup, if it did.
+let backendFailure = null;
+
+const PORT_IN_USE_MESSAGE =
+  'Another copy of the redaction engine is already running on this computer.\n\n' +
+  'Close any other copy of this app and try again. If you have just force-quit ' +
+  'the app, restarting your computer will clear it.';
 
 /** Wait for the backend to respond on its port (30-second wall-clock timeout). */
 function waitForBackend(port, timeoutMs = 30000) {
@@ -32,6 +43,14 @@ function waitForBackend(port, timeoutMs = 30000) {
     const deadline = Date.now() + timeoutMs;
 
     const check = () => {
+      // Our backend dying is terminal, and a healthy port does NOT prove
+      // otherwise: an orphaned backend from a force-quit, or a second copy of
+      // the app, answers on the same port with a DIFFERENT api token. Trusting
+      // that check would open a window whose every request 401s.
+      if (backendFailure) {
+        reject(new Error(backendFailure));
+        return;
+      }
       if (Date.now() > deadline) {
         reject(new Error('Backend did not start within 30 seconds'));
         return;
@@ -110,29 +129,43 @@ function startBackend() {
 
   backendProcess.on('exit', (code, signal) => {
     console.log(`Backend exited with code ${code}, signal ${signal}`);
-    // An exit we did not initiate (app not shutting down) means the engine
-    // crashed mid-session. The UI cannot recover without a restart.
-    if (!app.isQuitting) {
-      backendProcess = null;
-      dialog.showErrorBox(
-        'Redaction Engine Stopped',
-        'The redaction engine stopped unexpectedly. The app will now close — please reopen it to continue.',
-      );
-      app.quit();
+    if (app.isQuitting) return;
+    backendProcess = null;
+
+    if (!backendReady) {
+      // Died before we ever served a request. Overwhelmingly this is the port
+      // already being held by an orphan or a second copy — uvicorn exits 1 on
+      // "address already in use". Hand it to waitForBackend rather than racing
+      // it with a second, vaguer dialog.
+      backendFailure = PORT_IN_USE_MESSAGE;
+      return;
     }
+
+    // Crashed mid-session. The UI cannot recover without a restart.
+    dialog.showErrorBox(
+      'Redaction Engine Stopped',
+      'The redaction engine stopped unexpectedly. The app will now close — please reopen it to continue.',
+    );
+    app.quit();
   });
 
   backendProcess.on('error', (err) => {
     // The process could not be spawned at all (bad path, permissions, etc.).
     console.error('Failed to spawn backend:', err);
-    if (!app.isQuitting) {
-      backendProcess = null;
-      dialog.showErrorBox(
-        'Failed to Start',
-        `The redaction engine could not be started.\n\n${err.message}\n\nPlease reinstall the application.`,
-      );
-      app.quit();
+    if (app.isQuitting) return;
+    backendProcess = null;
+
+    if (!backendReady) {
+      backendFailure =
+        `The redaction engine could not be started.\n\n${err.message}\n\nPlease reinstall the application.`;
+      return;
     }
+
+    dialog.showErrorBox(
+      'Failed to Start',
+      `The redaction engine could not be started.\n\n${err.message}\n\nPlease reinstall the application.`,
+    );
+    app.quit();
   });
 }
 
@@ -304,24 +337,37 @@ ipcMain.handle('log-error', async (_event, payload) => {
 
 // ── App lifecycle ─────────────────────────────────────────────────────
 
-app.on('ready', async () => {
-  startBackend();
+// Only one copy of the app may run at a time. A second copy would spawn a
+// second backend that cannot bind port 8765, and its renderer would hold an api
+// token the already-running backend rejects — a window where nothing works.
+// Double-clicking the icon twice is an easy thing for anyone to do.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to open a second copy: surface the one already running.
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
 
-  try {
-    await waitForBackend(BACKEND_PORT);
-    console.log('Backend is ready');
-    createWindow();
-    if (!isDev) {
-      setupAutoUpdater();
+  app.on('ready', async () => {
+    startBackend();
+
+    try {
+      await waitForBackend(BACKEND_PORT);
+      console.log('Backend is ready');
+      backendReady = true;
+      createWindow();
+      if (!isDev) {
+        setupAutoUpdater();
+      }
+    } catch (e) {
+      console.error('Failed to start backend:', e);
+      showErrorWindow('Failed to Start', e.message);
     }
-  } catch (e) {
-    console.error('Failed to start backend:', e);
-    showErrorWindow(
-      'Failed to Start',
-      `The redaction tool backend could not be started.\n\n${e.message}\n\nPlease reinstall the application.`
-    );
-  }
-});
+  });
+}
 
 app.on('window-all-closed', () => {
   app.isQuitting = true;

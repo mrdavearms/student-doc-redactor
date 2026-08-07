@@ -8,6 +8,7 @@ import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import { friendlyCategory, isPreselected } from '../lib/categories';
+import { splitContext } from '../lib/context';
 
 export default function DocumentReview() {
   const isDeidentify = useStore.getState().workflowMode === 'deidentify';
@@ -227,7 +228,15 @@ export default function DocumentReview() {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-slate-600 mt-1 leading-relaxed">{match.context}</p>
+                      <p className="text-sm text-slate-600 mt-1 leading-relaxed break-words">
+                        {splitContext(match.context).map((seg, i) =>
+                          seg.matched ? (
+                            <span key={i} className="bg-amber-100 px-1 rounded">{seg.text}</span>
+                          ) : (
+                            <span key={i}>{seg.text}</span>
+                          )
+                        )}
+                      </p>
                     </div>
                   </motion.div>
                 );

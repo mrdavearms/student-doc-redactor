@@ -206,3 +206,83 @@ class TestFuzzyLeftovers:
 
     def test_distance_two_allowed_for_long_names(self):
         assert fuzzy_leftovers("Willianis was present.", ["Williams"]) == ["Williams"]
+
+
+class TestFormLabelsAreNotPeople:
+    """
+    "Parent/Guardian:" followed by "Phone:" makes cross-line contextual
+    detection offer the word "Phone" as a possible name, ticked by default.
+    Replacing it rewrote the row to "[name]: [phone]" — as though someone were
+    called Phone. The map already knows these words are not people.
+    """
+
+    def test_form_label_word_is_left_alone(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        out, count = deidentify_text(
+            "Phone: 0412 345 678",
+            [match("Phone", category="Parent/Guardian")],
+            pmap,
+        )
+        assert out == "Phone: 0412 345 678"
+        assert count == 0
+
+    @pytest.mark.parametrize("word", ["Email", "Address", "Signature", "Date"])
+    def test_other_form_labels_left_alone(self, word):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        out, _ = deidentify_text(
+            f"{word}: something",
+            [match(word, category="Parent/Guardian")],
+            pmap,
+        )
+        assert out == f"{word}: something"
+
+    def test_a_real_name_is_still_replaced(self):
+        """The narrow skip must not become a hole for actual names."""
+        pmap = PseudonymMap(student_name="Billy Bob")
+        out, count = deidentify_text(
+            "Billy Bob is in Year 3.", [match("Billy Bob")], pmap)
+        assert out == "[Student] is in Year 3."
+        assert count == 1
+
+    def test_an_unknown_person_is_still_replaced(self):
+        """A name the map has never seen must still become [name]."""
+        pmap = PseudonymMap(student_name="Billy Bob")
+        out, count = deidentify_text(
+            "Marlowe attended.",
+            [match("Marlowe", category="Person name (NER)")],
+            pmap,
+        )
+        assert "Marlowe" not in out
+        assert count == 1
+
+    def test_a_person_the_user_named_wins_over_the_word_list(self):
+        """If the user typed it as a parent's name, it IS a person."""
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Parent"])
+        out, count = deidentify_text(
+            "Parent attended.",
+            [match("Parent", category="Parent/Guardian (user-provided)")],
+            pmap,
+        )
+        assert "Parent attended" not in out
+        assert count == 1
+
+    def test_structured_pii_is_never_skipped(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        out, count = deidentify_text(
+            "Call 0412 345 678.",
+            [match("0412 345 678", category="Phone number")],
+            pmap,
+        )
+        assert "0412 345 678" not in out
+        assert count == 1
+
+    def test_span_containing_a_known_person_is_still_replaced(self):
+        """'Billy Bob Date of Birth' is junk, but it is still the student."""
+        pmap = PseudonymMap(student_name="Billy Bob")
+        out, count = deidentify_text(
+            "Billy Bob Date of Birth",
+            [match("Billy Bob Date of Birth", category="Person name (NER)")],
+            pmap,
+        )
+        assert "Billy Bob" not in out
+        assert count == 1

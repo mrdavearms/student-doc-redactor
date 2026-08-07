@@ -257,8 +257,12 @@ class DeidentificationService:
             request.folder_path, request.folder_action, request.custom_output_path
         )
 
-        # The log header would otherwise carry the real student name.
-        logger = RedactionLogger(request.folder_path, LOG_STUDENT_PLACEHOLDER)
+        # The log header would otherwise carry the real student name — and call
+        # this a redaction run, which it is not.
+        logger = RedactionLogger(
+            request.folder_path, LOG_STUDENT_PLACEHOLDER,
+            operation="DE-IDENTIFICATION", verb="de-identified",
+        )
 
         # Registering every person up front keeps labels consistent across all
         # documents in the run — the same teacher must not be [Teacher 2] in one
@@ -645,8 +649,16 @@ class DeidentificationService:
 
         # Verify before writing. Exact check everywhere; the fuzzy check only on
         # OCR text, where a misread name would otherwise ship readable.
-        selected_texts = list({m.text.strip() for m in selected_matches
-                               if (m.text or '').strip()})
+        # Only items the replacer will actually act on. Verification must stay
+        # symmetric with replacement: a form-label word deliberately left alone
+        # would otherwise be reported as "still visible" and quarantine a
+        # perfectly good file.
+        replaced_matches = [
+            m for m in selected_matches
+            if (m.text or '').strip()
+            and pmap.should_replace(m.text, getattr(m, 'category', ''))
+        ]
+        selected_texts = list({m.text.strip() for m in replaced_matches})
         labels = pmap.all_labels()
         full_output = "\n\n".join(
             f"{_PAGE_MARKER.format(n)}\n\n{page_outputs[n]}"
@@ -666,7 +678,7 @@ class DeidentificationService:
         # Only now do cell separators become visible table dividers.
         full_output = full_output.replace(_CELL_SEP, ' | ')
 
-        for match in selected_matches:
+        for match in replaced_matches:
             logger.add_entry(LogEntry(
                 # The stripped output name, never the source filename: documents
                 # are routinely named after the student.

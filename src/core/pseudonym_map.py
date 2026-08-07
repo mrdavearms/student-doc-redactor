@@ -131,6 +131,28 @@ def clean_person_name(raw: str):
     return ' '.join(tokens)
 
 
+def _is_form_label(text: str) -> bool:
+    """
+    Whether `text` is made entirely of document form-label words ("Phone",
+    "Email", "Signature") rather than anything that could be a person.
+
+    Cross-line contextual detection flags the capitalised word on the line after
+    a "Parent/Guardian:" label as a possible name, so an Australian school
+    form's "Phone:" row is routinely offered as PII at medium confidence — and
+    it is ticked by default. Blacking it out in redact mode costs nothing; in
+    de-identify mode it rewrote the row to "[name]: [phone]", which reads as
+    though someone were called Phone.
+
+    Deliberately narrow: only the already-curated _NOT_A_PERSON_TOKEN words, and
+    only when EVERY token is one. That set was chosen to exclude plausible
+    Australian names, so this can never swallow a real one.
+    """
+    tokens = (text or '').replace(':', ' ').split()
+    if not tokens:
+        return False
+    return all(t.strip(".,:;'’-").lower() in _NOT_A_PERSON_TOKEN for t in tokens)
+
+
 def _name_fullness(name: str):
     """
     How complete a written form of a name is, for choosing the one to show in
@@ -216,7 +238,6 @@ class PseudonymMap:
     ):
         self._owners: List[_Owner] = []
         self._seq = 0
-        self._person_counter = 0
         # variation (normalised) -> [(owner_index, kind)], kind in {'surname','other'}
         self._claims: Dict[str, List[Tuple[int, str]]] = {}
         self._variation_labels: Dict[str, str] = {}
@@ -403,10 +424,13 @@ class PseudonymMap:
             self._rebuild()
             return owner.label
 
-        self._person_counter += 1
-        self._add_person(full_name, f'[Person {self._person_counter}]', _PRIORITY_PERSON)
+        # DEFAULT_ROLE, not a label string. A rendered label here would not be a
+        # valid ROLE_LABELS key, so `stem` would silently fall back to the
+        # default anyway — the right label for the wrong reason, and an invalid
+        # role leaking out through /api/deidentify/people.
+        owner = self._add_person(full_name, DEFAULT_ROLE, _PRIORITY_PERSON)
         self._rebuild()
-        return self._variation_labels.get(norm, f'[Person {self._person_counter}]')
+        return owner.label
 
     # ── Lookup ───────────────────────────────────────────────────────────
 
@@ -429,6 +453,28 @@ class PseudonymMap:
                 return contained
             return FALLBACK_NAME_LABEL
         return FALLBACK_LABEL
+
+    def should_replace(self, match_text: str, category: str = '') -> bool:
+        """
+        Whether a detected item is worth substituting at all.
+
+        Everything is replaced except one case: a person-category match that is
+        purely a form-label word AND is not a name this map knows. Those exist
+        only because contextual detection is deliberately generous, and
+        replacing them costs meaning while gaining no privacy — see
+        _is_form_label.
+
+        Structured PII, known people, and spans that CONTAIN a known person are
+        never skipped, so this cannot cause an under-removal.
+        """
+        if not is_person_category(category):
+            return True
+        key = _POSSESSIVE_RE.sub('', _norm(match_text))
+        if key in self._variation_labels:
+            return True
+        if self._label_from_contained(key):
+            return True
+        return not _is_form_label(key)
 
     def _label_from_contained(self, key: str):
         """Label of the longest known variation appearing inside `key`."""

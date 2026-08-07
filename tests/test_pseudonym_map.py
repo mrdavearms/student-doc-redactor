@@ -6,6 +6,8 @@ import re
 import pytest
 from pseudonym_map import (
     ASSIGNABLE_ROLES,
+    DEFAULT_ROLE,
+    ROLE_LABELS,
     clean_person_name,
     PseudonymMap,
     STUDENT_LABEL,
@@ -523,3 +525,38 @@ class TestCustomRoleSanitisation:
             label = pmap.label_for("Sarah Williams", "Person name (NER)").lower()
             for word in ["billy", "bob", "mary", "bloggs", "sarah", "williams"]:
                 assert word not in label, f"role {role} leaked {word}"
+
+
+class TestDiscoveredPeopleGetAValidRole:
+    """
+    register_person used to pass a rendered label ("[Person 1]") into
+    _add_person's ROLE parameter. It produced the right label only because
+    ROLE_LABELS.get() silently falls back to the default — while the invalid
+    key leaked out through /api/deidentify/people.
+    """
+
+    def test_role_is_a_real_role_key(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        person = next(p for p in pmap.people() if p.full_name == "Sarah Williams")
+        assert person.role in ROLE_LABELS
+        assert person.role == DEFAULT_ROLE
+
+    def test_unclassified_person_still_labelled_other_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.register_person("Sarah Williams") == "[Other person]"
+
+    def test_several_unclassified_people_are_numbered(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        pmap.register_person("Helena Northcote")
+        labels = {p.full_name: p.label for p in pmap.people()}
+        assert labels == {
+            "Sarah Williams": "[Other person 1]",
+            "Helena Northcote": "[Other person 2]",
+        }
+
+    def test_assigning_a_role_still_works_afterwards(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah Williams")
+        assert pmap.assign_role("Sarah Williams", "teacher") == "[Teacher]"

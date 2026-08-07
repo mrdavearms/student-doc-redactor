@@ -294,7 +294,11 @@ export default function DeidentifyCompletion() {
           <h3 className="text-sm font-medium text-slate-600 mb-3">Document Summary</h3>
           <div className="space-y-2">
             {r.document_results.map((d, i) => (
-              <div key={i} className="flex items-center justify-between text-sm gap-3">
+              // Row and its preview live in ONE block: rendering the previews
+              // in a second pass after the whole list put a document's text
+              // below every other row instead of under the one it belongs to.
+              <div key={i} className="space-y-2">
+              <div className="flex items-center justify-between text-sm gap-3">
                 <span className="text-slate-600 truncate flex-1 min-w-0">
                   {d.output_path ? basename(d.output_path)
                     : d.quarantine_path ? basename(d.quarantine_path)
@@ -331,17 +335,14 @@ export default function DeidentifyCompletion() {
                   </span>
                 )}
               </div>
-            ))}
-            {r.document_results.map((d) =>
-              d.output_path && openPreview[d.output_path] && previews[d.output_path] ? (
-                <pre
-                  key={`prev-${d.output_path}`}
-                  className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed"
-                >
+
+              {d.output_path && openPreview[d.output_path] && previews[d.output_path] && (
+                <pre className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed">
                   {previews[d.output_path]}
                 </pre>
-              ) : null
-            )}
+              )}
+              </div>
+            ))}
           </div>
         </motion.section>
       )}

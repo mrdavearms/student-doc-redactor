@@ -23,9 +23,15 @@ class LogEntry:
 class RedactionLogger:
     """Creates detailed audit logs for redaction operations"""
 
-    def __init__(self, folder_path: Path, student_name: str):
+    def __init__(self, folder_path: Path, student_name: str,
+                 operation: str = "REDACTION", verb: str = "redacted"):
         self.folder_path = folder_path
         self.student_name = student_name
+        # De-identification reuses this logger. Defaults keep the redact log
+        # byte-for-byte as it was; only the two words that would otherwise be
+        # wrong in the other pathway are parameterised.
+        self.operation = operation
+        self.verb = verb
         self.log_entries: List[LogEntry] = []
         self.flagged_files: List[tuple] = []
         self.total_documents = 0
@@ -59,13 +65,13 @@ class RedactionLogger:
         lines = []
 
         # Header
-        lines.append("STUDENT DOC REDACTOR - REDACTION LOG")
+        lines.append(f"STUDENT DOC REDACTOR - {self.operation} LOG")
         lines.append("=" * 61)
         lines.append(f"Folder: {self.folder_path}")
         lines.append(f"Student: {self.student_name}")
         lines.append(f"Processed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Total documents: {self.total_documents}")
-        lines.append(f"Successfully redacted: {self.successfully_redacted}")
+        lines.append(f"Successfully {self.verb}: {self.successfully_redacted}")
         lines.append(f"Flagged for manual review: {len(self.flagged_files)}")
         if self.cancelled:
             lines.append(

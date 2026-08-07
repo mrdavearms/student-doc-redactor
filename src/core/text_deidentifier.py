@@ -60,7 +60,12 @@ def deidentify_text(text: str, selected_matches: List, pmap) -> Tuple[str, int]:
         raw = (getattr(match, 'text', '') or '').strip()
         if len(raw) < 2:
             continue
-        unique.setdefault(raw.lower(), (raw, getattr(match, 'category', '')))
+        category = getattr(match, 'category', '')
+        # The map is the authority on what is a person; ask it before replacing
+        # a contextual guess like the word "Phone" with "[name]".
+        if not pmap.should_replace(raw, category):
+            continue
+        unique.setdefault(raw.lower(), (raw, category))
 
     if not unique:
         return text, 0

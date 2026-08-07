@@ -136,9 +136,12 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
                   </span>
                 </div>
 
-                {/* Connector line */}
+                {/* Connector line. `relative` is load-bearing: the active
+                    highlight above is `absolute inset-0` over the whole <li>,
+                    so an unpositioned connector gets painted over and the
+                    active step's line disappears. */}
                 {idx < steps.length - 1 && (
-                  <div className="ml-[22px] w-px h-2 my-0.5">
+                  <div className="relative ml-[22px] w-px h-2 my-0.5">
                     <div
                       className={`w-full h-full ${
                         isCompleted ? 'bg-emerald-300' : 'bg-slate-200'

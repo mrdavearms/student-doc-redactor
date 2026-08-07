@@ -95,7 +95,10 @@ export default function FolderSelection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Choose Documents & Student Details</h2>
-        <p className="text-sm text-slate-400 mt-1">Redact a single document or a whole folder, then enter the identifying information to look for.</p>
+        <p className="text-sm text-slate-400 mt-1">
+          {isDeidentify ? 'De-identify' : 'Redact'} a single document or a whole folder,
+          then enter the identifying information to look for.
+        </p>
       </div>
 
       {/* What to redact */}
@@ -106,7 +109,7 @@ export default function FolderSelection() {
         className="bg-white rounded-xl border border-slate-200 p-6 space-y-4"
       >
         <div className="flex items-center gap-2 text-slate-700 font-medium">
-          What do you want to redact?
+          What do you want to {isDeidentify ? 'de-identify' : 'redact'}?
           <HelpTip text="Pick one document to redact just that file, or a folder to redact every PDF and Word document inside it." />
         </div>
 

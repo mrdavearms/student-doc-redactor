@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (631 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (645 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 95 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 115 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, `paths.ts`, `context.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -448,7 +448,7 @@ The only re-identifying artifact is the key file, `DO-NOT-UPLOAD-name-key.txt`. 
 
 Everything in the output folder must be safe to upload — that is the entire point of the mode. The key file is written to `request.folder_path` (where the unredacted originals already live), so it adds no new exposure there. `tests/test_backend_deidentify.py::test_key_file_is_outside_the_output_folder` enforces it. `/api/cleanup` cannot delete it either: it matches none of the `_CLEANUP_SUFFIXES` patterns.
 
-For the same reason the de-identify audit log records **labels, not values** — it sits alongside the documents and must not become a second copy of the key. `RedactionLogger` is constructed with `'[Student]'` in place of the real name so even its header is clean.
+For the same reason the de-identify audit log records **labels, not values** — it sits alongside the documents and must not become a second copy of the key. `RedactionLogger` is constructed with `'[Student]'` in place of the real name so even its header is clean, plus `operation="DE-IDENTIFICATION", verb="de-identified"` so it does not call itself a redaction run. Those two parameters **default** to the redact wording precisely so `redaction_service`'s two-argument call keeps the redact log byte-for-byte as it was — don't make them required.
 
 ### 44. Two names are the same person only by full name, never by a shared token
 
@@ -523,6 +523,43 @@ The people list itself is **response-only**: it carries real names by constructi
 The UI promises everything in the output folder is safe to upload. That holds for the default `deidentified/` subfolder, but not when the user points output at the folder holding the originals — where the unredacted source documents and the key file sit alongside the output. In single-document mode this is the **default** path, because the Save As dialog opens in the source document's own folder.
 
 `DeidentifyResults.output_folder_holds_originals` (via `_same_folder`, which uses `os.path.samefile` for the case-insensitive-filesystem and symlink variants) flows to the completion screen and the key file, both of which then warn instead of reassuring. The run is deliberately **not** blocked — the user is entitled to that choice; they are just not told a falsehood about it.
+
+### 55. One copy of the app only — and a healthy port does NOT mean the backend is ours
+
+`waitForBackend()` polling `/api/health` proves *something* is on 8765, not that it is the process we just spawned. Two everyday situations put a stranger there: double-clicking the app icon twice, and force-quitting the app (Task Manager / Force Quit) which orphans the Python child. Either way the second `uvicorn` exits 1 on `address already in use` — but only after the orphan has already answered health with 200, so the window opened, and its renderer holds an `API_TOKEN` the live backend rejects: every request 401s.
+
+Three things hold this together in `electron/main.cjs`, and removing any one restores the trap:
+- `app.requestSingleInstanceLock()` gates the whole `ready` path; the loser quits and `second-instance` focuses the running window.
+- `backendReady` is set only after the health check passes. Before that, a backend exit is a **startup** failure: the handler records `backendFailure` and returns instead of showing its own dialog.
+- `waitForBackend` checks `backendFailure` on every tick and rejects with it, so the user reads "another copy is already running… restarting your computer will clear it" rather than a generic "engine stopped".
+
+Do not "simplify" the exit handler back into a single unconditional dialog — it races `waitForBackend` and reports the wrong cause.
+
+### 56. Detection context carries markdown bold; the RENDERER strips it, never the detector
+
+`PIIDetector._get_context()` wraps the matched value in `**…**` — a leftover from the Streamlit UI, which rendered markdown. React renders text verbatim, so this shipped literal asterisks to teachers on the most-used screen (`...Student: **Billy Bob**...`).
+
+It is fixed in `desktop/src/lib/context.ts` (`splitContext`), NOT in `pii_detector`, for two reasons: `_get_context` feeds the shipped **redact** pathway too, and the NER path (`pii_orchestrator`) builds context with **no markers at all**, so the same list carries both formats. `splitContext` must therefore leave unmarked text completely alone rather than assume every context is marked up — `desktop/tests/context.test.ts` asserts both shapes. If you ever do change the backend format, that test is the thing to update first.
+
+### 57. The sidebar's active highlight covers the whole `<li>`, connector included
+
+In `Sidebar.tsx` the active step is drawn by `<motion.div layoutId="activeStep" className="absolute inset-0 …">`. `inset-0` spans the entire `<li>`, and the connector line is a **child of that same `<li>`** — so an unpositioned connector gets painted over and the active step's line silently disappears (and its pill looks taller than every other row).
+
+The connector div carries `relative` for exactly this reason. It looks like a redundant utility class; it is load-bearing. Same applies to the step-content div above it, which is already `relative`.
+
+### 58. `should_replace()` is the de-identify gate — and verification must use the SAME gate
+
+Contextual detection is deliberately generous: a `Parent/Guardian:` line makes the capitalised word on the **next** line a medium-confidence name candidate, so an Australian school form's `Phone:` row is routinely offered as PII **and ticked by default**. Replacing it rewrote the row to `[name]: [phone]`, as though someone were called Phone. `PseudonymMap` already knew better — `clean_person_name()` rejects those words — but `label_for()` never consulted it and fell through to `[name]`.
+
+`PseudonymMap.should_replace(text, category)` is now the single gate. It declines ONLY when all three hold: the category is a person category, the text is entirely `_NOT_A_PERSON_TOKEN` words (`_is_form_label`), and it is neither a known variation nor a span containing one. Structured PII, user-entered names, and junk spans wrapping a real name are never skipped, so it cannot cause under-removal.
+
+**Both callers must use it or the file quarantines itself.** `deidentify_text` skips the match; `_process_document` builds `replaced_matches` from the same predicate and derives `selected_texts` (verification) and the audit-log entries from that list. Verify a string the replacer deliberately left alone and `verify_deidentified` reports it "still visible" — a false quarantine on correct output. This is the same replace/verify symmetry rule #49 protects for cell separators.
+
+### 59. `register_person` assigns a ROLE KEY, never a rendered label
+
+It used to pass `f'[Person {n}]'` into `_add_person`'s **role** parameter. The label came out right only because `_Owner.stem` does `ROLE_LABELS.get(self.role, ROLE_LABELS[DEFAULT_ROLE])` and silently fell back — the right answer for the wrong reason, while an invalid role key leaked out through `/api/deidentify/people` as `"role": "[Person 1]"`. Anything that later validates or switches on `role` would have broken on it.
+
+It passes `DEFAULT_ROLE` and returns `owner.label` (set by `_rebuild()`) rather than reconstructing a string. There is no `[Person N]` label scheme any more — unclassified people render as `[Other person]`, numbered by rule #53 when several share the stem.
 
 ---
 
@@ -625,7 +662,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 631 tests total
+tests/                                # 645 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -639,8 +676,8 @@ tests/                                # 631 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_pseudonym_map.py             # 88 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans
-├── test_text_deidentifier.py         # 30 tests: longest-first replacement, label re-match guard, exact + fuzzy verification
+├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
+├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
 ├── test_deidentification_service.py  # 38 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
 ├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
