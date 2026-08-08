@@ -57,15 +57,58 @@ function waitForBackend(port, timeoutMs = 30000) {
         reject(new Error('Backend did not start within 30 seconds'));
         return;
       }
-      const req = http.get(`http://127.0.0.1:${port}/api/health`, (res) => {
-        if (res.statusCode === 200) {
-          resolve();
-        } else {
-          setTimeout(check, 500);
-        }
-      });
-      req.on('error', () => setTimeout(check, 500));
-      req.setTimeout(1000, () => { req.destroy(); setTimeout(check, 500); });
+      // `settled` stops one request from scheduling two follow-up polls when
+      // destroy() also emits 'error' — otherwise the poll loop forks on itself.
+      let settled = false;
+      const retry = () => {
+        if (settled) return;
+        settled = true;
+        setTimeout(check, 500);
+      };
+
+      const req = http.get(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/health',
+          // Proves identity, not permission: /api/health is unauthenticated,
+          // and answers instance_match=false rather than 401 on a mismatch.
+          headers: { 'X-Api-Token': API_TOKEN },
+        },
+        (res) => {
+          if (res.statusCode !== 200) {
+            res.resume();
+            retry();
+            return;
+          }
+          let body = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => { body += chunk; });
+          res.on('end', () => {
+            let ours = false;
+            try {
+              // Absent field = an older backend; treat as not ours rather than
+              // assume, since assuming is the bug this exists to fix.
+              ours = JSON.parse(body).instance_match === true;
+            } catch {
+              ours = false;
+            }
+            if (settled) return;
+            if (ours) {
+              settled = true;
+              resolve();
+            } else {
+              // Someone else is on our port. Keep polling: our own backend is
+              // about to exit on "address already in use", and that sets
+              // backendFailure, which the next tick reports properly.
+              retry();
+            }
+          });
+          res.on('error', retry);
+        },
+      );
+      req.on('error', retry);
+      req.setTimeout(1000, () => { req.destroy(); retry(); });
       req.end();
     };
 

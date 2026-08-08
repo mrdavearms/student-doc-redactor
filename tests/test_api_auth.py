@@ -72,3 +72,64 @@ class TestApiTokenAuth:
                         headers={"Origin": "http://localhost:5173"})
         assert r.status_code == 401
         assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+class TestHealthInstanceIdentity:
+    """
+    /api/health reports whether the caller reached the process it spawned.
+
+    A healthy port does not mean the backend is ours: an orphan left behind by
+    a force-quit, or a second copy of the app, answers first while our own
+    uvicorn is still loading spaCy and has not yet failed to bind. Electron's
+    waitForBackend requires instance_match before it opens a window.
+    """
+
+    def test_matching_token_is_our_instance(self, monkeypatch):
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.get("/api/health", headers={"X-Api-Token": "sekrit-token"})
+        assert r.status_code == 200
+        assert r.json()["instance_match"] is True
+
+    def test_foreign_token_is_not_our_instance(self, monkeypatch):
+        """An orphan from a previous run holds a DIFFERENT token."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "this-run-token")
+        r = client.get("/api/health", headers={"X-Api-Token": "previous-run-token"})
+        assert r.status_code == 200
+        assert r.json()["instance_match"] is False
+
+    def test_missing_token_is_not_our_instance(self, monkeypatch):
+        monkeypatch.setenv("REDACTION_API_TOKEN", "this-run-token")
+        r = client.get("/api/health")
+        assert r.status_code == 200
+        assert r.json()["instance_match"] is False
+
+    def test_mismatch_is_reported_in_the_body_never_as_401(self, monkeypatch):
+        """The endpoint must stay unauthenticated (rule 35) so the renderer's
+        backend-down poller keeps working — a mismatch is data, not a refusal."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "this-run-token")
+        r = client.get("/api/health", headers={"X-Api-Token": "wrong"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+
+    def test_no_token_configured_always_matches(self, monkeypatch):
+        """A manually-run uvicorn (or pytest) has no identity to check, and
+        must still look healthy — that dev workflow predates the token."""
+        monkeypatch.delenv("REDACTION_API_TOKEN", raising=False)
+        assert client.get("/api/health").json()["instance_match"] is True
+        r = client.get("/api/health", headers={"X-Api-Token": "anything"})
+        assert r.json()["instance_match"] is True
+
+    def test_non_ascii_token_header_does_not_500(self, monkeypatch):
+        """Same guard as the middleware: compare_digest raises TypeError on a
+        non-ASCII str, which would turn a junk header into a 500.
+
+        Header passed pre-encoded as UTF-8 bytes for the reason documented on
+        test_non_ascii_token_header_returns_401_not_500 above: httpx rejects a
+        non-ASCII str header client-side, so the bytes form is the only way to
+        put those octets on the wire.
+        """
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.get("/api/health",
+                       headers={"X-Api-Token": "tökén".encode("utf-8")})
+        assert r.status_code == 200
+        assert r.json()["instance_match"] is False

@@ -126,8 +126,29 @@ _redaction_control = {"cancel_requested": False}
 # ── Health ────────────────────────────────────────────────────────────────
 
 @app.get("/api/health", response_model=HealthResponse)
-def health_check():
-    return HealthResponse(status="ok", version="2.0.0")
+def health_check(request: Request):
+    """
+    Liveness, plus whether the caller is talking to the process it spawned.
+
+    Deliberately still UNAUTHENTICATED (the one endpoint the token middleware
+    skips) so the renderer's backend-down poller keeps working — a mismatched
+    or absent token is reported in the body, never as a 401.
+
+    `instance_match` exists because a healthy port does not mean the backend is
+    ours: an orphan left by a force-quit, or a second copy of the app, answers
+    here first while our own uvicorn is still loading spaCy and has not yet
+    failed to bind. See CLAUDE.md rule 55.
+    """
+    expected = os.environ.get("REDACTION_API_TOKEN", "")
+    if not expected:
+        # No identity configured (manual uvicorn, pytest) — nothing to check.
+        match = True
+    else:
+        provided = request.headers.get("x-api-token", "")
+        match = secrets.compare_digest(
+            provided.encode("utf-8", "ignore"), expected.encode("utf-8")
+        )
+    return HealthResponse(status="ok", version="2.0.0", instance_match=match)
 
 
 # ── Dependencies ──────────────────────────────────────────────────────────

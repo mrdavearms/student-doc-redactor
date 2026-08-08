@@ -263,6 +263,12 @@ class OpenFolderRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
+    # Whether the caller's X-Api-Token matches THIS process's token. Lets the
+    # Electron launcher tell its own freshly-spawned backend apart from an
+    # orphan (or a second copy of the app) already holding the port. True when
+    # no token is configured at all — there is then no identity to check, and
+    # a manually-run uvicorn must still look healthy.
+    instance_match: bool = True
 
 
 # ── Cleanup ──────────────────────────────────────────────────────────────
