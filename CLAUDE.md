@@ -760,11 +760,15 @@ Backend API tests use FastAPI's TestClient: `from fastapi.testclient import Test
 
 `.github/workflows/release.yml` — triggered by pushing a `v*` tag:
 
-1. **build-mac** (macos-latest): Bundles Python + Tesseract, builds `.dmg` via electron-builder
-2. **build-windows** (windows-latest): Bundles Python + Tesseract, builds `.exe` via electron-builder
-3. **release-notes** (runs after both builds): Auto-generates teacher-friendly release notes with download links, setup guidance, categorised changelog, and collapsed auto-updater files
+1. **verify-version** (ubuntu-latest): Hard-fails in seconds if `desktop/package.json` ≠ tag
+2. **create-release** (ubuntu-latest): Creates the GitHub Release for the tag, once — see the race note below
+3. **build-mac** (macos-latest): Bundles Python + Tesseract, builds `.dmg` via electron-builder
+4. **build-windows** (windows-latest): Bundles Python + Tesseract, builds `.exe` via electron-builder
+5. **release-notes** (runs after both builds): Auto-generates teacher-friendly release notes with download links, setup guidance, categorised changelog, and collapsed auto-updater files
 
-electron-builder uses `--publish always` to create a draft GitHub Release and upload assets. The `release-notes` job stamps the body and then runs `gh release edit --draft=false`, so the release **publishes automatically** — no manual step required.
+electron-builder uses `--publish always` to upload assets into that release. `build.publish.releaseType` is `"release"`, so nothing is ever a draft; the `release-notes` job overwrites the placeholder body and re-asserts `--draft=false`, so the release **publishes automatically** — no manual step required.
+
+- **`create-release` exists to stop two releases landing on one tag, and must stay a `needs:` barrier for BOTH builds.** electron-builder creates the release itself when it can't find one for the tag. With `build-mac` and `build-windows` in parallel, both can look, both can miss, and both can create. That is not theoretical — it happened on v1.6.1: two releases, same tag, and the near-empty one won the tag's **download namespace**, so `.../download/v1.6.1/<installer>` returned **404 for both installers and for `latest.yml`** while the release still looked published. `release-notes` then died with HTTP 422 `Release.tag_name already exists`, leaving both bodies blank. Note the failure is invisible from the run summary alone — both build jobs go green, because each one genuinely succeeded at building and uploading into *its own* release. Recovery is to delete the duplicate **by release ID** (`gh api -X DELETE .../releases/<id>`); `gh release delete` takes a tag, which is precisely the thing that is ambiguous. Re-running the `release-notes` job afterwards regenerates the notes correctly.
 
 - **Do NOT push tags to trigger builds unless code is merged to `main` first.** Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - **Pushing a `v*` tag via Bash requires bypass permissions** — the tool's classifier blocks tag pushes that trigger public releases.

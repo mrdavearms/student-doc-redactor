@@ -33,9 +33,37 @@ jobs:
             exit 1
           fi
 
+  # build-mac and build-windows both run `electron-builder --publish always`, and
+  # electron-builder creates the release itself when it can't find one for the tag.
+  # Running in parallel, both can look, both can miss, and both can create — leaving
+  # TWO releases on one tag. That happened on v1.6.1: the duplicate won the tag's
+  # download namespace, so every installer 404'd at its own advertised URL and the
+  # release-notes job died with "Release.tag_name already exists" (HTTP 422).
+  # Creating the release once, here, means both builders find it and only upload.
+  create-release:
+    name: Create release
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      # Non-draft on purpose — releases go straight to production in this repo.
+      # release-notes overwrites these placeholder notes once the installers land.
+      - name: Create the release before any builder can race for it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — reusing it."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "${GITHUB_REF_NAME#v}" \
+              --notes "Installers are still building — this release updates automatically in a few minutes." \
+              --draft=false
+          fi
+
   build-mac:
     name: Build macOS
-    needs: verify-version
+    needs: create-release
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -68,7 +96,7 @@ jobs:
 
   build-windows:
     name: Build Windows
-    needs: verify-version
+    needs: create-release
     runs-on: windows-latest
     steps:
       - name: Checkout
