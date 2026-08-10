@@ -50,11 +50,14 @@ export function useUpdater() {
           prev.status === 'downloading' ? { ...prev, percent } : prev
         );
       }),
-      window.electronAPI!.onUpdateDownloaded(() => {
+      window.electronAPI!.onUpdateDownloaded((version) => {
+        // An update staged before an earlier launch arrives here without ever
+        // passing through `downloading`, so fall back to the version the main
+        // process sends rather than showing a version-less "ready".
         setUpdateState((prev) =>
           prev.status === 'downloading'
-            ? { status: 'ready', version: prev.version }
-            : { status: 'ready', version: '' }
+            ? { status: 'ready', version: version || prev.version }
+            : { status: 'ready', version: version || '' }
         );
       }),
       window.electronAPI!.onUpdateNotAvailable(() => {

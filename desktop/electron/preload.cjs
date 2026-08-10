@@ -21,7 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-available', handler);
   },
   onUpdateDownloaded: (cb) => {
-    const handler = () => cb();
+    // The version must be forwarded: an update staged before a previous launch
+    // reaches "ready" without ever passing through "downloading", so it is the
+    // only place the renderer can learn which version is waiting.
+    const handler = (_event, version) => cb(version);
     ipcRenderer.on('update-downloaded', handler);
     return () => ipcRenderer.removeListener('update-downloaded', handler);
   },

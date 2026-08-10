@@ -464,11 +464,9 @@ function setupAutoUpdater() {
     sendToWindow('update-available-manual', info.version);
   });
 
-  autoUpdater.on('update-downloaded', () => {
+  autoUpdater.on('update-downloaded', (info) => {
     console.log('Update downloaded — will install on quit');
-    if (mainWindow) {
-      mainWindow.webContents.send('update-downloaded');
-    }
+    sendToWindow('update-downloaded', info && info.version);
   });
 
   autoUpdater.on('error', (err) => {
