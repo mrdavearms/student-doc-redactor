@@ -111,11 +111,13 @@ De-identification reads the extracted text already in `_detection_cache` rather 
 
 ### Screen Flow
 
-The desktop app has an 8-screen flow (setup + mode choice + 5 or 6 workflow steps):
+The desktop app has a 9-screen flow (setup + mode choice + 5 or 6 workflow steps, plus a no-PII branch):
 
 ```
 setup → mode_selection → folder_selection → conversion_status → document_review → [people_review] → final_confirmation → completion
 ```
+
+`no_pii_found` is a branch off `document_review`, not a step in the ladder — it is shown when detection finds nothing to remove, so the user is never marched through a review screen with an empty list.
 
 The `setup` screen checks for LibreOffice and Tesseract on first launch, with install guidance and a "Check Again" button. It is skipped on subsequent launches when dependencies are present.
 
@@ -171,7 +173,12 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/pages/ModeSelection.tsx` | Step 0 — choose redact or de-identify |
 | `desktop/src/pages/PeopleReview.tsx` | "Who's who?" — confirm each person's role (de-identify only) |
 | `desktop/src/pages/DeidentifyCompletion.tsx` | Completion screen for de-identify mode (leads with the key file) |
+| `desktop/src/pages/NoPiiFound.tsx` | Shown when detection finds nothing — a branch off `document_review`, not a numbered step |
+| `desktop/src/components/ErrorBoundary.tsx` | Top-level React error boundary, wrapped around `<App/>` in `main.tsx` |
+| `desktop/src/components/ErrorFallback.tsx` | What the boundary renders after a render crash |
+| `desktop/src/components/UpdateCard.tsx` | Prominent update panel on the landing screen (the banner is used on every other screen) |
 | `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **Strips every path-like token first** — file paths in this app contain student names |
+| `desktop/src/lib/peopleRoles.ts` | `effectiveRoleMap` — the role map a run actually uses; see rule #54b |
 | `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
 
 ---
@@ -633,6 +640,9 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 | `error` | string \| null | Global error toast message |
 | `detectionParamsKey` | string | Fingerprint of last detection inputs — matching inputs skip re-detection |
 | `conversionFolderPath` | string | Folder that produced conversionResults — mismatch triggers reprocessing |
+| `backendReachable` | boolean | Backend answering `/api/health` — drives the top-of-app banner (rule #28) |
+| `peopleAutoSkippedKey` | string | Input whose zero-people PeopleReview already auto-skipped — deliberately SEPARATE from `autoAdvancedKey` (rule #54b) |
+| `lastOutputPath` | string | Where the last run wrote, for the "open folder" action on the completion screen |
 
 `setFolderPath` is deliberately dumb (it fires on every keystroke); folder-change invalidation happens via `conversionFolderPath` in `ConversionStatus`, and `setDetectionResults` clears any stale `redactionResults`.
 
