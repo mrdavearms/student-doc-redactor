@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
+import UpdateCard from './components/UpdateCard';
 import { useStore } from './store';
 import { useUpdater } from './hooks/useUpdater';
 import { api, BackendUnreachableError } from './api';
@@ -94,12 +95,24 @@ function App() {
 
   return (
     <Layout updateState={updateState} onCheckForUpdates={checkForUpdates}>
-      <UpdateBanner
-        updateState={updateState}
-        onRestart={restartAndInstall}
-        onDismiss={dismiss}
-        onDownloadLatest={downloadLatest}
-      />
+      {/* On the landing screen the update gets a full card, so it can't be
+          scrolled past; everywhere else it's the banner. Never both — two
+          notices for one update reads as two updates. */}
+      {currentScreen === 'mode_selection' ? (
+        <UpdateCard
+          updateState={updateState}
+          onRestart={restartAndInstall}
+          onDismiss={dismiss}
+          onDownloadLatest={downloadLatest}
+        />
+      ) : (
+        <UpdateBanner
+          updateState={updateState}
+          onRestart={restartAndInstall}
+          onDismiss={dismiss}
+          onDownloadLatest={downloadLatest}
+        />
+      )}
 
       {!backendReachable && (
         <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">

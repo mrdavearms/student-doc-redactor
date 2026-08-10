@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Download, CheckCircle, AlertTriangle } from 'lucide-react';
+import { useStore } from '../store';
 import type { UpdateState } from '../hooks/useUpdater';
 
 interface UpdateBannerProps {
@@ -10,6 +11,9 @@ interface UpdateBannerProps {
 }
 
 export default function UpdateBanner({ updateState, onRestart, onDismiss, onDownloadLatest }: UpdateBannerProps) {
+  // Restarting mid-run would abort the redaction and can leave the backend
+  // holding its port as the new copy starts (see CLAUDE.md rule 55).
+  const isProcessing = useStore((s) => s.isProcessing);
   const visible =
     updateState.status === 'available' ||
     updateState.status === 'downloading' ||
@@ -25,36 +29,39 @@ export default function UpdateBanner({ updateState, onRestart, onDismiss, onDown
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.2 }}
-          className={`mb-4 rounded-lg px-4 py-3 flex items-center justify-between gap-4 text-sm ${
-            updateState.status === 'ready'
-              ? 'bg-emerald-50 border border-emerald-200'
-              : updateState.status === 'up-to-date'
-              ? 'bg-emerald-50 border border-emerald-200'
+          className={`mb-4 rounded-lg px-5 py-4 flex items-center justify-between gap-4 ${
+            // "Up to date" stays quiet and small; everything actionable is loud.
+            updateState.status === 'up-to-date'
+              ? 'bg-emerald-50 border border-emerald-200 text-sm'
+              : updateState.status === 'ready'
+              ? 'bg-emerald-50 border-2 border-emerald-300 shadow-sm'
               : updateState.status === 'error'
-              ? 'bg-amber-50 border border-amber-200'
-              : 'bg-blue-50 border border-blue-200'
+              ? 'bg-amber-50 border-2 border-amber-300 shadow-sm'
+              : 'bg-blue-50 border-2 border-blue-300 shadow-sm'
           }`}
         >
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             {updateState.status === 'available' && (
-              <Download size={15} className="text-blue-500 shrink-0" />
+              <Download size={22} className="text-blue-600 shrink-0" />
             )}
             {updateState.status === 'downloading' && (
-              <Download size={15} className="text-blue-500 shrink-0" />
+              <Download size={22} className="text-blue-600 shrink-0" />
             )}
             {updateState.status === 'ready' && (
-              <CheckCircle size={15} className="text-emerald-500 shrink-0" />
+              <CheckCircle size={22} className="text-emerald-600 shrink-0" />
             )}
             {updateState.status === 'up-to-date' && (
               <CheckCircle size={15} className="text-emerald-500 shrink-0" />
             )}
             {updateState.status === 'error' && (
-              <AlertTriangle size={15} className="text-amber-500 shrink-0" />
+              <AlertTriangle size={22} className="text-amber-600 shrink-0" />
             )}
 
             <span className={`truncate ${
-              updateState.status === 'error' ? 'text-amber-700' :
-              updateState.status === 'downloading' || updateState.status === 'available' ? 'text-blue-700' : 'text-emerald-700'
+              updateState.status === 'up-to-date' ? 'text-emerald-700' :
+              updateState.status === 'error' ? 'text-amber-900 font-semibold' :
+              updateState.status === 'ready' ? 'text-emerald-900 font-semibold' :
+              'text-blue-900 font-semibold'
             }`}>
               {updateState.status === 'available' &&
                 `A new version${updateState.version ? ` (v${updateState.version})` : ''} is available.`}
@@ -69,19 +76,21 @@ export default function UpdateBanner({ updateState, onRestart, onDismiss, onDown
             </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             {updateState.status === 'ready' && (
               <button
                 onClick={onRestart}
-                className="px-3 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors"
+                disabled={isProcessing}
+                title={isProcessing ? 'Finish the documents you’re working on first.' : undefined}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors btn-press"
               >
-                Restart Now
+                Restart &amp; install
               </button>
             )}
             {(updateState.status === 'available' || updateState.status === 'error') && (
               <button
                 onClick={onDownloadLatest}
-                className="px-3 py-1 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors btn-press"
               >
                 Download
               </button>
