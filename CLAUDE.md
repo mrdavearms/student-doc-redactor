@@ -10,14 +10,14 @@ Two frontends exist:
 - **Desktop app** (primary): Electron + React + Vite + Tailwind v4, communicating with a FastAPI backend via HTTP. This is the user-facing product.
 - **Streamlit app** (legacy): The original prototype in `app.py`. Still functional but no longer the focus.
 
-- **Repo**: https://github.com/mrdavearms/student-doc-redactor (primary) · https://gitlab.com/davearmswork/bulk-redaction-tool (mirror)
+- **Repo**: https://github.com/mrdavearms/student-doc-redactor — the only maintained remote. A `gitlab` remote (`davearmswork/bulk-redaction-tool`) is still configured in git but is **abandoned and drifted**; do not push to it, and do not offer to re-sync it.
 - **Branches**: `test` (development) → `main` (stable). Always push to `test` first, then to `main`.
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (651 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 115 tests). Covers **pure modules only** (`api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, `paths.ts`, `context.ts`, routing) — there is no React-component or Electron-main unit harness. Verify React/Electron changes via `npm run build` (tsc) + `npm run lint` + `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 166 tests across 11 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by the scratchpad harnesses described in the Auto-Update section instead. There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -151,6 +151,9 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `backend/main.py` | FastAPI API layer + server-side detection cache |
 | `backend/schemas.py` | Pydantic request/response models |
 | `desktop/electron/main.cjs` | Electron main process — spawns backend, creates window |
+| `desktop/electron/navigation.cjs` | Pure navigation allow-list used by `main.cjs` to deny `window.open` and off-app navigation — extracted so it is unit-testable |
+| `desktop/electron/macUpdate.cjs` | Pure logic for the macOS self-updater — asset choice, download URL, "can we self-update?" checks, and the swap-script text. Unit-tested |
+| `desktop/electron/macUpdateInstaller.cjs` | I/O half of the macOS self-updater — download + SHA-512 check, mount the dmg, stage the new `.app` beside the old one |
 | `desktop/electron/preload.cjs` | Electron preload — exposes `selectFolder`, `openExternal` to renderer |
 | `desktop/src/App.tsx` | React entry point, screen router |
 | `desktop/src/store.ts` | Zustand store — single source of truth for UI state |
@@ -168,6 +171,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/pages/ModeSelection.tsx` | Step 0 — choose redact or de-identify |
 | `desktop/src/pages/PeopleReview.tsx` | "Who's who?" — confirm each person's role (de-identify only) |
 | `desktop/src/pages/DeidentifyCompletion.tsx` | Completion screen for de-identify mode (leads with the key file) |
+| `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **Strips every path-like token first** — file paths in this app contain student names |
 | `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
 
 ---
@@ -486,6 +490,12 @@ The branch now claims any genuinely new form for the merged owner and rebuilds. 
 
 Native pages are rebuilt from line geometry (`_format_native_page`): wrapped prose reflows into paragraphs, lines sharing a row become table cells, header/footer lines are dropped by POSITION (never by string — string matching deleted body lines that merely repeated a letterhead line). Cells are assembled with `_CELL_SEP` (U+2028 — whitespace to the regex engine) and only decorated into `" | "` AFTER replacement and verification have run. Decorating first lets a multi-word PII value straddle a cell join where neither the replace pass nor the symmetric verify pass can bridge it — a silent false pass. AcroForm widget values are re-appended after the rebuild (they live outside the content stream); any formatting failure falls back to the cached raw text.
 
+### 50. The output folder is only safe to share when it is a SEPARATE folder
+
+The UI promises everything in the output folder is safe to upload. That holds for the default `deidentified/` subfolder, but not when the user points output at the folder holding the originals — where the unredacted source documents and the key file sit alongside the output. In single-document mode this is the **default** path, because the Save As dialog opens in the source document's own folder.
+
+`DeidentifyResults.output_folder_holds_originals` (via `_same_folder`, which uses `os.path.samefile` for the case-insensitive-filesystem and symlink variants) flows to the completion screen and the key file, both of which then warn instead of reassuring. The run is deliberately **not** blocked — the user is entitled to that choice; they are just not told a falsehood about it.
+
 ### 51. Roles are PROPOSED, never assumed
 
 The tool cannot know whether "Sarah Williams" is a classroom teacher or a speech pathologist, and getting it wrong is worse than leaving it vague: `[Teacher 1]` over a paediatrician's advice invites an AI to reason about it as classroom observation. `role_suggester.suggest_role()` therefore returns a role **and the phrase that suggested it**, and never emits `likely` without a quotable keyword. No evidence, or two roles tied, ⇒ `unknown` ⇒ `[Other person]` ⇒ the user is asked. `'guardian'` sits under both `parent` and `carer` deliberately so it ties. The bare word `'student'` is deliberately NOT a keyword — it is near-ubiquitous and almost always means the report's subject, who is excluded from the screen.
@@ -500,6 +510,12 @@ A user-typed role goes straight into a label, so "Billy's mum" would smuggle a r
 
 `_rebuild()` runs `_assign_role_labels()` and `_resolve_shared_tokens()` as two separate passes on purpose: role numbering must not be able to corrupt the priority logic that rule #44's identity resolution depends on.
 
+### 54. People-review answers die with any selection change
+
+`personRoles` / `personCustomLabels` / `ignoredPeople` / `peopleReviewed` are only meaningful for the exact set of people the current selections produce. `document_review` sits BEFORE `people_review`, so the user can always go back and deselect the very person they just classified. Every selection mutation — `toggleSelection`, `selectAll`, `deselectAll`, `addManualMatch` — clears them, as do `setDetectionResults` and `setWorkflowMode`. Same class of staleness rule #41 guards for `detectionParamsKey`; they are deliberately NOT part of that fingerprint.
+
+The people list itself is **response-only**: it carries real names by construction and must never be written to disk or into the audit log.
+
 ### 54a. Selection defaults are per-pathway, and mode-switch re-derives them
 
 "Select everything" is right for redaction (over-removal = a black box) and wrong for de-identification (over-removal destroys the content the AI needs — spaCy tags "Working Memory" as ORGANIZATION). `lib/categories.ts`: a category is pre-unticked ONLY when a false positive is likelier than a true one AND removal costs meaning — `ORGANIZATION (NER)`, `NRP (NER)`, unknown `* (NER)` fallbacks, de-identify mode only. The builder writes an EXPLICIT false for every unticked key (DocumentReview renders `?? true`; an omitted key displays ticked while submitting unticked). `setWorkflowMode` re-derives selections for the new mode when detection results exist — in BOTH directions — because the sidebar's change link is reachable mid-flow and stale defaults reintroduce the bug sideways. `detectionParamsKey` stays untouched (rule 41).
@@ -511,18 +527,6 @@ The dropdown renders `explicit answer ?? suggestion`; Continue commits exactly t
 ### 54c. The NER sweep and the read endpoint
 
 After a successful write, the output (labels stripped) is swept with the shared spaCy engine; surviving PERSON entities become `leftover_name_warnings` — warnings, not quarantine (NER false positives would block correct output), excluding strings the user deliberately deselected. The warnings carry REAL NAMES: UI response only, never the audit log, never disk. `/api/output/read` serves preview/copy and is deliberately narrower than cleanup: only `*_deidentified.txt` — never `.UNVERIFIED.txt` (may contain PII) and never the key file.
-
-### 54. People-review answers die with any selection change
-
-`personRoles` / `personCustomLabels` / `ignoredPeople` / `peopleReviewed` are only meaningful for the exact set of people the current selections produce. `document_review` sits BEFORE `people_review`, so the user can always go back and deselect the very person they just classified. Every selection mutation — `toggleSelection`, `selectAll`, `deselectAll`, `addManualMatch` — clears them, as do `setDetectionResults` and `setWorkflowMode`. Same class of staleness rule #41 guards for `detectionParamsKey`; they are deliberately NOT part of that fingerprint.
-
-The people list itself is **response-only**: it carries real names by construction and must never be written to disk or into the audit log.
-
-### 50. The output folder is only safe to share when it is a SEPARATE folder
-
-The UI promises everything in the output folder is safe to upload. That holds for the default `deidentified/` subfolder, but not when the user points output at the folder holding the originals — where the unredacted source documents and the key file sit alongside the output. In single-document mode this is the **default** path, because the Save As dialog opens in the source document's own folder.
-
-`DeidentifyResults.output_folder_holds_originals` (via `_same_folder`, which uses `os.path.samefile` for the case-insensitive-filesystem and symlink variants) flows to the completion screen and the key file, both of which then warn instead of reassuring. The run is deliberately **not** blocked — the user is entitled to that choice; they are just not told a falsehood about it.
 
 ### 55. One copy of the app only — and a healthy port does NOT mean the backend is ours
 
@@ -681,8 +685,9 @@ tests/                                # 651 tests total
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
 ├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
 ├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
-├── test_deidentification_service.py  # 38 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
+├── test_deidentification_service.py  # 48 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
+├── test_output_read_api.py           # 8 tests: /api/output/read guards — *_deidentified.txt only, never .UNVERIFIED.txt or the key file
 ├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
 ├── test_person_roles_api.py          # 12 tests: /people + /labels contracts, roles reaching output, renumbering
 ├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
@@ -781,9 +786,43 @@ electron-builder uses `--publish always` to upload assets into that release. `bu
 
 The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` hook + `UpdateBanner.tsx` component handle the UX. Update metadata (`.yml` and `.blockmap` files) are published alongside installers.
 
-**Platform reality (critical — don't "fix" as a bug):** macOS auto-update CANNOT work until the app is code-signed/notarised AND a `zip` build target is added — Squirrel.Mac can't apply a `.dmg`, and the `mac` target is `dmg`-only so `latest-mac.yml` references the dmg. Since v1.3.2 macOS is intentionally **notify-only**: `setupAutoUpdater()` uses `canAutoUpdate = process.platform === 'win32'` to set `autoDownload=false` on macOS and emit `update-available-manual` (UI prompts a manual download via `RELEASES_URL`). Windows (NSIS) auto-updates fine unsigned — don't disable it. Unsigned macOS installs can never auto-update even after signing (signature mismatch) → those users must re-download once.
+**Platform reality — Windows and macOS take different routes:** Windows (NSIS) auto-updates through electron-updater unsigned; don't disable it. macOS **cannot** use electron-updater's installer: Squirrel.Mac rejects any update whose code signature doesn't match the running app, and an ad-hoc signature has a different fingerprint every build. Adding a `zip` target does not fix that on its own — the signature is the blocker, not the archive format.
 
-**Updater spans 4 files — keep in sync:** `electron/main.cjs` `setupAutoUpdater()` (autoUpdater events → `webContents.send`) → `electron/preload.cjs` (`onUpdate*` bridges) → `src/hooks/useUpdater.ts` (state machine + a download-stall watchdog so it never hangs on "Downloading…") → `UpdateBanner.tsx`/`AboutModal.tsx` (render `available`/`error` with a Download link). `quitAndInstall(true, true)` (silent + relaunch) — don't revert to no-args; with NSIS `oneClick:false` the no-arg form pops the installer wizard.
+So since v1.6.3 macOS **installs updates itself** (`macUpdate.cjs` + `macUpdateInstaller.cjs`) instead of being notify-only: electron-updater still does the *detection*, and we do the download and install. `autoDownload` stays `false` on macOS either way.
+
+**VERIFIED END-TO-END on macOS 26.6.1** (Aug 2026): a locally-built 1.6.1, ad-hoc signed exactly as CI signs, installed in `/Applications`, self-updated to the genuine published 1.6.2 — real URL, real 568 MB download, real checksum, swap, relaunch. **macOS App Management (TCC) did NOT block the bundle swap** for an ad-hoc-signed app with no `TeamIdentifier`. That was the single biggest risk to this design; it is answered. Re-test if Apple tightens App Management.
+
+The Mac flow, and why each step is the way it is:
+1. `update-available` fires → we download the `.dmg` named in `latest-mac.yml` straight from the release URL (`v<version>` tag — see CI/CD).
+2. The published **SHA-512 (base64, not hex)** is verified, and **fails closed** — a manifest without the field aborts rather than installing unverified bytes.
+3. `hdiutil attach` → **`ditto`** (never `cp -R`, which mangles the symlinks inside framework bundles) → the new `.app` is staged in a hidden folder **beside the installed one**, so the later `mv` is a same-volume rename rather than a gigabyte copy.
+4. The staged bundle's **`CFBundleIdentifier`** must match — that is the strict identity gate. The version is only logged if it differs, because `mac.bundleShortVersion` or a pre-release tag can legitimately change it, and the checksum has already pinned the bytes to this release.
+5. On "Restart & Install", a **detached** bash script waits for the app's PID to exit, then swaps the bundles. It is deliberately NOT `set -e` (that would abort before the rollback), and every path is quoted because the bundle name contains a space.
+
+**What the SHA-512 does and does not prove.** `latest-mac.yml` and the `.dmg` come from the same release over the same channel, so it detects **corruption, not tampering** — anyone who can publish a release can publish a matching hash. There is no signature and no out-of-band trust anchor. Do not describe it as a security control; if you want one, sign the manifest with a key compiled into the app.
+
+**The real safety property is the swap**, and three things enforce it — all were defects first:
+- The rollback's exit status **is checked** before anything is deleted. The backup lives *inside* the staging directory, so deleting that directory after a failed rollback left the user with no app at all.
+- The script writes a **log and a failure marker** to `userData`. Everything it does happens after the app exits with stdio discarded; without these, a failed swap is invisible and the app silently re-downloads forever.
+- `restart-and-install` confirms the staged app and script still exist **before quitting**, and aborts on spawn error. Quitting on a vanished script means the app closes and nothing ever reopens it.
+
+**Failures before the quit fall back to `update-available-manual`** (the old notify-only behaviour). Failures *after* the quit cannot fall back — they are covered by the rollback and the failure marker instead. `selfUpdateBlockedReason()` refuses up front when the app isn't writable, is running from `/Volumes`, or is a dev build.
+
+**Staged updates persist across launches.** `staged.json` in the staging folder records what is staged; `adoptStagedUpdate()` re-adopts it at launch. Deleting the folder unconditionally (the original behaviour) made anyone who postponed the restart re-download ~568 MB **on every launch, forever**. A *newer* version arriving while one is staged is **deferred**, not re-staged — re-staging deletes the working update first, so a failed download would lose a perfectly installable one.
+
+**`pickMacAsset` prefers `.dmg` and filters by architecture.** The zip branch has never run in production; if a `zip` target is added later it must not silently become every Mac user's install path on the release that adds it. electron-updater has `filterFilesForArch()` for the same reason — without it, adding an x64 target would hand Intel builds to Apple Silicon users and every check would still pass. Ambiguity returns `null` → manual download.
+
+**Asset names use dash-substitution, NOT percent-encoding.** Verified against a real build: the local artifact is `Redaction Tool-1.6.2-arm64.dmg` but `latest-mac.yml` records `Redaction-Tool-1.6.2-arm64.dmg`. electron-builder rewrites spaces to dashes for the published name and electron-updater matches (`p.replace(/ /g, "-")`); percent-encoding a space would 404.
+
+**No Gatekeeper prompt on update:** macOS only attaches `com.apple.quarantine` to files downloaded by a *browser*. Because the app fetches the update itself, the swapped bundle launches with no security warning. The script does **not** run `xattr -dr` — it was pointless (nothing to strip) while acting as an explicit Gatekeeper bypass, and `/usr/bin/xattr` is a python3 shim that can pop the Command Line Tools installer. This does **not** help first-time installs, which still show the unidentified-developer warning until the app is signed.
+
+**Updater spans 6 files — keep in sync:** `electron/main.cjs` `setupAutoUpdater()` (autoUpdater events → `webContents.send`) → `electron/macUpdate.cjs` + `electron/macUpdateInstaller.cjs` (macOS install) → `electron/preload.cjs` (`onUpdate*` bridges) → `src/hooks/useUpdater.ts` (state machine + a download-stall watchdog so it never hangs on "Downloading…") → `UpdateBanner.tsx`/`AboutModal.tsx` (render `available`/`error` with a Download link). The renderer is deliberately **platform-agnostic** — macOS now drives the same `update-available → download-progress → update-downloaded` events Windows does, so no UI branch was needed. `quitAndInstall(true, true)` (silent + relaunch) — don't revert to no-args; with NSIS `oneClick:false` the no-arg form pops the installer wizard.
+
+**The renderer's stall watchdog resets on percent *change*, so progress must keep moving.** The download therefore owns only **0–90%** and the staging steps emit 92/96/98 — a `ditto` of a ~1 GB bundle reports nothing, and on a slow disk it exceeded `DOWNLOAD_STALL_MS` (90s), so a perfectly successful update told the user it had timed out. Below roughly 100 KB/s the download itself still can't advance a whole percent in 90s and correctly falls back to the manual prompt; don't "fix" that by lengthening the watchdog without also making progress finer-grained.
+
+**Restart is blocked mid-run.** Both `UpdateBanner` and `UpdateCard` disable "Restart & install" while the store's `isProcessing` is true: quitting then would abort the redaction, and the Python backend could still hold port 8765 as the new copy starts (rule #55). The swap script also sleeps 2s before relaunching for the same reason — verified in the end-to-end run, where the relaunched app came up with a healthy backend and no port dialog.
+
+**Where the update UI appears:** a full `UpdateCard` on `mode_selection` (the landing screen) and the `UpdateBanner` everywhere else — never both, since two notices read as two updates. The thin banner alone was easy to scroll past; the machine this was built on had been sitting on v1.5.0 while v1.6.2 was current. Only ACTIONABLE states get the card; "you're up to date" stays in the quiet banner, or the prominent slot trains people to ignore it.
 
 **ESLint baseline:** `cd desktop && npm run lint` reports **7 errors + 1 warning** — errors across `DocumentCard.tsx`, `RedactionProgress.tsx`, `Sidebar.tsx`, `Walkthrough.tsx`, and `FinalConfirmation.tsx`; the warning in `DocumentReview.tsx` (`react-hooks/exhaustive-deps`). New code must not increase the count, but these aren't yours to fix unless you're already touching those files.
 `eslint.config.js`'s `globalIgnores` includes `release` alongside `dist` — without it, a local Mac/Windows build (`npm run dist:mac`/`dist:win`) leaves `desktop/release/` on disk (gitignored, but not eslint-ignored) and `eslint .` sweeps up a bundled third-party file inside it, adding a spurious extra warning. Don't drop `release` from `globalIgnores`, or the baseline count above stops being deterministic.
@@ -792,7 +831,7 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 
 ## What's Next / Known Gaps
 
-- **Code signing**: Mac DMG ad-hoc signed (not notarised); Windows `.exe` unsigned → first-launch OS warnings (release-notes template + README explain the bypass for both platforms). **Consequence:** macOS auto-update is disabled (notify-only) until a Developer ID signature + a `zip` target land. Windows signing note: Azure Trusted Signing (cheapest) is **not available in Australia** (US/CA/EU/UK only); the AU path is a traditional OV cert on a hardware token/HSM, and EV no longer bypasses SmartScreen (changed 2024).
+- **Code signing**: Mac DMG ad-hoc signed (not notarised); Windows `.exe` unsigned → first-launch OS warnings (release-notes template + README explain the bypass for both platforms). **Consequence:** the *install-time* warning remains on both platforms. It no longer affects updating — macOS self-updates without a signature as of v1.6.3 (see Auto-Update), and that path deliberately avoids Gatekeeper by downloading the update itself. Signing would still be worth buying purely to remove the first-launch warning for new users. Windows signing note: Azure Trusted Signing (cheapest) is **not available in Australia** (US/CA/EU/UK only); the AU path is a traditional OV cert on a hardware token/HSM, and EV no longer bypasses SmartScreen (changed 2024).
 - **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
 - **Windows**: SUPPORTED as of v1.1.0. NSIS installer built via CI. Bundled Python + Tesseract. LibreOffice prompted on first run via Setup screen.
 - **Linux**: Not supported. No current plans.

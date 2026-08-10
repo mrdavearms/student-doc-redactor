@@ -10,7 +10,21 @@ const http = require('http');
 const { autoUpdater } = require('electron-updater');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
+const fs = require('fs');
 const { isAllowedNavigation } = require('./navigation.cjs');
+const {
+  downloadUrlFor,
+  pickMacAsset,
+  selfUpdateBlockedReason,
+  BUNDLE_ID,
+  FAILURE_MARKER_NAME,
+  SWAP_LOG_NAME,
+} = require('./macUpdate.cjs');
+const {
+  prepareMacUpdate,
+  readStagedUpdate,
+  cleanStagingDir,
+} = require('./macUpdateInstaller.cjs');
 
 // Per-session shared secret between the renderer and the Python backend.
 // Passed to the backend via env and handed to the renderer over IPC (NOT via
@@ -27,6 +41,11 @@ const DAILY_UPDATE_CHECK_MS = 24 * 60 * 60 * 1000;
 let backendProcess = null;
 let mainWindow = null;
 let updateCheckInterval = null;
+// Set once a macOS update has been downloaded and staged beside the installed
+// app. Holds the arguments the swap script needs; see macUpdate.cjs.
+let pendingMacUpdate = null;
+// Guards against a second 568 MB download while the first is still running.
+let macUpdateInFlight = false;
 // Set once the health check has passed and the window is being created. Before
 // that, a backend exit is a STARTUP failure and is reported by waitForBackend
 // with a more useful message than the generic "engine stopped" dialog.
@@ -267,24 +286,182 @@ function createWindow() {
 
 // ── Auto-updater ──────────────────────────────────────────────────────
 
+/** Path of the installed .app bundle, e.g. /Applications/Redaction Tool.app. */
+function installedAppPath() {
+  // exe is <bundle>.app/Contents/MacOS/<name> — three levels below the bundle.
+  return path.resolve(path.dirname(app.getPath('exe')), '..', '..');
+}
+
+function isWritable(target) {
+  try {
+    fs.accessSync(target, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why macOS can't install this update itself, or null if it can.
+ * Any reason at all sends the user down the manual-download path.
+ */
+function macSelfUpdateBlockedReason() {
+  if (process.platform !== 'darwin') return 'not macOS';
+  const appPath = installedAppPath();
+  return selfUpdateBlockedReason({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    appPath,
+    appWritable: isWritable(appPath),
+    parentWritable: isWritable(path.dirname(appPath)),
+  });
+}
+
+/** Send to the renderer, tolerating a window that has since been closed. */
+function sendToWindow(channel, ...args) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args);
+  }
+}
+
+/**
+ * Read and clear the marker the swap script writes when it fails.
+ *
+ * Everything the script does happens after this process has exited with stdio
+ * discarded, so without this a failed swap is completely invisible — the old
+ * app just relaunches and silently re-downloads the same update forever.
+ */
+function reportPreviousSwapFailure() {
+  const markerPath = path.join(app.getPath('userData'), FAILURE_MARKER_NAME);
+  let reason = null;
+  try {
+    reason = fs.readFileSync(markerPath, 'utf8').trim();
+    fs.unlinkSync(markerPath);
+  } catch {
+    return; // No marker: the last swap either succeeded or never ran.
+  }
+  if (!reason) return;
+  console.error(`Previous update did not install: ${reason}`);
+  // The window does not exist yet at this point in startup.
+  app.whenReady().then(() => {
+    setTimeout(() => sendToWindow('update-error', reason), 3000);
+  });
+}
+
+/** Re-adopt an update staged before an earlier quit, or clear it if unusable. */
+async function adoptStagedUpdate() {
+  const appPath = installedAppPath();
+  const staged = await readStagedUpdate(appPath, { bundleId: BUNDLE_ID });
+  if (staged && staged.version !== app.getVersion()) {
+    pendingMacUpdate = { ...staged, appPath };
+    console.log(`Re-using update ${staged.version} staged earlier`);
+  } else {
+    await cleanStagingDir(appPath);
+  }
+}
+
+/**
+ * Download and stage a macOS update, then tell the renderer it's ready.
+ * Falls back to the manual-download prompt on any failure — this path must
+ * never leave the user worse off than the notify-only behaviour it replaced.
+ */
+async function runMacSelfUpdate(info) {
+  const asset = pickMacAsset(info.files);
+  if (!asset) throw new Error('No downloadable file was published for this release');
+
+  const downloadUrl = downloadUrlFor({ version: info.version, fileName: asset.url });
+  if (!downloadUrl) throw new Error('Could not work out where to download the update from');
+
+  const staged = await prepareMacUpdate({
+    appPath: installedAppPath(),
+    version: info.version,
+    asset,
+    downloadUrl,
+    tempDir: app.getPath('temp'),
+    expectedBundleId: BUNDLE_ID,
+    onProgress: (percent) => sendToWindow('download-progress', percent),
+  });
+
+  pendingMacUpdate = { ...staged, appPath: installedAppPath() };
+  sendToWindow('update-downloaded', staged.version);
+}
+
 function setupAutoUpdater() {
-  // macOS auto-update requires a code-signed app AND a .zip artifact (Squirrel
-  // cannot apply a .dmg). Until the Mac build is signed/notarised, attempting an
-  // auto-download just fails — so on macOS we only DETECT updates and let the
-  // user download manually. Windows (NSIS) auto-updates fine without signing.
+  // Windows (NSIS) auto-updates through electron-updater without a signature.
+  //
+  // macOS cannot: Squirrel.Mac rejects any update whose code signature doesn't
+  // match the running app, and our ad-hoc signature changes every build. So we
+  // let electron-updater DETECT the update and install it ourselves — see
+  // macUpdate.cjs. autoDownload stays off on both branches of the Mac path.
   const canAutoUpdate = process.platform === 'win32';
+  const macBlockedReason = macSelfUpdateBlockedReason();
   autoUpdater.autoDownload = canAutoUpdate;
   autoUpdater.autoInstallOnAppQuit = canAutoUpdate;
+
+  if (process.platform === 'darwin') {
+    if (macBlockedReason) {
+      console.log(`macOS self-update unavailable: ${macBlockedReason}`);
+    } else {
+      reportPreviousSwapFailure();
+      // Adopt an update staged before a previous quit rather than deleting it.
+      // Deleting unconditionally meant anyone who postponed the restart
+      // re-downloaded ~568 MB on every single launch, forever.
+      adoptStagedUpdate().catch(() => {});
+    }
+  }
 
   autoUpdater.on('update-available', (info) => {
     console.log(`Update available: ${info.version}`);
     if (!mainWindow) return;
+
     if (canAutoUpdate) {
-      mainWindow.webContents.send('update-available', info.version);
-    } else {
-      // Notify only — the renderer prompts a manual download.
-      mainWindow.webContents.send('update-available-manual', info.version);
+      sendToWindow('update-available', info.version);
+      return;
     }
+
+    if (process.platform === 'darwin' && !macBlockedReason) {
+      // Already staged — either earlier in this session or before a relaunch.
+      // Re-answering "ready" keeps the daily re-check from knocking the banner
+      // back to "downloading" and re-fetching half a gigabyte.
+      if (pendingMacUpdate && pendingMacUpdate.version === info.version) {
+        sendToWindow('update-downloaded', pendingMacUpdate.version);
+        return;
+      }
+      // A newer version arrived while one is already staged. Keep what we have:
+      // re-staging deletes the working update FIRST, so a failed download would
+      // lose a perfectly installable one. The newer version is picked up after
+      // the pending one is applied.
+      if (pendingMacUpdate) {
+        console.log(
+          `Update ${info.version} deferred — ${pendingMacUpdate.version} is already staged`
+        );
+        sendToWindow('update-downloaded', pendingMacUpdate.version);
+        return;
+      }
+      if (macUpdateInFlight) {
+        // Must not return silently: a manual "Check for Updates" leaves the UI
+        // in `checking` and it reports a bogus "are you connected?" error.
+        sendToWindow('update-available', info.version);
+        return;
+      }
+
+      // Show the same downloading UI Windows gets, then do the work ourselves.
+      macUpdateInFlight = true;
+      sendToWindow('update-available', info.version);
+      runMacSelfUpdate(info)
+        .catch((err) => {
+          console.error('macOS self-update failed:', err.message);
+          pendingMacUpdate = null;
+          sendToWindow('update-available-manual', info.version);
+        })
+        .finally(() => {
+          macUpdateInFlight = false;
+        });
+      return;
+    }
+
+    // Notify only — the renderer prompts a manual download.
+    sendToWindow('update-available-manual', info.version);
   });
 
   autoUpdater.on('update-downloaded', () => {
@@ -376,6 +553,52 @@ ipcMain.handle('open-external', async (_event, url) => {
 ipcMain.handle('get-api-token', () => API_TOKEN);
 
 ipcMain.handle('restart-and-install', () => {
+  if (pendingMacUpdate) {
+    // The swap cannot happen from inside the running bundle, so hand it to a
+    // detached script that waits for this process to exit, replaces the app
+    // (keeping a backup to roll back to) and relaunches it.
+    const { scriptPath, stagedApp, backupPath, stagingDir, appPath } = pendingMacUpdate;
+
+    // Confirm the staged content is still there BEFORE quitting. Quitting on a
+    // vanished script means the app closes and nothing ever reopens it — from
+    // the user's side it simply disappears when they click Restart.
+    if (!fs.existsSync(scriptPath) || !fs.existsSync(stagedApp)) {
+      console.error('Staged update is missing — not quitting');
+      pendingMacUpdate = null;
+      sendToWindow('update-error', 'The downloaded update is no longer available.');
+      return;
+    }
+
+    const userData = app.getPath('userData');
+    let child;
+    try {
+      child = spawn(
+        '/bin/bash',
+        [
+          scriptPath, String(process.pid), appPath, stagedApp, backupPath, stagingDir,
+          path.join(userData, SWAP_LOG_NAME), path.join(userData, FAILURE_MARKER_NAME),
+        ],
+        { detached: true, stdio: 'ignore' }
+      );
+    } catch (err) {
+      console.error('Could not start the update installer:', err.message);
+      sendToWindow('update-error', 'The update could not be started.');
+      return;
+    }
+    // A spawn failure surfaces asynchronously; if it fires before we quit, the
+    // app stays open and says so rather than closing into nothing.
+    child.on('error', (err) => {
+      console.error('Update installer failed to start:', err.message);
+      sendToWindow('update-error', 'The update could not be started.');
+    });
+    child.unref();
+
+    pendingMacUpdate = null;
+    app.isQuitting = true;
+    app.quit();
+    return;
+  }
+
   // isSilent=true, isForceRunAfter=true: install the update silently (no NSIS
   // wizard for the assisted oneClick:false installer) and relaunch the app
   // afterwards — a smooth, hands-off update for non-technical users (Windows).
