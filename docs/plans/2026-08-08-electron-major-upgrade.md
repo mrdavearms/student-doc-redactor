@@ -1,6 +1,15 @@
 # Electron major upgrade — closing GHSA-9f4c-93c8-jc8g
 
-**Status:** planned, not started
+**Status: DONE — 11 August 2026.** Runtime moved 40.10.6 → 43.3.0; `npm audit` reports 0 vulnerabilities. What was actually verified, on macOS 26.6.1:
+
+- static gates: build clean, 166 tests, lint at the 7-error/1-warning baseline, `verify:mac-updater` 43/43
+- packaged build carries **Electron 43.3.0** (checked inside the bundle, not inferred) and is correctly signed: `Identifier=au.com.antigravity.redaction-tool`, `flags=0x10002(adhoc,runtime)`, entitlements applied
+- the Electron 43 app launches and its bundled Python backend answers on 8765, with no library-validation kills
+- **a full self-update from an Electron 43 build**: detected 1.7.1, downloaded the real 567 MB image, verified the SHA-512, mounted, staged 971 MB, detached, wrote `staged.json`, swapped and relaunched itself — `swap succeeded` in the log, no failure marker, staging cleaned, backend healthy afterwards
+- **Windows is NOT runtime-verified** — see the caveat at the end of this file
+
+**Trap found while doing it:** an `electron-builder --dir` build does **not** write `Contents/Resources/app-update.yml`, so a `--dir` build can never detect updates. Do not use `--dir` to test updating; it silently looks like "no update available". Use a full target build.
+
 **Written:** 8 August 2026
 **Revised:** 10 August 2026 — after v1.7.0/v1.7.1 the macOS updater works completely differently, and step 7 as originally written would have had someone undo it. Claims re-verified against the codebase on the same date.
 **Trigger:** the one remaining `npm audit` high, and the only advisory in the August batch that both ships to users and has no in-range fix.
@@ -130,3 +139,19 @@ The bump is two files (`package.json`, `package-lock.json`). If the packaged bui
 - **A macOS user on the previous version self-updates successfully** — downloaded, verified, swapped, relaunched, with `swap succeeded` in the log
 - **The packaged macOS app still reports `Identifier=au.com.antigravity.redaction-tool`, `flags=(adhoc,runtime)`**
 - CLAUDE.md's dependency-advisories note and this file are updated to say it is done
+
+---
+
+## Outstanding caveat: Windows is not runtime-verified
+
+Everything above was verified on macOS. The Windows side of this bump has **not been run by anyone**:
+
+- CI builds the NSIS `.exe` on `windows-latest`, so a build failure would surface — but building is not running.
+- Nobody has launched the Electron 43 app on Windows, confirmed the bundled Python spawns from `process.resourcesPath`, or confirmed electron-updater still auto-updates an installed older build.
+
+Windows relies on electron-updater for the **whole** update path (macOS now only uses it for detection), so a regression there is the higher-consequence one. Before announcing a release widely, smoke-test on Windows:
+
+1. Install the previous version, then let it auto-update to the new one.
+2. Confirm the window opens, the backend starts, and one document runs end-to-end.
+
+The API surface this app uses is tiny and long-stable, so the risk is low — but it is unverified, not proven.
