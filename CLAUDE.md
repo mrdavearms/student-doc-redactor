@@ -788,7 +788,7 @@ The app uses `electron-updater` to check for updates on launch. `useUpdater.ts` 
 
 **Platform reality — Windows and macOS take different routes:** Windows (NSIS) auto-updates through electron-updater unsigned; don't disable it. macOS **cannot** use electron-updater's installer: Squirrel.Mac rejects any update whose code signature doesn't match the running app, and an ad-hoc signature has a different fingerprint every build. Adding a `zip` target does not fix that on its own — the signature is the blocker, not the archive format.
 
-So since v1.6.3 macOS **installs updates itself** (`macUpdate.cjs` + `macUpdateInstaller.cjs`) instead of being notify-only: electron-updater still does the *detection*, and we do the download and install. `autoDownload` stays `false` on macOS either way.
+So since v1.7.0 macOS **installs updates itself** (`macUpdate.cjs` + `macUpdateInstaller.cjs`) instead of being notify-only: electron-updater still does the *detection*, and we do the download and install. `autoDownload` stays `false` on macOS either way.
 
 **VERIFIED END-TO-END on macOS 26.6.1** (Aug 2026): a locally-built 1.6.1, ad-hoc signed exactly as CI signs, installed in `/Applications`, self-updated to the genuine published 1.6.2 — real URL, real 568 MB download, real checksum, swap, relaunch. **macOS App Management (TCC) did NOT block the bundle swap** for an ad-hoc-signed app with no `TeamIdentifier`. That was the single biggest risk to this design; it is answered. Re-test if Apple tightens App Management.
 
@@ -831,7 +831,7 @@ The Mac flow, and why each step is the way it is:
 
 ## What's Next / Known Gaps
 
-- **Code signing**: Mac DMG ad-hoc signed (not notarised); Windows `.exe` unsigned → first-launch OS warnings (release-notes template + README explain the bypass for both platforms). **Consequence:** the *install-time* warning remains on both platforms. It no longer affects updating — macOS self-updates without a signature as of v1.6.3 (see Auto-Update), and that path deliberately avoids Gatekeeper by downloading the update itself. Signing would still be worth buying purely to remove the first-launch warning for new users. Windows signing note: Azure Trusted Signing (cheapest) is **not available in Australia** (US/CA/EU/UK only); the AU path is a traditional OV cert on a hardware token/HSM, and EV no longer bypasses SmartScreen (changed 2024).
+- **Code signing**: Mac DMG ad-hoc signed (not notarised); Windows `.exe` unsigned → first-launch OS warnings (release-notes template + README explain the bypass for both platforms). **Consequence:** the *install-time* warning remains on both platforms. It no longer affects updating — macOS self-updates without a signature as of v1.7.0 (see Auto-Update), and that path deliberately avoids Gatekeeper by downloading the update itself. Signing would still be worth buying purely to remove the first-launch warning for new users. Windows signing note: Azure Trusted Signing (cheapest) is **not available in Australia** (US/CA/EU/UK only); the AU path is a traditional OV cert on a hardware token/HSM, and EV no longer bypasses SmartScreen (changed 2024).
 - **Desktop UX polish**: COMPLETED (March 2026). Walkthrough, tooltips, before/after preview, witty progress comments, custom output path, typographic logo.
 - **Windows**: SUPPORTED as of v1.1.0. NSIS installer built via CI. Bundled Python + Tesseract. LibreOffice prompted on first run via Setup screen.
 - **Linux**: Not supported. No current plans.
