@@ -121,8 +121,10 @@ export default function PasteCompletion() {
             Some items may still be visible
           </div>
           <p className="text-xs text-red-600 mb-2">
-            These could not be confirmed as fully removed. Read the text below before sharing it —
-            the Save button below now suggests an UNVERIFIED filename as a reminder.
+            These could not be confirmed as fully removed. Read the text below before sharing it
+            {isDeidentify
+              ? ' — the Save button below now suggests an UNVERIFIED filename as a reminder.'
+              : '.'}
           </p>
           <ul className="text-xs text-red-500 space-y-0.5">
             {leftovers.map((l, i) => <li key={i}>{l}</li>)}
