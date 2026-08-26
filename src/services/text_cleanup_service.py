@@ -55,3 +55,35 @@ def blackout(text: str, selected_matches: List) -> Tuple[str, int, List[str]]:
     ]
     leftovers = verify_deidentified(cleaned, selected_texts, labels=[BLOCK])
     return cleaned, count, leftovers
+
+
+def deidentify_paste(text: str, selected_matches: List, pmap) -> Tuple[str, int, List[str]]:
+    """
+    Replace every selected PII string with its role label.
+
+    The replaced set is derived from pmap.should_replace() and BOTH the
+    replacement and the verification read from it. Verifying a string the
+    replacer deliberately left alone reports it "still visible" and would
+    quarantine correct output — the replace/verify symmetry of CLAUDE.md
+    rules 49 and 58.
+
+    No fuzzy pass. Rule 45's tolerance exists for OCR text; pasted text is
+    typed, so a classmate "Smyth" against student "Smith" is edit-distance 1
+    and would be a false leftover.
+    """
+    replaced = [
+        m for m in selected_matches
+        if pmap.should_replace(
+            (getattr(m, 'text', '') or '').strip(),
+            getattr(m, 'category', ''))
+    ]
+    cleaned, count = deidentify_text(text, selected_matches, pmap)
+
+    # Same convention as deidentification_service.py: the strip-list before
+    # verification is every label the map can emit, not just the ones used
+    # here — narrower sets omit category/fallback labels that genuinely land
+    # in the output, which verify would then misread as a leftover.
+    labels = pmap.all_labels()
+    selected_texts = [(getattr(m, 'text', '') or '').strip() for m in replaced]
+    leftovers = verify_deidentified(cleaned, selected_texts, labels=labels)
+    return cleaned, count, leftovers
