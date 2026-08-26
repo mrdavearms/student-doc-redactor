@@ -38,8 +38,26 @@ export function useDetection() {
     setLoading, setError, navigateTo,
   } = useStore();
 
+  // Cancels the in-flight detection request, if any, and clears the loading
+  // flag it set. runDetection's own `finally` deliberately never clears
+  // loading for an aborted request (see below) — an aborted request can't
+  // tell whether it was superseded by a newer one that is still legitimately
+  // showing the overlay (React StrictMode's dev-only double-invoke) or
+  // whether this was a genuine cancel with nothing to follow it. This
+  // function IS always the genuine-cancel case (a Back button or an
+  // unmount), so it is the one place that can safely clear loading.
+  //
+  // Guarded to only clear loading when there was actually something of
+  // ours in flight to cancel: `loading` is a single global flag shared by
+  // unrelated callers elsewhere in the app (e.g. PreviewSection), so calling
+  // this with no controller (detection never started) or an
+  // already-aborted one (already cancelled once) must not blindly turn off
+  // a loading state that may by now belong to something else entirely.
   const abortDetection = () => {
-    abortRef.current?.abort();
+    const ctrl = abortRef.current;
+    if (!ctrl || ctrl.signal.aborted) return;
+    ctrl.abort();
+    setLoading(false);
   };
 
   const runDetection = async (source: DetectionSource) => {
@@ -105,6 +123,11 @@ export function useDetection() {
     } catch (e) {
       if ((e as { name?: string })?.name !== 'AbortError') setError(friendlyError(e));
     } finally {
+      // Deliberately skip clearing loading when THIS request was the one
+      // aborted: abortDetection() (above) already cleared it for a genuine
+      // cancel, and if this request was instead superseded by a newer one
+      // (StrictMode's double-invoke), the newer request's own loading state
+      // is still live and must not be stomped on here.
       if (!ctrl.signal.aborted) setLoading(false);
     }
   };
