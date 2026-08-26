@@ -83,3 +83,12 @@ class DetectionService:
             )
 
         return results
+
+    def detect_in_text(self, text: str) -> List['PIIMatch']:
+        """
+        Detect PII in a block of text with no document behind it.
+
+        The orchestrator is already pure text-in; this exists so callers do not
+        reach into the private _orchestrator attribute.
+        """
+        return self._orchestrator.detect_pii_in_text(text, 1)

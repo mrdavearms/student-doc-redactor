@@ -41,6 +41,7 @@ from backend.schemas import (
     PeopleResponse,
     PersonInfoResponse,
     DetectPIIRequest,
+    DetectTextRequest,
     DetectionResultsResponse,
     DocumentPIIResponse,
     DocumentResultResponse,
@@ -112,6 +113,16 @@ app.add_middleware(
 # redaction step needs. We store them server-side keyed by doc path so the
 # frontend only needs to send back selection keys.
 _detection_cache: Dict[str, Dict] = {}
+
+# Reserved detection-cache key for the paste pathway. Chosen because "<" and ">"
+# are invalid in Windows filenames and this is not an absolute POSIX path, so it
+# can never collide with a real document — and because fitz.open() on it raises,
+# so anything that mistakes it for a document degrades safely.
+PASTE_KEY = "<pasted-text>"
+
+# Detection is superlinear: 8.6k chars ~0.3s, 20.7k ~1.2s, 43.1k ~4.6s. Past
+# this a paste is document-sized, and the document pathway handles it better.
+PASTE_MAX_CHARS = 50_000
 
 # Cooperative cancel flag for the in-flight redaction run. This is a single
 # process-global, which is correct only under the app's single-user,
@@ -243,6 +254,9 @@ def process_file(req: ProcessFileRequest):
 def detect_pii(req: DetectPIIRequest):
     pdf_paths = [Path(p) for p in req.pdf_paths]
 
+    if PASTE_KEY in req.pdf_paths:
+        raise HTTPException(status_code=400, detail="Invalid document path.")
+
     for p in pdf_paths:
         if not p.exists():
             raise HTTPException(status_code=400, detail=f"File not found: {p}")
@@ -312,6 +326,61 @@ def detect_pii(req: DetectPIIRequest):
     return DetectionResultsResponse(
         documents=doc_responses,
         total_matches=results.total_matches,
+    )
+
+
+@app.post("/api/text/detect", response_model=DetectionResultsResponse)
+def detect_text(req: DetectTextRequest):
+    """
+    Detection over pasted text, cached under PASTE_KEY.
+
+    ocr_pages stays EMPTY deliberately: marking the page OCR-sourced would arm
+    the fuzzy verification pass (CLAUDE.md rule 45), which is right for scans
+    and wrong for typed text, where a classmate "Smyth" against student "Smith"
+    is edit-distance 1 and would falsely quarantine correct output.
+    """
+    text = req.text or ""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No text was provided.")
+    if len(text) > PASTE_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"That text is {len(text):,} characters, over the "
+                    f"{PASTE_MAX_CHARS:,} limit. Save it as a document and use "
+                    "the document pathway instead."),
+        )
+
+    try:
+        service = DetectionService(
+            student_name=req.student_name,
+            parent_names=req.parent_names,
+            family_names=req.family_names,
+            organisation_names=req.organisation_names,
+            require_ner=True,
+        )
+        matches = service.detect_in_text(text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Detection failed: {e}") from e
+
+    _detection_cache.clear()
+    _detection_cache[PASTE_KEY] = {
+        "matches": matches,
+        "text_data": {"pages": {1: {"text": text}}, "ocr_pages": []},
+    }
+
+    return DetectionResultsResponse(
+        documents=[DocumentPIIResponse(
+            path=PASTE_KEY,
+            filename="Pasted text",
+            matches=[PIIMatchResponse(
+                text=m.text, category=m.category, confidence=m.confidence,
+                confidence_label=m.confidence_label, page_num=m.page_num,
+                line_num=m.line_num, context=m.context, source=m.source,
+                bbox=list(m.bbox) if m.bbox else None,
+            ) for m in matches],
+            ocr_pages=[],
+        )],
+        total_matches=len(matches),
     )
 
 

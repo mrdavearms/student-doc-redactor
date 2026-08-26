@@ -49,6 +49,15 @@ class DetectPIIRequest(BaseModel):
     organisation_names: List[str] = []
 
 
+class DetectTextRequest(BaseModel):
+    """Detection over pasted text. No document, no folder."""
+    text: str
+    student_name: str
+    parent_names: List[str] = []
+    family_names: List[str] = []
+    organisation_names: List[str] = []
+
+
 class PIIMatchResponse(BaseModel):
     text: str
     category: str
