@@ -16,7 +16,7 @@ export default function DocumentReview() {
   // Continue paths below must go through it, not just the button one.
   const afterReview = isDeidentify ? 'people_review' : 'final_confirmation';
   const {
-    detectionResults, currentDocIndex, userSelections,
+    detectionResults, currentDocIndex, userSelections, inputMode,
     setCurrentDocIndex, toggleSelection, selectAll, deselectAll,
     addManualMatch, setError, navigateTo,
   } = useStore();
@@ -309,7 +309,7 @@ export default function DocumentReview() {
             </button>
           )}
           <button
-            onClick={() => navigateTo('conversion_status')}
+            onClick={() => navigateTo(inputMode === 'paste' ? 'folder_selection' : 'conversion_status')}
             className="px-4 py-2.5 rounded-lg text-sm text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
           >
             Cancel
