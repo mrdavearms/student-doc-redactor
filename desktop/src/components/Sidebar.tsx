@@ -30,11 +30,13 @@ interface SidebarProps {
 export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps) {
   const currentScreen = useStore((s) => s.currentScreen);
   const workflowMode = useStore((s) => s.workflowMode);
+  const inputMode = useStore((s) => s.inputMode);
   const navigateTo = useStore((s) => s.navigateTo);
   const isProcessing = useStore((s) => s.isProcessing);
   const effectiveScreen: Screen = currentScreen === 'no_pii_found' ? 'document_review' : currentScreen;
-  // De-identify has an extra step, so the ladder is built per pathway.
-  const steps = screensFor(workflowMode);
+  // De-identify has an extra step, and paste swaps in a scan step, so the
+  // ladder is built per pathway + input.
+  const steps = screensFor(workflowMode, inputMode);
   // -1 for screens outside the ladder (setup, mode_selection) — every step then
   // reads as "future", which is correct: none of them has been done yet.
   const currentIdx = steps.findIndex((s) => s.key === effectiveScreen);

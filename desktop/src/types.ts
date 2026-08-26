@@ -26,14 +26,24 @@ export type WorkflowMode = 'redact' | 'deidentify';
 export interface StepInfo { key: Screen; label: string; step: number }
 
 /**
- * The wizard's steps for a given pathway. De-identify has one extra step —
- * classifying who each person is — so the sidebar must be built per mode
- * rather than from a fixed array.
+ * The wizard's steps for a given pathway and input.
+ *
+ * De-identify has one extra step (classifying who each person is), and paste
+ * REPLACES the conversion step with a scan step rather than skipping it — a
+ * skipped step would need a third auto-advance stamp alongside autoAdvancedKey
+ * and peopleAutoSkippedKey, which is exactly the forward-bounce trap those two
+ * had to be split apart to avoid.
  */
-export function screensFor(mode: WorkflowMode): StepInfo[] {
+export function screensFor(
+  mode: WorkflowMode,
+  inputMode: InputMode = 'folder',
+): StepInfo[] {
+  const isPaste = inputMode === 'paste';
   const steps: { key: Screen; label: string }[] = [
-    { key: 'folder_selection', label: 'Select Documents' },
-    { key: 'conversion_status', label: 'Convert Docs' },
+    { key: 'folder_selection', label: isPaste ? 'Enter Text' : 'Select Documents' },
+    isPaste
+      ? { key: 'text_scan', label: 'Scan Text' }
+      : { key: 'conversion_status', label: 'Convert Docs' },
     { key: 'document_review', label: 'Review PII' },
     ...(mode === 'deidentify'
       ? [{ key: 'people_review' as Screen, label: "Who's Who" }]
