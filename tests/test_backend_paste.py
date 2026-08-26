@@ -99,3 +99,60 @@ def test_folder_path_is_unused_by_the_people_endpoint():
     # touching it, this would fail rather than writing to a bogus location.
     r, _ = people()
     assert r.status_code == 200
+
+
+def clean(mode='redact', **over):
+    return client.post('/api/text/clean', json=paste_body(mode, **over))
+
+
+def test_blackout_removes_the_student_name():
+    r = clean('redact')
+    assert r.status_code == 200
+    assert 'Billy Bob' not in r.json()['text']
+    assert '█' in r.json()['text']
+    assert r.json()['replacements'] > 0
+
+
+def test_blackout_returns_no_key_entries():
+    assert clean('redact').json()['key_entries'] == []
+
+
+def test_deidentify_returns_labels_and_a_key():
+    r = clean('deidentify')
+    assert r.status_code == 200
+    assert '[Student]' in r.json()['text']
+    assert 'Billy Bob' not in r.json()['text']
+    entries = {e['label']: e['real_name'] for e in r.json()['key_entries']}
+    assert entries.get('[Student]') == 'Billy Bob'
+
+
+def test_deselected_items_are_left_alone():
+    r = clean('redact', selected_keys=[])
+    assert r.json()['replacements'] == 0
+    assert 'Billy Bob' in r.json()['text']
+
+
+def test_clean_without_detection_returns_400():
+    client.post('/api/text/discard')
+    r = client.post('/api/text/clean', json={
+        'mode': 'redact', 'student_name': 'Billy Bob', 'selected_keys': [],
+        'parent_names': [], 'family_names': [], 'organisation_names': [],
+        'person_roles': {}, 'person_custom_labels': {}, 'ignored_people': []})
+    assert r.status_code == 400
+
+
+def test_discard_clears_the_cache():
+    detect()
+    assert client.post('/api/text/discard').json()['discarded'] is True
+    # Hand-built body, NOT the clean()/paste_body() helpers: paste_body() calls
+    # detect() internally to compute selected_keys, which would silently
+    # repopulate the very cache this test just discarded and the endpoint
+    # would then return 200. Posting directly is the only way to prove the
+    # cache is genuinely gone (mirrors test_clean_without_detection_returns_400).
+    r = client.post('/api/text/clean', json={
+        'mode': 'redact', 'student_name': 'Billy Bob', 'selected_keys': [],
+        'parent_names': [], 'family_names': [], 'organisation_names': [],
+        'person_roles': {}, 'person_custom_labels': {}, 'ignored_people': []})
+    assert r.status_code == 400
+    # Nothing left to discard a second time.
+    assert client.post('/api/text/discard').json()['discarded'] is False

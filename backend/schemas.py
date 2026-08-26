@@ -76,6 +76,21 @@ class CleanTextRequest(BaseModel):
     ignored_people: List[str] = []
 
 
+class KeyEntry(BaseModel):
+    """One label-to-name row. RESPONSE ONLY — re-identifies a person."""
+    label: str
+    real_name: str
+
+
+class CleanTextResponse(BaseModel):
+    text: str
+    replacements: int
+    leftovers: List[str] = []
+    key_entries: List[KeyEntry] = []
+    ambiguity_notes: List[str] = []
+    leftover_name_warnings: List[str] = []
+
+
 class PIIMatchResponse(BaseModel):
     text: str
     category: str

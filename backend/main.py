@@ -30,6 +30,9 @@ from src.services.deidentification_service import (
 )
 from src.core.pseudonym_map import ASSIGNABLE_ROLES, ROLE_LABELS
 from src.core.pii_detector import PIIMatch
+from src.services.text_cleanup_service import BLOCK, blackout, deidentify_paste
+from src.core.text_deidentifier import strip_labels
+from src.core.pii_orchestrator import find_person_entities
 
 from backend.schemas import (
     ConversionResultsResponse,
@@ -41,6 +44,8 @@ from backend.schemas import (
     PeopleResponse,
     PersonInfoResponse,
     CleanTextRequest,
+    CleanTextResponse,
+    KeyEntry,
     DetectPIIRequest,
     DetectTextRequest,
     DetectionResultsResponse,
@@ -646,6 +651,82 @@ def text_people(req: CleanTextRequest):
 def text_labels(req: CleanTextRequest):
     """Label preview for pasted text."""
     return deidentify_label_preview(_paste_deidentify_body(req))
+
+
+@app.post("/api/text/clean", response_model=CleanTextResponse)
+def clean_text(req: CleanTextRequest):
+    """
+    Blackout or de-identify the cached pasted text.
+
+    key_entries and leftover_name_warnings carry REAL NAMES. They are response
+    only — shown in the local UI, never written to disk and never logged
+    (CLAUDE.md rules 43 and 54c).
+    """
+    cached = _detection_cache.get(PASTE_KEY)
+    if not cached:
+        raise HTTPException(
+            status_code=400,
+            detail="No cached detection data for the pasted text. Run detection first.",
+        )
+
+    text = cached["text_data"]["pages"][1]["text"]
+    matches = cached["matches"]
+    chosen = set(req.selected_keys)
+    selected = [m for i, m in enumerate(matches) if f"{PASTE_KEY}_{i}" in chosen]
+
+    try:
+        if req.mode == "deidentify":
+            request = _deidentify_request_from(_paste_deidentify_body(req))
+            pmap, _ = DeidentificationService.build_map(request)
+            cleaned, count, leftovers = deidentify_paste(text, selected, pmap)
+            # Same convention as deidentification_service.py:662 — the
+            # strip-list before the NER sweep is every label the map can
+            # emit, not just the ones used for people. A narrower list would
+            # leave category/fallback labels (e.g. "[Phone number]",
+            # "[Other person]") unstripped, and the sweep below would then
+            # misread an inserted label as a surviving name.
+            labels = list(pmap.all_labels())
+            key_entries = [KeyEntry(label=l, real_name=n) for l, n in pmap.key_entries()]
+            notes = pmap.ambiguity_notes()
+        else:
+            cleaned, count, leftovers = blackout(text, selected)
+            labels = [BLOCK]
+            key_entries, notes = [], []
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cleaning text failed: {e}") from e
+
+    # The net under everything (rule 54c): sweep the OUTPUT for anything NER
+    # still reads as a person. Warnings, never quarantine — NER false positives
+    # would block correct output. Deliberately deselected strings are excluded
+    # because the user's choice stands.
+    deselected = {
+        (m.text or "").strip().lower()
+        for i, m in enumerate(matches) if f"{PASTE_KEY}_{i}" not in chosen
+    }
+    warnings = []
+    for name in find_person_entities(strip_labels(cleaned, labels)):
+        if name.lower() in deselected:
+            continue
+        warnings.append(name)
+        if len(warnings) >= 10:
+            break
+
+    return CleanTextResponse(
+        text=cleaned,
+        replacements=count,
+        leftovers=leftovers,
+        key_entries=key_entries,
+        ambiguity_notes=notes,
+        leftover_name_warnings=warnings,
+    )
+
+
+@app.post("/api/text/discard")
+def discard_text():
+    """Drop the pasted text from the cache when the user leaves the flow."""
+    return {"discarded": _detection_cache.pop(PASTE_KEY, None) is not None}
 
 
 @app.post("/api/deidentify", response_model=DeidentifyResultsResponse)
