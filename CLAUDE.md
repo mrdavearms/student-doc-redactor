@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (686 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (723 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest, 181 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -725,10 +725,10 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 686 tests total
+tests/                                # 723 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
-├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
+├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
 ├── test_presidio_recognizers.py      # 23 tests: 6 custom AU Presidio recognizer unit tests
 ├── test_redactor.py                  # 26 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
@@ -741,11 +741,11 @@ tests/                                # 686 tests total
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
 ├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
 ├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
-├── test_text_pdf.py                  # 9 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
+├── test_text_pdf.py                  # 23 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
 ├── test_text_cleanup_service.py      # 8 tests: blackout/de-identify over a string, leftover checks, all_labels() strip-list
 ├── test_deidentification_service.py  # 48 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
-├── test_backend_paste.py             # 18 tests: /api/text/* contract, reserved-key rejection, ocr_pages empty, save endpoint
+├── test_backend_paste.py             # 24 tests: /api/text/* contract, reserved-key rejection, ocr_pages empty, save endpoint, manual-PII round trip
 ├── test_output_read_api.py           # 8 tests: /api/output/read guards — *_deidentified.txt only, never .UNVERIFIED.txt or the key file
 ├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
 ├── test_person_roles_api.py          # 12 tests: /people + /labels contracts, roles reaching output, renumbering
