@@ -1,15 +1,20 @@
 import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, FileText, User, Users, Building, ArrowLeft, ArrowRight, Search } from 'lucide-react';
+import { FolderOpen, FileText, ClipboardPaste, User, Users, Building, ArrowLeft, ArrowRight, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { api, BackendUnreachableError } from '../api';
 import HelpTip from '../components/HelpTip';
 
+// Mirrors PASTE_MAX_CHARS in backend/main.py. Detection is superlinear:
+// 8.6k chars ~0.3s, 20.7k ~1.2s, 43.1k ~4.6s.
+const PASTE_MAX = 50_000;
+const PASTE_WARN = 20_000;
+
 export default function FolderSelection() {
   const {
-    inputMode, filePath, fileValid, folderPath, studentName, parentNames, familyNames,
+    inputMode, filePath, fileValid, folderPath, pastedText, studentName, parentNames, familyNames,
     organisationNames, redactHeaderFooter, folderValid, workflowMode,
-    setInputMode, setFilePath, setFileValid,
+    setInputMode, setFilePath, setFileValid, setPastedText,
     setFolderPath, setStudentName, setParentNames, setFamilyNames,
     setOrganisationNames, setRedactHeaderFooter, setFolderValid, navigateTo,
   } = useStore();
@@ -87,8 +92,21 @@ export default function FolderSelection() {
     }
   }, [validateFile]);
 
+  // Switching away from paste drops the slab (the store already clears
+  // pastedText in setInputMode) — this pairs that with discarding the
+  // backend's copy so the two never disagree about whether it was saved.
+  const chooseDocuments = useCallback((mode: 'file' | 'folder') => {
+    if (inputMode === 'paste') {
+      api.discardText().catch(() => { /* best effort — nothing was saved */ });
+    }
+    setInputMode(mode);
+  }, [inputMode, setInputMode]);
+
   const isFileMode = inputMode === 'file';
-  const inputReady = isFileMode ? fileValid : folderValid;
+  const isPasteMode = inputMode === 'paste';
+  const inputReady = isPasteMode
+    ? pastedText.trim().length > 0 && pastedText.length <= PASTE_MAX
+    : isFileMode ? fileValid : folderValid;
   const canProceed = inputReady && studentName.trim().length > 0;
 
   return (
@@ -113,18 +131,18 @@ export default function FolderSelection() {
           <HelpTip text="Pick one document to redact just that file, or a folder to redact every PDF and Word document inside it." />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <ModeCard
             selected={isFileMode}
-            onSelect={() => setInputMode('file')}
+            onSelect={() => chooseDocuments('file')}
             icon={<FileText size={18} />}
             title="One document"
             subtitle="A single PDF or Word file"
           />
           <ModeCard
-            selected={!isFileMode}
+            selected={inputMode === 'folder'}
             onSelect={() => {
-              setInputMode('folder');
+              chooseDocuments('folder');
               // Picking a file rewrote folderPath and cleared folderValid, so
               // re-check whatever is in the box rather than showing a stale
               // (or missing) result for a path the user never validated.
@@ -134,9 +152,42 @@ export default function FolderSelection() {
             title="A whole folder"
             subtitle="Every document in a folder"
           />
+          <ModeCard
+            selected={isPasteMode}
+            onSelect={() => setInputMode('paste')}
+            icon={<ClipboardPaste size={18} />}
+            title="Paste text"
+            subtitle="Clean a block of text you copied from somewhere"
+          />
         </div>
 
-        {isFileMode ? (
+        {isPasteMode ? (
+          <div>
+            <label className="flex items-center gap-1.5 text-sm text-slate-600 mb-1.5">
+              Paste your text
+            </label>
+            <textarea
+              value={pastedText}
+              onChange={(e) => setPastedText(e.target.value)}
+              rows={12}
+              placeholder="Paste the text you want cleaned up…"
+              className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm font-mono
+                         focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
+            />
+            <div className="mt-1.5 flex justify-between text-xs">
+              <span className={pastedText.length > PASTE_MAX ? 'text-red-500' : 'text-slate-400'}>
+                {pastedText.length.toLocaleString()} characters
+              </span>
+              {pastedText.length > PASTE_MAX ? (
+                <span className="text-red-500">
+                  Too long — save it as a document and use the document pathway instead.
+                </span>
+              ) : pastedText.length > PASTE_WARN ? (
+                <span className="text-amber-600">Long text — scanning may take a few seconds.</span>
+              ) : null}
+            </div>
+          </div>
+        ) : isFileMode ? (
           <>
             <div className="flex gap-2">
               <input
@@ -315,7 +366,9 @@ export default function FolderSelection() {
       {/* Warning + proceed */}
       {!canProceed && (
         <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
-          Please select a valid {isFileMode ? 'document' : 'folder'} and enter the student's name to continue.
+          {isPasteMode
+            ? "Please paste some text (under the length limit) and enter the student's name to continue."
+            : `Please select a valid ${isFileMode ? 'document' : 'folder'} and enter the student's name to continue.`}
         </p>
       )}
 
@@ -328,7 +381,7 @@ export default function FolderSelection() {
         </button>
         <button
           disabled={!canProceed}
-          onClick={() => navigateTo('conversion_status')}
+          onClick={() => navigateTo(isPasteMode ? 'text_scan' : 'conversion_status')}
           className={`
             flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all
             ${canProceed
