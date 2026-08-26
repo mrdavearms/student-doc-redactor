@@ -100,11 +100,31 @@ def _split_for_page(text: str, rect: fitz.Rect):
         else:
             hi = mid - 1
 
-    if best is None:
-        # A single unbroken token taller than a page. Hard-split rather than
-        # loop forever producing empty pages.
-        best = max(1, len(text) // 2)
-    return text[:best], text[best:]
+    if best is not None:
+        return text[:best], text[best:]
+
+    # No whitespace break fits on the page -- typically one giant unbroken
+    # token (a URL, an ID string, prose pasted with no spaces). A naive
+    # len(text) // 2 split point was never verified to actually render,
+    # and PyMuPDF cannot wrap a single word: it either fits or it doesn't.
+    # An unverified split silently dropped the ENTIRE chunk (leftover < 0,
+    # zero characters rendered) -- so binary-search on raw character count
+    # for the largest prefix that is confirmed, via _fits(), to render.
+    lo, hi, best_n = 1, len(text), 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if _fits(text[:mid], rect):
+            best_n = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    # best_n starts at 1 and is only ever raised, so at least one character
+    # is always split off -- guaranteed forward progress even in the
+    # pathological case where a single character doesn't fit the rect
+    # (which would otherwise spin the caller's pagination loop forever on
+    # empty chunks).
+    return text[:best_n], text[best_n:]
 
 
 def _strip_metadata(doc: fitz.Document) -> None:
