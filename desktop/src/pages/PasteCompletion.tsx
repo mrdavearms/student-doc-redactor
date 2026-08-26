@@ -116,7 +116,8 @@ export default function PasteCompletion() {
           {isDeidentify ? 'Your de-identified text is ready' : 'Your text is ready'}
         </h2>
         <p className="text-sm text-slate-400 mt-1">
-          {replacements} item{replacements === 1 ? '' : 's'} {isDeidentify ? 'replaced' : 'blacked out'}.
+          {replacements} spot{replacements === 1 ? '' : 's'} {isDeidentify ? 'replaced with a label' : 'blacked out'} in
+          your text. A lower number than what you selected is normal — some selected items shared the same text.
         </p>
       </div>
 
