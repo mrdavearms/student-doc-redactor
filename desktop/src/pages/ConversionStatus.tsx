@@ -8,18 +8,17 @@ import { useStore } from '../store';
 import { basename } from '../lib/paths';
 import { api } from '../api';
 import { friendlyError } from '../lib/errorMessage';
+import { useDetection } from '../hooks/useDetection';
 import type { DependencyStatus } from '../types';
 
 export default function ConversionStatus() {
   const {
     inputMode, filePath,
     folderPath, conversionResults, conversionFolderPath, setConversionResults,
-    setDetectionResults, studentName, parentNames, familyNames,
-    organisationNames, detectionResults, userSelections,
-    detectionParamsKey, setDetectionParamsKey,
     autoAdvancedKey, setAutoAdvancedKey,
     navigateTo, setLoading, setError,
   } = useStore();
+  const { runDetection, abortDetection } = useDetection();
 
   const [deps, setDeps] = useState<DependencyStatus | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -40,6 +39,7 @@ export default function ConversionStatus() {
     // Reprocess when the input changed since these results were produced.
     if (!deps) return;
     if (conversionResults && conversionFolderPath === sourceKey) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing, out of this task's scope
     setProcessing(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -61,80 +61,22 @@ export default function ConversionStatus() {
 
   const handleContinue = async () => {
     if (!results) return;
-
     const allPdfs = [...results.pdf_files, ...results.converted_files];
-    const parentList = parentNames.split(',').map((n) => n.trim()).filter(Boolean);
-    const familyList = familyNames.split(',').map((n) => n.trim()).filter(Boolean);
-    const orgList = organisationNames.split(',').map((n) => n.trim()).filter(Boolean);
-
-    const paramsKey = JSON.stringify({
-      pdfs: allPdfs,
-      student: studentName.trim(),
-      parents: parentList,
-      family: familyList,
-      orgs: orgList,
+    await runDetection({
+      fingerprint: { pdfs: allPdfs },
+      message: 'Extracting text and detecting PII...',
+      run: (names, signal) =>
+        api.detectPII({ pdf_paths: allPdfs, ...names }, { signal }),
     });
-
-    // Same inputs as the last successful run — reuse the existing results so
-    // review decisions and manually added items survive. The backend cache is
-    // only cleared by a NEW detect call, so redaction will still work.
-    if (detectionResults && detectionParamsKey && paramsKey === detectionParamsKey) {
-      const totalMatches = detectionResults.documents.reduce(
-        (sum, d) => sum + d.matches.length, 0);
-      navigateTo(totalMatches === 0 ? 'no_pii_found' : 'document_review');
-      return;
-    }
-
-    // Inputs changed — re-detection will reset review work. Warn if any exists.
-    if (detectionResults) {
-      const hasReviewWork =
-        Object.values(userSelections).some((v) => v === false) ||
-        detectionResults.documents.some((d) =>
-          d.matches.some((m) => m.source === 'manual'));
-      if (hasReviewWork) {
-        const proceed = confirm(
-          'Your details have changed, so PII detection needs to run again. ' +
-          'This will reset your review choices and remove any manually added items. Continue?'
-        );
-        if (!proceed) return;
-      }
-    }
-
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setLoading(true, 'Extracting text and detecting PII...');
-    try {
-      const detection = await api.detectPII({
-        pdf_paths: allPdfs,
-        student_name: studentName,
-        parent_names: parentList,
-        family_names: familyList,
-        organisation_names: orgList,
-      }, { signal: ctrl.signal });
-
-      // If the user navigated away (Back) mid-request, do not force-navigate.
-      if (ctrl.signal.aborted) return;
-
-      setDetectionResults(detection);
-      setDetectionParamsKey(paramsKey);
-      const totalMatches = detection.documents.reduce((sum, d) => sum + d.matches.length, 0);
-      if (totalMatches === 0) {
-        navigateTo('no_pii_found');
-      } else {
-        navigateTo('document_review');
-      }
-    } catch (e) {
-      if ((e as { name?: string })?.name !== 'AbortError') setError(friendlyError(e));
-    } finally {
-      if (!ctrl.signal.aborted) setLoading(false);
-    }
   };
 
   // Single-document mode: nothing to review on this screen when the one file
   // came through cleanly, so go straight to PII detection. Keyed on the file so
   // pressing Back from the review screen doesn't bounce the user forward again.
   const continueRef = useRef(handleContinue);
-  continueRef.current = handleContinue;
+  useEffect(() => {
+    continueRef.current = handleContinue;
+  });
 
   useEffect(() => {
     if (!isFileMode || processing || !results) return;
@@ -296,7 +238,7 @@ export default function ConversionStatus() {
       {/* Navigation */}
       <div className="flex justify-between pt-2">
         <button
-          onClick={() => { abortRef.current?.abort(); setLoading(false); navigateTo('folder_selection'); }}
+          onClick={() => { abortRef.current?.abort(); abortDetection(); setLoading(false); navigateTo('folder_selection'); }}
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
         >
           <ArrowLeft size={16} /> Back
