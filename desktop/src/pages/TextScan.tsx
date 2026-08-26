@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
@@ -14,13 +14,11 @@ import { useDetection } from '../hooks/useDetection';
  * has no auto-advance logic of its own.
  */
 export default function TextScan() {
-  const { pastedText, navigateTo, loading } = useStore();
+  const { pastedText, navigateTo, loading, error } = useStore();
   const { runDetection, abortDetection } = useDetection();
-  const started = useRef(false);
 
   useEffect(() => {
-    if (started.current || !pastedText.trim()) return;
-    started.current = true;
+    if (!pastedText.trim()) return;
     void runDetection({
       fingerprint: { paste: pastedText },
       // This is the copy shown in Layout's full-screen loading overlay — the
@@ -35,15 +33,26 @@ export default function TextScan() {
       run: (names, signal) =>
         api.detectText({ text: pastedText, ...names }, { signal }),
     });
-    // Deliberately no cleanup / no return of abortDetection here. React
-    // StrictMode double-invokes this effect in dev (mount → cleanup →
-    // mount) on the SAME component instance, so `started` would already be
-    // true on the simulated remount. A cleanup that aborts would cancel the
-    // real request kicked off a moment earlier, and the `started` guard
-    // would then block the remount's setup from starting it again — leaving
-    // this screen stuck on "Scanning" until a manual reload. The Back button
-    // below is the only real way to leave this screen, and it already calls
-    // abortDetection() itself before navigating.
+    // Standard AbortController-on-unmount pattern: cancel whatever request
+    // this effect started. There is no `started` ref guarding the call above
+    // — with one, React StrictMode's dev-only double-invoke (mount → cleanup
+    // → mount, same instance) would abort the request the first setup just
+    // started and then the guard would block the second setup from starting
+    // a replacement, leaving the screen stuck on "Scanning" forever. Without
+    // the guard, the first (aborted) call's own `ctrl` sees itself aborted
+    // and quietly no-ops (useDetection ignores AbortError and skips clearing
+    // loading for a signal that isn't the live one); the second call is the
+    // one that actually completes and navigates.
+    //
+    // The cleanup is not just a StrictMode nicety: `Sidebar.tsx`'s "change
+    // pathway" link calls navigateTo() directly whenever a redaction/
+    // de-identify run isn't in flight, which is true for the whole span of
+    // this screen's detection. Without this cleanup, clicking it while a
+    // scan is still running would unmount this screen with nothing to cancel
+    // the fetch — when it later resolved, useDetection would still write the
+    // results into the store and navigate, yanking the user away from
+    // wherever they'd gone in the meantime.
+    return abortDetection;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -54,7 +63,9 @@ export default function TextScan() {
         <p className="text-sm text-slate-400 mt-1">
           {loading
             ? 'Reading your text and looking for personal information.'
-            : 'Scan finished.'}
+            : error
+              ? 'The scan could not finish. See the message above, or go back and try again.'
+              : 'Scan finished.'}
         </p>
       </div>
 
