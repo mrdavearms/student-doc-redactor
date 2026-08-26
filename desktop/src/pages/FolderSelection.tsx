@@ -5,8 +5,10 @@ import { useStore } from '../store';
 import { api, BackendUnreachableError } from '../api';
 import HelpTip from '../components/HelpTip';
 
-// Mirrors PASTE_MAX_CHARS in backend/main.py. Detection is superlinear:
-// 8.6k chars ~0.3s, 20.7k ~1.2s, 43.1k ~4.6s.
+// Mirrors PASTE_MAX_CHARS in backend/main.py. Cost depends heavily on how
+// many names appear, not just length — see that constant's comment for
+// measured timings. Ordinary long text is a several-second wait; text that
+// repeats the same name very heavily can take over a minute.
 const PASTE_MAX = 50_000;
 const PASTE_WARN = 20_000;
 
@@ -183,7 +185,10 @@ export default function FolderSelection() {
                   Too long — save it as a document and use the document pathway instead.
                 </span>
               ) : pastedText.length > PASTE_WARN ? (
-                <span className="text-amber-600">Long text — scanning may take a few seconds.</span>
+                <span className="text-amber-600">
+                  Long text — scanning may take up to a minute, longer if the same
+                  name comes up a lot.
+                </span>
               ) : null}
             </div>
           </div>

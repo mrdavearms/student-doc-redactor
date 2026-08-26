@@ -7,6 +7,7 @@ Architecture: NER-primary — Presidio discovers names, then regex
 catches structured PII and user-provided names.
 """
 
+import bisect
 import re
 import threading
 from typing import List, Optional
@@ -33,6 +34,29 @@ def _get_shared_nlp_engine():
             })
             _NLP_ENGINE = provider.create_engine()
         return _NLP_ENGINE
+
+
+def _line_number_at(newline_offsets: List[int], pos: int) -> int:
+    """
+    1-indexed line number for character offset `pos`, given the sorted list
+    of indices where '\\n' occurs in the text (see `newline_offsets_for`).
+
+    Exactly equivalent to `text[:pos].count('\\n') + 1`, but O(log n) via
+    binary search instead of an O(n) slice-and-count. That formula, run once
+    per occurrence of every generated name variation, was profiled at 1.6
+    million `str.count` calls (5.7s) scanning a 26K-character paste — more
+    than the NER model itself. Precomputing the offsets once per call and
+    bisecting per match removes the quadratic blow-up while returning
+    identical results for every offset, including 0, a position immediately
+    after a newline, the final line, no newlines at all, text ending in a
+    newline, and consecutive newlines.
+    """
+    return bisect.bisect_left(newline_offsets, pos) + 1
+
+
+def newline_offsets_for(text: str) -> List[int]:
+    """Sorted indices of every '\\n' in `text`, for use with `_line_number_at`."""
+    return [i for i, c in enumerate(text) if c == '\n']
 
 
 def find_person_entities(text: str) -> List[str]:
@@ -197,6 +221,12 @@ class PIIOrchestrator:
             # Filter very short NER hits
             ner_matches = [m for m in ner_matches if len(m.text) >= 3]
 
+            # Precompute newline offsets once per call, rather than
+            # re-scanning text[:match.start()] for every occurrence of every
+            # variation below — see _line_number_at's docstring for the
+            # profiled cost of not doing this.
+            newline_offsets = newline_offsets_for(text)
+
             # For each PERSON entity, generate name variations
             for m in ner_matches:
                 if 'name' in m.category.lower() or m.category == 'Person':
@@ -214,7 +244,7 @@ class PIIOrchestrator:
                             var_pattern = (r'(?<![A-Za-z0-9])' + re.escape(var)
                                            + r'(?![A-Za-z0-9])')
                             for match in re.finditer(var_pattern, text, re.IGNORECASE):
-                                line_num = text[:match.start()].count('\n') + 1
+                                line_num = _line_number_at(newline_offsets, match.start())
                                 all_matches.append(PIIMatch(
                                     text=match.group(), category="Person name (NER variation)",
                                     confidence=0.85, page_num=page_num, line_num=line_num,

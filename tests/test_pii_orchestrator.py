@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'core'))
 
 import pytest
 from unittest.mock import patch, MagicMock
-from pii_orchestrator import PIIOrchestrator
+from pii_orchestrator import PIIOrchestrator, _line_number_at, newline_offsets_for
 from pii_detector import PIIMatch
 
 
@@ -340,3 +340,90 @@ class TestNlpEngineCache:
             pytest.skip("Presidio/spaCy not available in this environment")
         assert o1.presidio_analyzer.nlp_engine is o2.presidio_analyzer.nlp_engine, \
             "spaCy NLP engine must be loaded once per process, not per orchestrator"
+
+
+# ---------------------------------------------------------------------------
+# Line-number resolution: bisect must be EXACTLY equivalent to the old
+# text[:pos].count('\n') + 1 formula for every input and offset.
+#
+# This is the fix for the O(occurrences x text length) hot spot profiled in
+# the paste pathway's final review: detect_pii_in_text() used to recompute
+# text[:match.start()].count('\n') from scratch for every occurrence of every
+# generated name variation. On a 26K-character paste that was 1.6 million
+# str.count calls costing 5.7s -- more than the NER model itself. The new
+# path precomputes newline offsets once per call and binary-searches per
+# match. This is shared code the shipped document pathway also runs (once
+# per ~3K-character page), so correctness here is non-negotiable: any drift
+# from the old formula would silently mis-locate matches on the review
+# screen for both pathways.
+# ---------------------------------------------------------------------------
+
+def _naive_line_number(text: str, pos: int) -> int:
+    """The formula being replaced, kept here only as the equivalence oracle."""
+    return text[:pos].count('\n') + 1
+
+
+class TestLineNumberResolutionMatchesOldFormula:
+
+    @pytest.mark.parametrize("text", [
+        "",
+        "no newlines at all here",
+        "\n",
+        "\n\n\n",
+        "line one\nline two\nline three",
+        "line one\nline two\nline three\n",           # trailing newline
+        "a\n\nb\n\n\nc",                                # consecutive newlines
+        "\nstarts with a newline",
+        "ends with a newline\n",
+        "single",
+        ("Behaviour log.\nStudent: Billy Bob\nDOB: 1/1/2015\n\n"
+         "Billy Bob was observed talking to Jane Bob.\nJane Bob reported "
+         "the incident.\n" * 20),                        # realistic, larger
+    ])
+    def test_every_offset_in_text_matches_the_old_formula(self, text):
+        newline_offsets = newline_offsets_for(text)
+        # Every offset from 0 through len(text) inclusive (a regex match can
+        # legitimately end exactly at len(text)).
+        for pos in range(0, len(text) + 1):
+            expected = _naive_line_number(text, pos)
+            actual = _line_number_at(newline_offsets, pos)
+            assert actual == expected, (
+                f"pos={pos!r} in {text!r}: expected {expected}, got {actual}"
+            )
+
+    def test_offset_zero(self):
+        text = "Billy Bob\nwas here"
+        assert _line_number_at(newline_offsets_for(text), 0) == _naive_line_number(text, 0) == 1
+
+    def test_offset_immediately_after_a_newline(self):
+        text = "line one\nline two"
+        pos = text.index('\n') + 1  # first char of "line two"
+        newline_offsets = newline_offsets_for(text)
+        assert _line_number_at(newline_offsets, pos) == _naive_line_number(text, pos) == 2
+
+    def test_offset_on_the_final_line(self):
+        text = "line one\nline two\nline three"
+        pos = len(text) - 1  # last char, on line 3
+        newline_offsets = newline_offsets_for(text)
+        assert _line_number_at(newline_offsets, pos) == _naive_line_number(text, pos) == 3
+
+    def test_text_with_no_newlines_at_all(self):
+        text = "just one long line of text"
+        newline_offsets = newline_offsets_for(text)
+        for pos in (0, 5, len(text)):
+            assert _line_number_at(newline_offsets, pos) == _naive_line_number(text, pos) == 1
+
+    def test_text_ending_in_a_newline(self):
+        text = "line one\nline two\n"
+        newline_offsets = newline_offsets_for(text)
+        # Position right at the trailing newline, and right after it.
+        assert _line_number_at(newline_offsets, len(text) - 1) == \
+            _naive_line_number(text, len(text) - 1) == 2
+        assert _line_number_at(newline_offsets, len(text)) == \
+            _naive_line_number(text, len(text)) == 3
+
+    def test_consecutive_newlines(self):
+        text = "a\n\n\nb"
+        newline_offsets = newline_offsets_for(text)
+        for pos in range(len(text) + 1):
+            assert _line_number_at(newline_offsets, pos) == _naive_line_number(text, pos)

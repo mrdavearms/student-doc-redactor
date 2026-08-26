@@ -129,8 +129,17 @@ _detection_cache: Dict[str, Dict] = {}
 # so anything that mistakes it for a document degrades safely.
 PASTE_KEY = "<pasted-text>"
 
-# Detection is superlinear: 8.6k chars ~0.3s, 20.7k ~1.2s, 43.1k ~4.6s. Past
-# this a paste is document-sized, and the document pathway handles it better.
+# Detection cost depends heavily on how many names appear, not just length —
+# pii_orchestrator.py runs the whole slab as a single "page" (the document
+# pathway calls it once per ~3K-char page instead). Measured after the
+# newline-offset/bisect fix for the O(occurrences x text length) line-number
+# hot spot: ~50K chars of ordinary prose ~7-8s; a behaviour log naming the
+# student on every line, ~35K chars, ~8s. Text that repeats the same one or
+# two names very heavily (the same sentence copy-pasted hundreds of times)
+# can still take over a minute — that residual cost is a second, separate
+# hot spot (re-searching the whole text for every NER-discovered occurrence)
+# that this fix does not touch. Past PASTE_MAX_CHARS a paste is document-
+# sized, and the document pathway handles it better.
 PASTE_MAX_CHARS = 50_000
 
 # Cooperative cancel flag for the in-flight redaction run. This is a single
