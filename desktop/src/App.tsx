@@ -15,6 +15,7 @@ import DocumentReview from './pages/DocumentReview';
 import FinalConfirmation from './pages/FinalConfirmation';
 import Completion from './pages/Completion';
 import DeidentifyCompletion from './pages/DeidentifyCompletion';
+import PasteCompletion from './pages/PasteCompletion';
 import NoPiiFound from './pages/NoPiiFound';
 import PeopleReview from './pages/PeopleReview';
 
@@ -28,6 +29,7 @@ function App() {
   const backendReachable = useStore((s) => s.backendReachable);
   const setBackendReachable = useStore((s) => s.setBackendReachable);
   const workflowMode = useStore((s) => s.workflowMode);
+  const inputMode = useStore((s) => s.inputMode);
   const [appVersion, setAppVersion] = useState('');
 
   useEffect(() => {
@@ -88,6 +90,7 @@ function App() {
       case 'people_review':      return <PeopleReview />;
       case 'final_confirmation': return <FinalConfirmation />;
       case 'completion':
+        if (inputMode === 'paste') return <PasteCompletion />;
         return workflowMode === 'deidentify' ? <DeidentifyCompletion /> : <Completion />;
     }
   };

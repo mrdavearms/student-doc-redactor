@@ -1,16 +1,21 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldCheck, RotateCcw, ArrowLeft, ArrowRight, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, RotateCcw, ArrowLeft, ArrowRight, AlertTriangle, Copy } from 'lucide-react';
 import { useStore } from '../store';
 
 export default function NoPiiFound() {
   const detectionResults = useStore((s) => s.detectionResults);
   const workflowMode = useStore((s) => s.workflowMode);
+  const inputMode = useStore((s) => s.inputMode);
+  const pastedText = useStore((s) => s.pastedText);
   const navigateTo = useStore((s) => s.navigateTo);
+  const [copied, setCopied] = useState(false);
 
   if (!detectionResults) return null;
 
   const docCount = detectionResults.documents.length;
   const isDeidentify = workflowMode === 'deidentify';
+  const isPaste = inputMode === 'paste';
 
   const handleBackToNames = () => {
     navigateTo('folder_selection');
@@ -21,6 +26,69 @@ export default function NoPiiFound() {
   const handleProcessAnother = () => {
     useStore.getState().reset();
   };
+
+  // A document that turns up nothing is fine as-is — the original is still
+  // right there. A paste has no original on disk to fall back to, so "nothing
+  // found" needs its own way out: the pasted text itself, ready to copy back.
+  if (isPaste) {
+    const copyText = async () => {
+      try {
+        await navigator.clipboard.writeText(pastedText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Clipboard failure is non-critical here — the text is still visible below.
+      }
+    };
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-6"
+      >
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
+            {isDeidentify ? 'Nothing was found to replace' : 'Nothing to redact'}
+          </h2>
+          <p className="text-sm text-slate-400 mt-1">
+            We scanned your pasted text and didn&apos;t find any personal information
+            matching the names you gave us. Nothing needed removing, so here it is unchanged.
+          </p>
+        </div>
+
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-slate-600">Your text</h3>
+            <button
+              onClick={copyText}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-primary-50 text-primary-600 hover:bg-primary-100 transition-colors btn-press"
+            >
+              <Copy size={12} /> {copied ? 'Copied ✓' : 'Copy text'}
+            </button>
+          </div>
+          <textarea
+            readOnly
+            value={pastedText}
+            rows={12}
+            className="w-full text-xs font-mono text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-4
+                       resize-y focus:outline-none focus:ring-2 focus:ring-primary-200"
+          />
+        </section>
+
+        <div className="pt-2">
+          <button
+            onClick={handleBackToNames}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600
+                       hover:bg-slate-100 border border-slate-200 transition-colors btn-press"
+          >
+            <ArrowLeft size={16} />
+            Check the names
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

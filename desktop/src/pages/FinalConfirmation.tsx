@@ -7,6 +7,7 @@ import { friendlyError } from '../lib/errorMessage';
 import { basename, dirname, isSamePath, joinPath, stem } from '../lib/paths';
 import { suggestRedactedFilename, suggestDeidentifiedFilename } from '../lib/filename';
 import { friendlyCategory } from '../lib/categories';
+import { holdSensitive } from '../lib/pasteResult';
 import HelpTip from '../components/HelpTip';
 import RedactionProgress from '../components/RedactionProgress';
 
@@ -17,11 +18,15 @@ export default function FinalConfirmation() {
     inputMode, filePath, workflowMode,
     personRoles, personCustomLabels, ignoredPeople, peopleAutoSkippedKey,
     navigateTo, setRedactionResults, setDeidentifyResults, setError,
-    lastOutputPath, setLastOutputPath, setIsProcessing,
+    lastOutputPath, setLastOutputPath, setIsProcessing, setLoading, setPasteOutput,
   } = useStore();
 
   const isDeidentify = workflowMode === 'deidentify';
   const outputSubfolder = isDeidentify ? 'deidentified' : 'redacted';
+  // Three input modes, not two — see CLAUDE.md rule about FinalConfirmation's
+  // branching. isFileMode/isPaste are checked explicitly wherever the choice
+  // matters, rather than inferring "folder" from "!isFileMode".
+  const isPaste = inputMode === 'paste';
 
   const [outputMode, setOutputMode] = useState<'default' | 'custom'>('default');
   const [customPath, setCustomPath] = useState('');
@@ -99,8 +104,10 @@ export default function FinalConfirmation() {
   // Derive the default output path for display
   const defaultOutputDisplay = joinPath(folderPath, outputSubfolder);
 
-  // A custom folder was chosen in folder mode but no path picked yet.
-  const outputIncomplete = !isFileMode && outputMode === 'custom' && !customPath;
+  // A custom folder was chosen in folder mode but no path picked yet. Folder
+  // mode only — paste has no output-folder UI at all (see isPaste below), so
+  // this must not fall through to it via a bare `!isFileMode`.
+  const outputIncomplete = !isFileMode && !isPaste && outputMode === 'custom' && !customPath;
 
   // De-identify can legitimately run with nothing selected: the user came from
   // the "nothing found" screen and still wants the plain-text conversion.
@@ -132,6 +139,39 @@ export default function FinalConfirmation() {
   };
 
   const handleRedact = async () => {
+    // Paste has no documents, no cancel endpoint, and no output folder — it
+    // takes its own short-lived path entirely separate from the
+    // redacting/isProcessing/cancel scaffolding the document pathways need.
+    if (isPaste) {
+      setLoading(true, isDeidentify ? 'De-identifying your text…' : 'Blacking out your text…');
+      try {
+        const result = await api.cleanText({
+          mode: workflowMode,
+          student_name: studentName,
+          selected_keys: Object.entries(userSelections)
+            .filter(([, on]) => on).map(([k]) => k),
+          parent_names: parentNames.split(',').map((n) => n.trim()).filter(Boolean),
+          family_names: familyNames.split(',').map((n) => n.trim()).filter(Boolean),
+          organisation_names: organisationNames.split(',').map((n) => n.trim()).filter(Boolean),
+          person_roles: personRoles,
+          person_custom_labels: personCustomLabels,
+          ignored_people: ignoredPeople,
+        });
+        holdSensitive(result);
+        setPasteOutput({
+          text: result.text,
+          replacements: result.replacements,
+          leftovers: result.leftovers,
+        });
+        navigateTo('completion');
+      } catch (e) {
+        setError(friendlyError(e));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setRedacting(true);
     setIsProcessing(true);
     cancelRequestedRef.current = false;
@@ -411,7 +451,9 @@ export default function FinalConfirmation() {
         )}
       </motion.section>
 
-      {/* Output Folder */}
+      {/* Output Folder — a paste has no output folder and nothing is written
+          until the user chooses to save it on the completion screen. */}
+      {!isPaste && (
       <motion.section
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -549,13 +591,19 @@ export default function FinalConfirmation() {
         </div>
         )}
       </motion.section>
+      )}
 
       {/* Warning */}
       <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
         <ShieldCheck size={18} className="text-emerald-500 shrink-0 mt-0.5" />
         <p className="text-sm text-emerald-700">
-          Your original files will <span className="font-medium">not</span> be modified.{' '}
-          {isDeidentify ? 'De-identified text files' : 'Redacted copies'} will be created in the output folder above.
+          {isPaste ? (
+            <>Nothing is saved automatically. On the next screen you can copy your
+            cleaned text, or save it to a file yourself.</>
+          ) : (
+            <>Your original files will <span className="font-medium">not</span> be modified.{' '}
+            {isDeidentify ? 'De-identified text files' : 'Redacted copies'} will be created in the output folder above.</>
+          )}
         </p>
       </div>
 
@@ -574,9 +622,15 @@ export default function FinalConfirmation() {
         <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
           <Bot size={18} className="text-amber-500 shrink-0 mt-0.5" />
           <p className="text-sm text-amber-700">
-            A private key file will also be saved <span className="font-medium">with your originals</span>,
-            so you can turn the labels back into names later. It is kept out of the output
-            folder on purpose — never upload it.
+            {isPaste ? (
+              <>A name key will also be shown on the next screen, so you can turn
+              the labels back into names later. Keep it private — never paste it
+              into an AI tool.</>
+            ) : (
+              <>A private key file will also be saved <span className="font-medium">with your originals</span>,
+              so you can turn the labels back into names later. It is kept out of the output
+              folder on purpose — never upload it.</>
+            )}
           </p>
         </div>
       )}
@@ -603,7 +657,9 @@ export default function FinalConfirmation() {
             `}
           >
             {isDeidentify ? <Bot size={16} /> : <ShieldCheck size={16} />}
-            {isDeidentify
+            {isPaste
+              ? (isDeidentify ? 'De-identify My Text' : 'Black Out My Text')
+              : isDeidentify
               ? `Create De-identified ${isFileMode ? 'File' : 'Files'}`
               : `Create Redacted ${isFileMode ? 'Document' : 'Documents'}`}
           </button>

@@ -14,10 +14,14 @@ export default function PeopleReview() {
   const {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
-    personRoles, personCustomLabels, ignoredPeople,
+    personRoles, personCustomLabels, ignoredPeople, inputMode, workflowMode,
     navigateTo, setError, setPersonRole, setPersonIgnored,
     acceptSuggestedRoles, peopleAutoSkippedKey, setPeopleAutoSkippedKey,
   } = useStore();
+
+  const isPaste = inputMode === 'paste';
+  const fetchPeople = isPaste ? api.textPeople : api.deidentifyPeople;
+  const fetchLabels = isPaste ? api.textLabels : api.deidentifyLabels;
 
   const [people, setPeople] = useState<PersonInfo[] | null>(null);
   const [roleOptions, setRoleOptions] = useState<{ key: string; label: string }[]>([]);
@@ -35,7 +39,8 @@ export default function PeopleReview() {
       });
     }
     const split = (s: string) => s.split(',').map((n) => n.trim()).filter(Boolean);
-    return {
+    const body: Record<string, unknown> = {
+      mode: workflowMode,
       folder_path: folderPath,
       student_name: studentName,
       parent_names: split(parentNames),
@@ -53,14 +58,25 @@ export default function PeopleReview() {
       person_custom_labels: personCustomLabels,
       ignored_people: ignoredPeople,
     };
+    // The paste endpoints build folder_path/documents/folder_action/
+    // custom_output_* themselves — a paste has none of those, and the
+    // renderer must never fabricate one.
+    if (isPaste) {
+      delete body.folder_path;
+      delete body.documents;
+      delete body.folder_action;
+      delete body.custom_output_path;
+      delete body.custom_output_filename;
+    }
+    return body;
   }, [detectionResults, userSelections, folderPath, studentName, parentNames,
       familyNames, organisationNames, redactHeaderFooter, personRoles,
-      personCustomLabels, ignoredPeople, people]);
+      personCustomLabels, ignoredPeople, people, isPaste, workflowMode]);
 
   // Load the people once on mount.
   useEffect(() => {
     let cancelled = false;
-    api.deidentifyPeople(requestBody())
+    fetchPeople(requestBody())
       .then((res) => {
         if (cancelled) return;
         setPeople(res.people);
@@ -87,11 +103,11 @@ export default function PeopleReview() {
   useEffect(() => {
     if (!people || people.length === 0) return;
     let cancelled = false;
-    api.deidentifyLabels(requestBody())
+    fetchLabels(requestBody())
       .then((res) => { if (!cancelled) setLabels(res.labels); })
       .catch(() => { /* preview only — the run itself is authoritative */ });
     return () => { cancelled = true; };
-  }, [personRoles, personCustomLabels, ignoredPeople, people, requestBody]);
+  }, [personRoles, personCustomLabels, ignoredPeople, people, requestBody, fetchLabels]);
 
   const needsInput = useMemo(
     () => (people ?? []).filter(

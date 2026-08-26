@@ -41,6 +41,10 @@ interface AppState {
   setPastedText: (text: string) => void;
   clearPastedText: () => void;
 
+  /** Safe half of a paste result. The name-bearing half lives in lib/pasteResult. */
+  pasteOutput: { text: string; replacements: number; leftovers: string[] } | null;
+  setPasteOutput: (o: { text: string; replacements: number; leftovers: string[] } | null) => void;
+
   // Step 1: Folder & student info
   folderPath: string;
   studentName: string;
@@ -145,6 +149,7 @@ const initialState = {
   filePath: '',
   fileValid: false,
   pastedText: '',
+  pasteOutput: null as { text: string; replacements: number; leftovers: string[] } | null,
   folderPath: '',
   studentName: '',
   parentNames: '',
@@ -220,6 +225,8 @@ export const useStore = create<AppState>((set) => ({
 
   // "Clean another" on the completion screen.
   clearPastedText: () => set({ pastedText: '' }),
+
+  setPasteOutput: (o) => set({ pasteOutput: o }),
 
   // The redaction run still works in folders (audit log, default output
   // location), so a chosen file also sets folderPath to its containing folder.
