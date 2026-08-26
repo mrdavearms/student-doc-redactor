@@ -5,6 +5,7 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/folder not found/i, "That folder couldn't be found. Check the path and try again."],
   [/file not found/i, "That file couldn't be opened. It may have been moved, renamed, or deleted."],
   [/no cached detection data/i, "The detection step needs to run again. Please go back one step and try again."],
+  [/newer scan has already started/i, "Another scan started after this one, so these results couldn't be used. Please try again."],
   [/cannot open pdf/i, "One of the PDFs couldn't be read. It may be corrupted or password-protected."],
   [/manual pii text must be at least 3 characters/i, "That's too short to redact reliably — please enter at least 3 characters."],
   [/does not exist in this document/i, "That document doesn't have that many pages. Check the page number and try again."],

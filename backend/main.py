@@ -9,6 +9,7 @@ import platform
 import secrets
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List
 
@@ -122,6 +123,50 @@ app.add_middleware(
 # redaction step needs. We store them server-side keyed by doc path so the
 # frontend only needs to send back selection keys.
 _detection_cache: Dict[str, Dict] = {}
+
+# Both detect endpoints (documents and pasted text) are synchronous `def`
+# handlers, so Starlette runs each on a threadpool — and a client disconnect
+# (the user pressing Back mid-scan) does NOT cancel the in-flight work. Two
+# scans can therefore genuinely overlap: whichever finishes last used to win
+# the cache outright, regardless of which one the user is actually looking
+# at. If an older, slower scan then overwrote a newer one the user had
+# already started reviewing, "Clean" would act on text/documents the user
+# never saw or approved — the worst class of bug in a privacy tool.
+#
+# The fix is a generation counter: only the newest detection to have STARTED
+# may publish. _begin_detection() is called right before the slow detection
+# work starts and claims the next generation number; _publish_detection() is
+# called once that work finishes, and only commits the results if no newer
+# detection has started in the meantime. The lock is held only for these two
+# O(1) operations — never across the detection work itself, or the app would
+# become single-threaded for the slowest part of the whole pipeline.
+_detection_lock = threading.Lock()
+_detection_generation = 0
+
+
+def _begin_detection() -> int:
+    """Claim the next detection generation. Call this immediately before the
+    slow detection work starts, after input validation."""
+    global _detection_generation
+    with _detection_lock:
+        _detection_generation += 1
+        return _detection_generation
+
+
+def _publish_detection(generation: int, entries: Dict[str, Dict]) -> bool:
+    """
+    Commit `entries` to the shared cache if `generation` is still the newest
+    one to have started detection. Returns False (and leaves the cache
+    untouched) if a newer detection has started since — the caller's results
+    are stale and must not be published.
+    """
+    global _detection_generation
+    with _detection_lock:
+        if generation != _detection_generation:
+            return False
+        _detection_cache.clear()
+        _detection_cache.update(entries)
+        return True
 
 # Reserved detection-cache key for the paste pathway. Chosen because "<" and ">"
 # are invalid in Windows filenames and this is not an absolute POSIX path, so it
@@ -279,6 +324,8 @@ def detect_pii(req: DetectPIIRequest):
         if not p.exists():
             raise HTTPException(status_code=400, detail=f"File not found: {p}")
 
+    generation = _begin_detection()
+
     try:
         service = DetectionService(
             student_name=req.student_name,
@@ -294,9 +341,11 @@ def detect_pii(req: DetectPIIRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Detection failed: {e}") from e
 
-    # Build response and cache results for redaction step
+    # Build response and cache entries locally — nothing is written to the
+    # shared cache until we know this is still the newest detection to have
+    # started (see _begin_detection/_publish_detection).
     doc_responses = []
-    _detection_cache.clear()
+    cache_entries: Dict[str, Dict] = {}
 
     for doc_path, doc_pii in results.pii_by_document.items():
         doc_key = str(doc_path)
@@ -329,7 +378,7 @@ def detect_pii(req: DetectPIIRequest):
                 "bbox": list(match.bbox) if match.bbox else None,
             })
 
-        _detection_cache[doc_key] = {
+        cache_entries[doc_key] = {
             "matches": doc_pii.matches,  # Keep original PIIMatch objects
             "text_data": doc_pii.text_data,
         }
@@ -340,6 +389,19 @@ def detect_pii(req: DetectPIIRequest):
             matches=match_responses,
             ocr_pages=ocr_pages,
         ))
+
+    if not _publish_detection(generation, cache_entries):
+        # A newer detection has already started (and likely finished) since
+        # this one began — e.g. the user pressed Back and re-scanned while
+        # this request was still running. This request's results are NOT in
+        # the shared cache, so returning them as 200 would let the caller
+        # review or clean a document nobody else is looking at. In practice
+        # the caller is a fetch the renderer already abandoned (AbortError),
+        # so nobody sees this response.
+        raise HTTPException(
+            status_code=409,
+            detail="A newer scan has already started. These results are out of date.",
+        )
 
     return DetectionResultsResponse(
         documents=doc_responses,
@@ -389,6 +451,8 @@ def detect_text(req: DetectTextRequest):
             ),
         )
 
+    generation = _begin_detection()
+
     try:
         service = DetectionService(
             student_name=req.student_name,
@@ -401,11 +465,21 @@ def detect_text(req: DetectTextRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Detection failed: {e}") from e
 
-    _detection_cache.clear()
-    _detection_cache[PASTE_KEY] = {
-        "matches": matches,
-        "text_data": {"pages": {1: {"text": text}}, "ocr_pages": []},
+    cache_entries = {
+        PASTE_KEY: {
+            "matches": matches,
+            "text_data": {"pages": {1: {"text": text}}, "ocr_pages": []},
+        }
     }
+
+    if not _publish_detection(generation, cache_entries):
+        # See the matching comment in detect_pii — a newer detection (paste
+        # or document) has already started, so these results must not
+        # overwrite it.
+        raise HTTPException(
+            status_code=409,
+            detail="A newer scan has already started. These results are out of date.",
+        )
 
     return DetectionResultsResponse(
         documents=[DocumentPIIResponse(
@@ -479,8 +553,19 @@ def add_manual_pii(req: AddManualPIIRequest):
         source="manual",
         bbox=None,
     )
-    cached["matches"].append(match)
-    index = len(cached["matches"]) - 1
+    with _detection_lock:
+        # Re-fetch under the lock rather than reusing the `cached` object
+        # from above: a detection publish could have replaced the cache
+        # entry (with a fresh dict) while we were validating the page
+        # number, and appending to the stale object would silently vanish.
+        cached = _detection_cache.get(req.doc_path)
+        if not cached:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No cached detection data for {req.doc_path}. Run detection first.",
+            )
+        cached["matches"].append(match)
+        index = len(cached["matches"]) - 1
 
     return AddManualPIIResponse(
         match=PIIMatchResponse(

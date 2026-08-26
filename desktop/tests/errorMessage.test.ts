@@ -28,6 +28,11 @@ describe('friendlyError', () => {
       .toMatch(/detection step needs to run again/i);
   });
 
+  it('maps "A newer scan has already started" to a superseded-scan message', () => {
+    expect(friendlyError(new Error('A newer scan has already started. These results are out of date.')))
+      .toMatch(/another scan started after this one/i);
+  });
+
   it('maps "Cannot open PDF" to a corrupted-PDF message', () => {
     expect(friendlyError(new Error('Cannot open PDF: cannot find xref')))
       .toMatch(/PDFs couldn't be read/i);
