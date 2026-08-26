@@ -199,6 +199,30 @@ jobs:
 
           echo "$CHANGELOG" > /tmp/changelog.md
 
+      # A hand-written summary for this version, if one exists. The generated
+      # changelog below is accurate but reads as a wall of commit subjects; a
+      # release that adds a whole feature needs a sentence of plain English
+      # above it saying what the user can now do. Optional by design — a
+      # release with no highlights file just gets the changelog, as before.
+      - name: Load release highlights (optional)
+        # VERSION comes via env rather than being interpolated into the script:
+        # git permits characters like ; " $ & in tag names, so a tag name spliced
+        # straight into a shell string is an injection point, however unlikely.
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          HIGHLIGHTS="docs/release-highlights/v${VERSION}.md"
+          if [ -f "$HIGHLIGHTS" ]; then
+            cp "$HIGHLIGHTS" /tmp/highlights.md
+            printf '\n---\n\n<details>\n<summary>Full list of changes</summary>\n\n' >> /tmp/highlights.md
+            cat /tmp/changelog.md >> /tmp/highlights.md
+            printf '\n</details>\n' >> /tmp/highlights.md
+            mv /tmp/highlights.md /tmp/changelog.md
+            echo "Highlights found — prepended, changelog collapsed."
+          else
+            echo "No highlights file for this version — using the changelog alone."
+          fi
+
       - name: Update release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
