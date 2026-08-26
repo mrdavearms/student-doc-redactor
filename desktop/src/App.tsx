@@ -10,6 +10,7 @@ import Setup from './pages/Setup';
 import ModeSelection from './pages/ModeSelection';
 import FolderSelection from './pages/FolderSelection';
 import ConversionStatus from './pages/ConversionStatus';
+import TextScan from './pages/TextScan';
 import DocumentReview from './pages/DocumentReview';
 import FinalConfirmation from './pages/FinalConfirmation';
 import Completion from './pages/Completion';
@@ -81,6 +82,7 @@ function App() {
       case 'mode_selection':     return <ModeSelection />;
       case 'folder_selection':   return <FolderSelection />;
       case 'conversion_status':  return <ConversionStatus />;
+      case 'text_scan':          return <TextScan />;
       case 'document_review':    return <DocumentReview />;
       case 'no_pii_found':       return <NoPiiFound />;
       case 'people_review':      return <PeopleReview />;
