@@ -1,9 +1,53 @@
 """API token auth: enabled only when REDACTION_API_TOKEN is set (Electron sets it)."""
 
+import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 
 client = TestClient(app)
+
+# The six paste-text-pathway endpoints (2026-08 addition). Bodies here are
+# deliberately minimal/invalid — the token middleware runs before request
+# routing or body validation, so a request must be rejected on the token
+# alone regardless of whether the body would otherwise 422.
+_TEXT_ENDPOINTS = [
+    ("/api/text/detect", {}),
+    ("/api/text/people", {}),
+    ("/api/text/labels", {}),
+    ("/api/text/clean", {}),
+    ("/api/text/discard", {}),
+    ("/api/text/save", {}),
+]
+
+
+class TestNewTextEndpointsRequireToken:
+    """
+    The token middleware matches on request.url.path, not on a registered
+    route allow-list, so it should cover any new endpoint automatically —
+    but that is exactly the kind of assumption a shipping desktop app
+    should not rest on unverified. These six endpoints were not previously
+    exercised by this file at all.
+    """
+
+    @pytest.mark.parametrize("path,body", _TEXT_ENDPOINTS)
+    def test_no_token_rejected(self, monkeypatch, path, body):
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.post(path, json=body)
+        assert r.status_code == 401
+
+    @pytest.mark.parametrize("path,body", _TEXT_ENDPOINTS)
+    def test_wrong_token_rejected(self, monkeypatch, path, body):
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.post(path, json=body, headers={"X-Api-Token": "wrong"})
+        assert r.status_code == 401
+
+    @pytest.mark.parametrize("path,body", _TEXT_ENDPOINTS)
+    def test_correct_token_not_rejected(self, monkeypatch, path, body):
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.post(path, json=body, headers={"X-Api-Token": "sekrit-token"})
+        # The bodies above are minimal/invalid, so a 422 is expected for some
+        # of these — the assertion is only that auth itself did not block it.
+        assert r.status_code != 401
 
 
 class TestApiTokenAuth:
