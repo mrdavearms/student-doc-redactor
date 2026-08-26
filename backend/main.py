@@ -40,6 +40,7 @@ from backend.schemas import (
     LabelPreviewResponse,
     PeopleResponse,
     PersonInfoResponse,
+    CleanTextRequest,
     DetectPIIRequest,
     DetectTextRequest,
     DetectionResultsResponse,
@@ -611,6 +612,40 @@ def deidentify_label_preview(req: DeidentifyRequestBody):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Label preview failed: {e}") from e
+
+
+def _paste_deidentify_body(req: CleanTextRequest) -> DeidentifyRequestBody:
+    """
+    The paste request as a document-shaped one.
+
+    folder_path is PASTE_KEY and is never read: build_map() does not touch it,
+    and nothing in the paste pathway writes to disk. Building it here rather
+    than in the renderer keeps the frontend from inventing paths.
+    """
+    return DeidentifyRequestBody(
+        folder_path=PASTE_KEY,
+        student_name=req.student_name,
+        documents=[PASTE_KEY],
+        selected_keys=req.selected_keys,
+        parent_names=req.parent_names,
+        family_names=req.family_names,
+        organisation_names=req.organisation_names,
+        person_roles=req.person_roles,
+        person_custom_labels=req.person_custom_labels,
+        ignored_people=req.ignored_people,
+    )
+
+
+@app.post("/api/text/people", response_model=PeopleResponse)
+def text_people(req: CleanTextRequest):
+    """Who's who, for pasted text. Same map the clean step will build."""
+    return deidentify_people(_paste_deidentify_body(req))
+
+
+@app.post("/api/text/labels", response_model=LabelPreviewResponse)
+def text_labels(req: CleanTextRequest):
+    """Label preview for pasted text."""
+    return deidentify_label_preview(_paste_deidentify_body(req))
 
 
 @app.post("/api/deidentify", response_model=DeidentifyResultsResponse)

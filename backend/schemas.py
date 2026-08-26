@@ -58,6 +58,24 @@ class DetectTextRequest(BaseModel):
     organisation_names: List[str] = []
 
 
+class CleanTextRequest(BaseModel):
+    """
+    Shared body for the paste pathway's people, labels and clean endpoints.
+
+    Carries no folder_path: a paste has no folder, and the renderer must never
+    fabricate one. The endpoints build the synthetic request themselves.
+    """
+    mode: str  # 'redact' | 'deidentify'
+    student_name: str
+    selected_keys: List[str]  # ["<pasted-text>_<idx>", ...]
+    parent_names: List[str] = []
+    family_names: List[str] = []
+    organisation_names: List[str] = []
+    person_roles: Dict[str, str] = {}
+    person_custom_labels: Dict[str, str] = {}
+    ignored_people: List[str] = []
+
+
 class PIIMatchResponse(BaseModel):
     text: str
     category: str
