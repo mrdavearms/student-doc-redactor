@@ -4,14 +4,15 @@ export type Screen =
   | 'mode_selection'
   | 'folder_selection'
   | 'conversion_status'
+  | 'text_scan'
   | 'document_review'
   | 'no_pii_found'
   | 'people_review'
   | 'final_confirmation'
   | 'completion';
 
-/** What the user picked to redact: one document, or a whole folder */
-export type InputMode = 'file' | 'folder';
+/** What the user picked to clean: one document, a whole folder, or pasted text */
+export type InputMode = 'file' | 'folder' | 'paste';
 
 /**
  * Which pathway the user chose at the start:

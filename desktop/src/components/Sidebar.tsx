@@ -14,6 +14,7 @@ const ICONS: Record<Screen, React.ReactNode> = {
   mode_selection: <ShieldCheck size={18} />,
   folder_selection: <FolderOpen size={18} />,
   conversion_status: <RefreshCw size={18} />,
+  text_scan: <Search size={18} />,
   document_review: <Search size={18} />,
   people_review: <UserRound size={18} />,
   no_pii_found: <Search size={18} />,

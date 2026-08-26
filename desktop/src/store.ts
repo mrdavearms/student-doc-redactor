@@ -33,6 +33,14 @@ interface AppState {
   setFilePath: (path: string) => void;
   setFileValid: (valid: boolean) => void;
 
+  /**
+   * The slab the user pasted. Raw PII in the store — it has to be, because it
+   * spans four screens — so it is cleared aggressively. See clearPastedText.
+   */
+  pastedText: string;
+  setPastedText: (text: string) => void;
+  clearPastedText: () => void;
+
   // Step 1: Folder & student info
   folderPath: string;
   studentName: string;
@@ -136,6 +144,7 @@ const initialState = {
   inputMode: 'folder' as InputMode,
   filePath: '',
   fileValid: false,
+  pastedText: '',
   folderPath: '',
   studentName: '',
   parentNames: '',
@@ -199,7 +208,18 @@ export const useStore = create<AppState>((set) => ({
       ...CLEARED_PEOPLE_STATE,
     })),
 
-  setInputMode: (mode) => set({ inputMode: mode }),
+  // Leaving the paste pathway drops the slab immediately. FolderSelection
+  // pairs this with POST /api/text/discard so the backend cache goes too.
+  setInputMode: (mode) =>
+    set((state) => ({
+      inputMode: mode,
+      pastedText: mode === 'paste' ? state.pastedText : '',
+    })),
+
+  setPastedText: (text) => set({ pastedText: text }),
+
+  // "Clean another" on the completion screen.
+  clearPastedText: () => set({ pastedText: '' }),
 
   // The redaction run still works in folders (audit log, default output
   // location), so a chosen file also sets folderPath to its containing folder.
