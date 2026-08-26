@@ -14,6 +14,15 @@ The sentinel is chosen per render. search_for() cannot tell our sentinel from
 the same characters occurring in the user's own text, so a hard-coded one would
 black out real content — a maths report containing "XXXX", a table of "~~~~"
 separators.
+
+The block/sentinel mechanism only has to cope with characters WE choose. The
+user's own pasted content goes through the same 'helv' font with no such
+protection: a non-Latin-1 character in it (an emoji, a name in a non-Latin
+script) silently renders as "?" too. There is no in-repo fix for that without
+bundling a Unicode font (a new asset/dependency this project deliberately
+avoids), so `render()` instead reports which of the user's own characters it
+could not display, via `unsupported_characters()`, so the caller can warn
+rather than silently ship corrupted content.
 """
 
 import re
@@ -127,6 +136,43 @@ def _split_for_page(text: str, rect: fitz.Rect):
     return text[:best_n], text[best_n:]
 
 
+def unsupported_characters(text: str) -> list:
+    """
+    Distinct characters in `text` (first-seen order) that render()'s font
+    cannot display -- these come out as a literal "?" in the saved PDF.
+
+    fitz.Font(FONT_NAME).has_glyph() alone is NOT a reliable predictor here:
+    it reports whether the underlying substitute font FILE contains a glyph
+    for a codepoint, but a base-14 font referenced by name (like 'helv') is
+    written into the PDF as a "simple" font, addressed through a single-byte
+    Latin-1 table -- so has_glyph() answers "yes" for characters the file
+    happens to contain but insert_textbox() can never actually reach, e.g.
+    '€', an em dash, or curly quotes (all confirmed by direct rendering to
+    produce '?', despite has_glyph() reporting a glyph exists). A character
+    only survives both constraints: its codepoint must fit in one byte
+    (<= 0xFF) AND the font must have a glyph for it -- the latter half
+    catches the few Latin-1-range codepoints (the C0/C1 control characters)
+    that have no glyph at all. Whitespace is exempt: it lays out lines and
+    is never rendered as a glyph, so has_glyph() correctly says "no" for it
+    while it renders perfectly fine.
+
+    Verified directly against fitz.Font('helv') + a real insert_textbox()
+    render across the full Latin-1 range, common CJK/Hebrew/Arabic/emoji,
+    and the specific "looks covered but isn't" cases above -- this rule
+    matched actual rendered output with zero mismatches.
+    """
+    font = fitz.Font(FONT_NAME)
+    seen = set()
+    unsupported = []
+    for char in text:
+        if char in seen or char.isspace():
+            continue
+        seen.add(char)
+        if ord(char) > 0xFF or not font.has_glyph(ord(char)):
+            unsupported.append(char)
+    return unsupported
+
+
 def _strip_metadata(doc: fitz.Document) -> None:
     doc.set_metadata({
         'author': '', 'title': '', 'subject': '', 'creator': '',
@@ -135,10 +181,23 @@ def _strip_metadata(doc: fitz.Document) -> None:
     doc.del_xml_metadata()
 
 
-def render(text: str, out_path, block: str) -> None:
-    """Lay `text` out as a PDF, turning each `block` run into a black box."""
+def render(text: str, out_path, block: str) -> list:
+    """
+    Lay `text` out as a PDF, turning each `block` run into a black box.
+
+    Returns the distinct characters (first-seen order) of the user's OWN
+    content that this renderer's font cannot display and which therefore
+    show up as "?" in the saved PDF -- empty if none. Checked against `text`
+    with the `block` runs removed, since those are never actually inserted
+    into the page (they become the sentinel, then get redacted away) and so
+    can never appear as "?" no matter what character they use. The save
+    still succeeds either way; the caller decides what to do with the list.
+    """
+    text = text or ''
+    unsupported = unsupported_characters(text.replace(block, ''))
+
     sentinel = choose_sentinel(text)
-    laid_out = (text or '').replace(block, sentinel)
+    laid_out = text.replace(block, sentinel)
 
     doc = fitz.open()
     rect = _page_rect()
@@ -163,3 +222,5 @@ def render(text: str, out_path, block: str) -> None:
         doc.save(str(out_path))
     finally:
         doc.close()
+
+    return unsupported

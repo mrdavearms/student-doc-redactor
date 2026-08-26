@@ -740,16 +740,20 @@ def save_text(req: SaveTextRequest):
         raise HTTPException(status_code=400, detail="Unsupported file type.")
 
     out = Path(req.path)
+    unsupported: list = []
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         if req.kind == "txt":
             out.write_text(req.text, encoding="utf-8")
         else:
-            render_text_pdf(req.text, out, block=BLOCK)
+            # A save always succeeds even if some characters can't be shown
+            # (see src/core/text_pdf.py) -- the warning travels back in the
+            # response rather than blocking the write.
+            unsupported = render_text_pdf(req.text, out, block=BLOCK)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Saving failed: {e}") from e
 
-    return SaveTextResponse(path=str(out))
+    return SaveTextResponse(path=str(out), unsupported_characters=unsupported)
 
 
 @app.post("/api/deidentify", response_model=DeidentifyResultsResponse)

@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 import fitz
-from text_pdf import choose_sentinel, render
+from text_pdf import choose_sentinel, render, unsupported_characters
 
 BLOCK = '█' * 6
 
@@ -139,3 +139,109 @@ def test_the_reported_pathological_case_produces_no_blank_page():
     expected_non_ws = _non_whitespace_count(
         text.replace(BLOCK, ''))
     assert _non_whitespace_count(extracted) == expected_non_ws
+
+
+# ── Defect A: unsupported (non-Latin-1) characters must be reported, not
+# silently corrupted to "?" ─────────────────────────────────────────────────
+
+def _render_as_question_mark(char):
+    """Ground truth: does this single character actually come out as '?'
+    when laid out with the real renderer font? Used to confirm the
+    detection helper's predictions against the real rendered result, not
+    just against fitz.Font.has_glyph() in isolation."""
+    probe = fitz.open()
+    page = probe.new_page(width=595, height=842)
+    rect = fitz.Rect(50, 50, 545, 792)
+    page.insert_textbox(rect, f'X{char}Y', fontname='helv', fontsize=11)
+    extracted = page.get_text().strip()
+    probe.close()
+    if extracted.startswith('X') and extracted.endswith('Y'):
+        extracted = extracted[1:-1]
+    return extracted == '?'
+
+
+def test_ordinary_latin1_text_has_no_unsupported_characters():
+    assert unsupported_characters('Café François Müller Zoë - 100%!') == []
+
+
+def test_whitespace_is_never_reported_as_unsupported():
+    assert unsupported_characters('line one\nline two\ttabbed') == []
+
+
+def test_emoji_hebrew_chinese_and_arabic_are_detected_as_unsupported():
+    text = 'Great work! 🎉 שלום 你好 مرحبا'
+    found = unsupported_characters(text)
+    assert '🎉' in found
+    assert 'ש' in found
+    assert '你' in found
+    assert 'م' in found
+
+
+def test_characters_that_LOOK_covered_but_actually_render_as_question_mark():
+    # These exist in the underlying font FILE (fitz.Font.has_glyph() alone
+    # would call them "supported"), but a base-14 font is written into the
+    # PDF as a single-byte Latin-1 font, so MuPDF can never actually reach
+    # them -- confirmed by direct rendering. Regression for trusting
+    # has_glyph() in isolation.
+    for char in ['€', '—', '–', '‘', '’', '“', '”', 'œ']:
+        assert _render_as_question_mark(char), (
+            f'test premise wrong: {char!r} did not render as "?"')
+        assert char in unsupported_characters(f'text {char} text'), (
+            f'{char!r} renders as "?" but was not detected as unsupported')
+
+
+def test_detection_helper_agrees_with_real_rendered_output():
+    # Broad cross-check: for a sample spanning printable ASCII, the full
+    # Latin-1 supplement, Latin Extended-A, common "looks covered but isn't"
+    # punctuation, and a few emoji/CJK/Hebrew/Arabic characters, the helper's
+    # prediction must match what actually gets rendered.
+    codepoints = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x180))
+                  + [0x20AC, 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D,
+                     0x1F600, 0x05D0, 0x4F60, 0x0645])
+    mismatches = []
+    for cp in codepoints:
+        char = chr(cp)
+        if char.isspace() or char == '?':
+            continue  # a literal '?' can't be told apart from a substitution
+        predicted_unsupported = char in unsupported_characters(f'x{char}y')
+        actually_renders_as_q = _render_as_question_mark(char)
+        if predicted_unsupported != actually_renders_as_q:
+            mismatches.append((hex(cp), char, predicted_unsupported, actually_renders_as_q))
+    assert mismatches == []
+
+
+def test_the_block_marker_itself_is_never_reported_as_unsupported():
+    # U+2588 (the block character) is not Latin-1 and would fail the glyph
+    # check on its own -- but render() never actually inserts it into the
+    # page (it becomes the sentinel first, then gets redacted away), so it
+    # must never appear in the reported list.
+    warnings = render(f'Name: {BLOCK}.', _tmp_path(), block=BLOCK)
+    assert '█' not in warnings
+
+
+def _tmp_path():
+    return Path(tempfile.mkdtemp()) / 'out.pdf'
+
+
+def test_render_reports_no_warnings_for_ordinary_text():
+    warnings = render(f'Name: {BLOCK} attended school today.', _tmp_path(), block=BLOCK)
+    assert warnings == []
+
+
+def test_render_reports_unsupported_characters_found_in_the_users_own_text():
+    warnings = render(f'Great effort! 🎉 Name: {BLOCK}.', _tmp_path(), block=BLOCK)
+    assert '🎉' in warnings
+    # The redacted PII itself must still be gone, and the save must still
+    # succeed (a warning is not a failure) -- proven by _render() not raising.
+
+
+def test_render_still_saves_successfully_despite_unsupported_characters():
+    # The save must succeed even when content can't be fully displayed --
+    # a partly-imperfect PDF the user is warned about beats a refused save.
+    path = _tmp_path()
+    render(f'Notes: 你好 Name: {BLOCK}.', path, block=BLOCK)
+    doc = fitz.open(str(path))
+    extracted = ''.join(p.get_text() for p in doc)
+    doc.close()
+    assert 'Notes:' in extracted
+    assert '█' not in extracted

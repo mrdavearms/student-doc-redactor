@@ -24,6 +24,10 @@ export default function PasteCompletion() {
   const [copied, setCopied] = useState(false);
   const [keyCopied, setKeyCopied] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  // Only known after a PDF save actually runs (backend/main.py's response),
+  // so it can't live in pasteOutput -- it's about the saved FILE, not the
+  // text shown on screen.
+  const [unsupportedChars, setUnsupportedChars] = useState<string[]>([]);
 
   const isDeidentify = workflowMode === 'deidentify';
   // Real names — read from the module-level holder, never the store
@@ -73,7 +77,8 @@ export default function PasteCompletion() {
     const path = await window.electronAPI?.saveFileAs?.(suggested, kind);
     if (!path) return;                       // user cancelled — stay put
     try {
-      await api.saveText(text, path, kind);
+      const result = await api.saveText(text, path, kind);
+      setUnsupportedChars(result.unsupported_characters ?? []);
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -173,6 +178,25 @@ export default function PasteCompletion() {
           <Save size={16} /> {isDeidentify ? 'Save as .txt' : 'Save as PDF'}
         </button>
       </div>
+
+      {unsupportedChars.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-amber-50 border border-amber-200 rounded-xl p-5"
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-700 mb-2">
+            <AlertTriangle size={16} />
+            Some characters couldn't be shown in the saved PDF
+          </div>
+          <p className="text-xs text-amber-600">
+            The PDF's text style can't display these characters, so they appear as a question
+            mark (?) instead: {unsupportedChars.map((c) => `"${c}"`).join(', ')}. This can
+            happen with emoji or characters from some non-English scripts. Copying the text
+            above instead keeps everything exactly as written.
+          </p>
+        </motion.div>
+      )}
 
       {isDeidentify && (key_entries.length > 0 || ambiguity_notes.length > 0) && (
         <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">

@@ -151,7 +151,7 @@ export const api = {
     }, 30 * 60_000),
 
   saveText: (text: string, path: string, kind: 'pdf' | 'txt') =>
-    request<{ path: string }>('/api/text/save', {
+    request<{ path: string; unsupported_characters: string[] }>('/api/text/save', {
       method: 'POST',
       body: JSON.stringify({ text, path, kind }),
     }),

@@ -188,3 +188,34 @@ def test_an_unknown_kind_is_rejected():
     r = client.post('/api/text/save', json={
         'text': 'x', 'path': str(out), 'kind': 'exe'})
     assert r.status_code == 400
+
+
+def test_saving_pdf_with_unsupported_characters_warns_but_still_saves():
+    # Defect A (e2e report): emoji/non-Latin-1 characters in the user's own
+    # text silently became "?" in the saved PDF. The save must still
+    # succeed -- it's a warning, not a failure -- but the response must say
+    # which characters could not be shown.
+    out = Path(tempfile.mkdtemp()) / 'out.pdf'
+    r = client.post('/api/text/save', json={
+        'text': 'Great work! 🎉 Name: ██████.', 'path': str(out), 'kind': 'pdf'})
+    assert r.status_code == 200
+    assert out.exists()
+    assert '🎉' in r.json()['unsupported_characters']
+
+
+def test_saving_pdf_with_only_latin1_text_reports_no_warning():
+    out = Path(tempfile.mkdtemp()) / 'out.pdf'
+    r = client.post('/api/text/save', json={
+        'text': 'Café François attended.', 'path': str(out), 'kind': 'pdf'})
+    assert r.status_code == 200
+    assert r.json()['unsupported_characters'] == []
+
+
+def test_saving_txt_never_reports_unsupported_characters():
+    # The .txt path is UTF-8 all the way through -- no font, no limitation.
+    out = Path(tempfile.mkdtemp()) / 'out.txt'
+    r = client.post('/api/text/save', json={
+        'text': 'Great work! 🎉 שלום', 'path': str(out), 'kind': 'txt'})
+    assert r.status_code == 200
+    assert r.json()['unsupported_characters'] == []
+    assert out.read_text(encoding='utf-8') == 'Great work! 🎉 שלום'

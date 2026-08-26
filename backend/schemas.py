@@ -105,6 +105,10 @@ class SaveTextRequest(BaseModel):
 
 class SaveTextResponse(BaseModel):
     path: str
+    # Distinct characters from the user's own text that the PDF's font could
+    # not display (they show up as "?" in the saved file). Always empty for
+    # .txt saves, which use UTF-8 directly and have no such limitation.
+    unsupported_characters: List[str] = []
 
 
 class PIIMatchResponse(BaseModel):
