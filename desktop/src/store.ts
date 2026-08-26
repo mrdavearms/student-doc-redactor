@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { dirname } from './lib/paths';
 import { buildDefaultSelections } from './lib/categories';
+import { clearSensitive } from './lib/pasteResult';
 import type {
   Screen,
   InputMode,
@@ -198,7 +199,14 @@ export const useStore = create<AppState>((set) => ({
   // Switching pathway invalidates any finished run, but deliberately NOT
   // detectionParamsKey: detection inputs are identical in both modes, so a user
   // who changes their mind after reviewing should not have to detect again.
-  setWorkflowMode: (mode) =>
+  setWorkflowMode: (mode) => {
+    // The Sidebar's "change pathway" link (the only Sidebar-initiated exit
+    // from the completion screen) drives this, not setInputMode — a pathway
+    // change can legitimately keep the same pasted text (rule 41's fingerprint
+    // stays), so inputMode never flips here. Drop the stale name-key holder
+    // from whatever run was last shown; a fresh one is written the next time
+    // handleRedact completes, before PasteCompletion could ever display it.
+    clearSensitive();
     set((state) => ({
       workflowMode: mode,
       redactionResults: null,
@@ -211,15 +219,24 @@ export const useStore = create<AppState>((set) => ({
         ? { userSelections: buildDefaultSelections(state.detectionResults, mode) }
         : {}),
       ...CLEARED_PEOPLE_STATE,
-    })),
+    }));
+  },
 
   // Leaving the paste pathway drops the slab immediately. FolderSelection
   // pairs this with POST /api/text/discard so the backend cache goes too.
-  setInputMode: (mode) =>
+  //
+  // Also drops the module-level name-key holder (lib/pasteResult) when
+  // leaving paste — it is never cleared by a component unmount (StrictMode's
+  // mount -> unmount -> mount would blank it before the second render reads
+  // it), so a store-level exit point is the safe place. In-memory only,
+  // never disk or the store itself — see holdSensitive's own comment.
+  setInputMode: (mode) => {
+    if (mode !== 'paste') clearSensitive();
     set((state) => ({
       inputMode: mode,
       pastedText: mode === 'paste' ? state.pastedText : '',
-    })),
+    }));
+  },
 
   setPastedText: (text) => set({ pastedText: text }),
 
@@ -351,5 +368,8 @@ export const useStore = create<AppState>((set) => ({
   setBackendReachable: (reachable) =>
     set(reachable ? { backendReachable: true } : { backendReachable: false, detectionParamsKey: '' }),
 
-  reset: () => set(initialState),
+  reset: () => {
+    clearSensitive();
+    set(initialState);
+  },
 }));

@@ -15,7 +15,7 @@ export default function FinalConfirmation() {
   const {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
-    inputMode, filePath, workflowMode,
+    inputMode, filePath, pastedText, workflowMode,
     personRoles, personCustomLabels, ignoredPeople, peopleAutoSkippedKey,
     navigateTo, setRedactionResults, setDeidentifyResults, setError,
     lastOutputPath, setLastOutputPath, setIsProcessing, setLoading, setPasteOutput,
@@ -87,6 +87,10 @@ export default function FinalConfirmation() {
 
   if (!detectionResults) return null;
 
+  // A word count is the paste-appropriate stand-in for the document-count
+  // tile below — "1 document" is meaningless for a single pasted slab.
+  const pastedWordCount = pastedText.trim() ? pastedText.trim().split(/\s+/).length : 0;
+
   // Count selected items by category
   const categoryCounts: Record<string, number> = {};
   let totalSelected = 0;
@@ -143,6 +147,13 @@ export default function FinalConfirmation() {
     // takes its own short-lived path entirely separate from the
     // redacting/isProcessing/cancel scaffolding the document pathways need.
     if (isPaste) {
+      // Same hazard as the document paths below: the Sidebar's pathway-change
+      // link is a sibling of the loading overlay (which only covers <main>),
+      // so it stays clickable during this request unless isProcessing hides
+      // it outright. And if it's clicked anyway, a bare navigateTo('completion')
+      // would drag the user back here once the request resolves, wherever
+      // they'd gone in the meantime — goToCompletionIfStillHere guards that.
+      setIsProcessing(true);
       setLoading(true, isDeidentify ? 'De-identifying your text…' : 'Blacking out your text…');
       try {
         const result = await api.cleanText({
@@ -163,11 +174,12 @@ export default function FinalConfirmation() {
           replacements: result.replacements,
           leftovers: result.leftovers,
         });
-        navigateTo('completion');
+        goToCompletionIfStillHere();
       } catch (e) {
         setError(friendlyError(e));
       } finally {
         setLoading(false);
+        setIsProcessing(false);
       }
       return;
     }
@@ -401,7 +413,11 @@ export default function FinalConfirmation() {
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Final Confirmation</h2>
         <p className="text-sm text-slate-400 mt-1">
-          {isDeidentify
+          {isPaste
+            ? (isDeidentify
+                ? 'Review your selections before de-identifying your text.'
+                : 'Review your selections before blacking out your text.')
+            : isDeidentify
             ? 'Review your selections before creating the de-identified text files.'
             : 'Review your selections before creating redacted documents.'}
         </p>
@@ -420,8 +436,12 @@ export default function FinalConfirmation() {
           </p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-5 text-center">
-          <p className="text-3xl font-semibold text-slate-700">{detectionResults.documents.length}</p>
-          <p className="text-xs text-slate-400 mt-1 uppercase tracking-wide">Documents</p>
+          <p className="text-3xl font-semibold text-slate-700">
+            {isPaste ? pastedWordCount : detectionResults.documents.length}
+          </p>
+          <p className="text-xs text-slate-400 mt-1 uppercase tracking-wide">
+            {isPaste ? 'Words' : 'Documents'}
+          </p>
         </div>
       </motion.div>
 
