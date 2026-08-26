@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'core'))
 
 import fitz
 from fastapi.testclient import TestClient
-from backend.main import app, PASTE_KEY, PASTE_MAX_CHARS
+from backend.main import app, PASTE_KEY, PASTE_MAX_CHARS, _detection_cache
 
 client = TestClient(app)
 
@@ -52,6 +52,70 @@ def test_pii_detect_refuses_the_reserved_key():
         'pdf_paths': [PASTE_KEY], 'student_name': 'Billy Bob',
         'parent_names': [], 'family_names': [], 'organisation_names': []})
     assert r.status_code == 400
+
+
+def test_manual_pii_can_be_added_against_the_pasted_text():
+    # Previously /api/pii/manual's exists()/page-count probes assumed a real
+    # file and rejected PASTE_KEY with "File not found: <pasted-text>" — the
+    # "Add a Missed Item" control in DocumentReview was silently broken for
+    # every paste-mode user.
+    detect()
+    r = client.post('/api/pii/manual', json={
+        'doc_path': PASTE_KEY, 'text': 'Acme School', 'page_num': 1,
+        'category': 'Organisation name'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['match']['text'] == 'Acme School'
+    assert body['match']['page_num'] == 1
+    assert body['match']['source'] == 'manual'
+
+
+def test_manual_pii_round_trips_through_clean_for_pasted_text():
+    # The thing that actually matters: a manually-added item must be appended
+    # to the same cache /api/text/clean reads from, and must then be removed
+    # from the output when its selection key is included — exactly like an
+    # engine-found match (CLAUDE.md rule #31).
+    text = SAMPLE + ' Ask Acme School for records.'
+    r = detect(text=text)
+    n = len(r.json()['documents'][0]['matches'])
+    # Sanity: the engines don't already know about this organisation — the
+    # test would be meaningless if they did.
+    for m in r.json()['documents'][0]['matches']:
+        assert m['text'] != 'Acme School'
+
+    add = client.post('/api/pii/manual', json={
+        'doc_path': PASTE_KEY, 'text': 'Acme School', 'page_num': 1,
+        'category': 'Organisation name'})
+    assert add.status_code == 200
+    manual_index = add.json()['index']
+    assert manual_index == n  # appended at the end, not inserted (rule #31)
+
+    selected_keys = [f'{PASTE_KEY}_{i}' for i in range(n)] + [f'{PASTE_KEY}_{manual_index}']
+    clean_r = client.post('/api/text/clean', json={
+        'mode': 'redact', 'student_name': 'Billy Bob',
+        'selected_keys': selected_keys,
+        'parent_names': ['Jane Bob'], 'family_names': [],
+        'organisation_names': [], 'person_roles': {},
+        'person_custom_labels': {}, 'ignored_people': []})
+    assert clean_r.status_code == 200
+    assert 'Acme School' not in clean_r.json()['text']
+    assert 'Billy Bob' not in clean_r.json()['text']
+
+
+def test_manual_pii_still_rejects_a_real_missing_file():
+    # The PASTE_KEY short-circuit must not weaken the exists() guard for real
+    # paths — a doc_path that IS cached but no longer exists on disk (moved,
+    # renamed, deleted) must still 400 rather than being treated like paste.
+    fake_path = '/tmp/definitely-does-not-exist-12345.pdf'
+    _detection_cache[fake_path] = {'matches': [], 'text_data': {'pages': {}, 'ocr_pages': []}}
+    try:
+        r = client.post('/api/pii/manual', json={
+            'doc_path': fake_path, 'text': 'Some Name',
+            'page_num': 1, 'category': 'Manual'})
+        assert r.status_code == 400
+        assert 'file not found' in r.json()['detail'].lower()
+    finally:
+        _detection_cache.pop(fake_path, None)
 
 
 def paste_body(mode='deidentify', **over):

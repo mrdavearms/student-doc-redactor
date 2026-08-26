@@ -593,7 +593,7 @@ It passes `DEFAULT_ROLE` and returns `owner.label` (set by `_rebuild()`) rather 
 
 The paste pathway caches under `PASTE_KEY = "<pasted-text>"` (`backend/main.py`), and `/api/pii/detect` rejects it explicitly. It is chosen because `<` and `>` are invalid in Windows filenames and it is not an absolute POSIX path, so it can never collide with a real document — and because `fitz.open("<pasted-text>")` raises `FileNotFoundError`, so any code that mistakes it for a document degrades safely rather than misbehaving.
 
-Selection keys become `<pasted-text>_0`, `<pasted-text>_1` — the same `f"{doc_path}_{index}"` contract used everywhere else, so `DocumentReview` and `/api/pii/manual` (rule #31) work on pasted text unchanged.
+Selection keys become `<pasted-text>_0`, `<pasted-text>_1` — the same `f"{doc_path}_{index}"` contract used everywhere else, so `DocumentReview` and `/api/pii/manual` (rule #31) can append to the same cache list. But `/api/pii/manual`'s `exists()` + page-count probes assume a real file, and `PASTE_KEY` is neither a path nor a PDF — so `add_manual_pii` short-circuits both checks for `req.doc_path == PASTE_KEY` and forces `page_num = 1` (the single synthetic page `/api/text/detect` caches under). Without that branch, "add a missed item" 400s on pasted text with a message about a file that was never opened.
 
 ### 61. A pasted page's `ocr_pages` must stay EMPTY
 

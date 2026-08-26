@@ -415,28 +415,35 @@ def add_manual_pii(req: AddManualPIIRequest):
     if len(text) < 3:
         raise HTTPException(status_code=400, detail="Manual PII text must be at least 3 characters.")
 
-    doc_path = Path(req.doc_path)
-    if not doc_path.exists():
-        raise HTTPException(status_code=400, detail=f"File not found: {doc_path}")
+    if req.doc_path == PASTE_KEY:
+        # No file on disk for pasted text — it lives entirely in the cache
+        # under a single synthetic page (see detect_text). The exists()/page-
+        # count probes below are meaningless for it and must not run.
+        page_num = 1
+    else:
+        doc_path = Path(req.doc_path)
+        if not doc_path.exists():
+            raise HTTPException(status_code=400, detail=f"File not found: {doc_path}")
 
-    try:
-        pdf = fitz.open(str(doc_path))
-        total_pages = len(pdf)
-        pdf.close()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Cannot open PDF: {e}")
+        try:
+            pdf = fitz.open(str(doc_path))
+            total_pages = len(pdf)
+            pdf.close()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Cannot open PDF: {e}")
 
-    if req.page_num < 1 or req.page_num > total_pages:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Page {req.page_num} does not exist in this document (it has {total_pages} pages).",
-        )
+        if req.page_num < 1 or req.page_num > total_pages:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Page {req.page_num} does not exist in this document (it has {total_pages} pages).",
+            )
+        page_num = req.page_num
 
     match = PIIMatch(
         text=text,
         category=req.category,
         confidence=1.0,
-        page_num=req.page_num,
+        page_num=page_num,
         line_num=0,
         context=text,
         source="manual",
