@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (651 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (686 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 166 tests across 11 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 181 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -95,7 +95,13 @@ FastAPI (backend/main.py)
 ├── /api/deidentify   → same cache/selections, writes labelled .txt instead
 ├── /api/deidentify/people → who was found, with a proposed role + its evidence
 ├── /api/deidentify/labels → labels for a proposed assignment (preview)
-└── /api/preview      → renders PDF page at 150 DPI, returns base64 PNG
+├── /api/preview      → renders PDF page at 150 DPI, returns base64 PNG
+├── /api/text/detect  → detection over pasted text, cached under PASTE_KEY
+├── /api/text/people  → Who's who for pasted text (wraps /api/deidentify/people)
+├── /api/text/labels  → label preview for pasted text (wraps /api/deidentify/labels)
+├── /api/text/clean   → blackout or de-identify the cached pasted text
+├── /api/text/discard → drop the pasted text from the cache
+└── /api/text/save    → the only paste-pathway endpoint that touches disk, and only a path the user chose
 ```
 
 ### Two Pathways
@@ -111,17 +117,19 @@ De-identification reads the extracted text already in `_detection_cache` rather 
 
 ### Screen Flow
 
-The desktop app has a 9-screen flow (setup + mode choice + 5 or 6 workflow steps, plus a no-PII branch):
+The desktop app has a 10-screen flow (setup + mode choice + 5 or 6 workflow steps, plus a no-PII branch):
 
 ```
-setup → mode_selection → folder_selection → conversion_status → document_review → [people_review] → final_confirmation → completion
+setup → mode_selection → folder_selection → {conversion_status | text_scan} → document_review → [people_review] → final_confirmation → completion
 ```
 
 `no_pii_found` is a branch off `document_review`, not a step in the ladder — it is shown when detection finds nothing to remove, so the user is never marched through a review screen with an empty list.
 
 The `setup` screen checks for LibreOffice and Tesseract on first launch, with install guidance and a "Check Again" button. It is skipped on subsequent launches when dependencies are present.
 
-`people_review` appears in **de-identify mode only** — hence `screensFor(mode)` rather than a fixed `SCREENS` array (6 steps de-identify, 5 redact). `mode_selection` is the app's landing screen (`initialState.currentScreen`). Like `setup` it is **not** in the step ladder — step numbering still runs 1–5, and the Sidebar shows the chosen pathway as a badge with a "change" link rather than as a step. `completion` renders `<DeidentifyCompletion />` or `<Completion />` depending on `workflowMode`, which keeps the redact completion screen untouched.
+`people_review` appears in **de-identify mode only** — hence `screensFor(mode, inputMode)` rather than a fixed `SCREENS` array (6 steps de-identify, 5 redact). `mode_selection` is the app's landing screen (`initialState.currentScreen`). Like `setup` it is **not** in the step ladder — step numbering still runs 1–5, and the Sidebar shows the chosen pathway as a badge with a "change" link rather than as a step. `completion` renders `<PasteCompletion />` when `inputMode === 'paste'` (checked before `workflowMode`), otherwise `<DeidentifyCompletion />` or `<Completion />` depending on `workflowMode` — which keeps the two document-pathway completion screens untouched.
+
+`text_scan` (paste mode only) **replaces** `conversion_status` as step 2 — `screensFor` swaps the screen and its label ("Scan Text" vs "Convert Docs") rather than inserting an extra step, which would need a third auto-advance stamp alongside `autoAdvancedKey` and `peopleAutoSkippedKey` (the forward-bounce trap rules #38 and #54b split those two apart to avoid). `folder_selection` itself is relabelled "Enter Text" in paste mode; it is the same screen component rendering a textarea instead of a folder picker, not a separate screen.
 
 In the desktop app, `App.tsx` switches on `currentScreen` from the Zustand store. Layout wraps children in `<AnimatePresence mode="wait">` with `key={currentScreen}` for animated transitions.
 
@@ -140,6 +148,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `src/core/pseudonym_map.py` | De-identify mode: privacy-safe labels, roles, person-identity merge rules |
 | `src/core/role_suggester.py` | Proposes a person's role from surrounding text, with quotable evidence |
 | `src/core/text_deidentifier.py` | De-identify mode: single-pass label replacement + exact/fuzzy verification |
+| `src/core/text_pdf.py` | Paste pathway: renders blackout output as a PDF via a per-render sentinel (rule #62) |
 | `src/core/text_extractor.py` | Text + OCR extraction from PDFs |
 | `src/core/document_converter.py` | LibreOffice Word → PDF conversion |
 | `src/core/binary_resolver.py` | Cross-platform Tesseract/LibreOffice path resolution |
@@ -150,6 +159,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `src/services/detection_service.py` | Framework-agnostic PII detection business logic |
 | `src/services/redaction_service.py` | Framework-agnostic redaction orchestration + custom output path |
 | `src/services/deidentification_service.py` | De-identify orchestration, key file, label-only audit log |
+| `src/services/text_cleanup_service.py` | Paste pathway: blackout/de-identify over a string, nothing touches disk |
 | `backend/main.py` | FastAPI API layer + server-side detection cache |
 | `backend/schemas.py` | Pydantic request/response models |
 | `desktop/electron/main.cjs` | Electron main process — spawns backend, creates window |
@@ -170,15 +180,19 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/components/RedactionProgress.tsx` | Animated progress bar + rotating witty teacher comments |
 | `desktop/src/components/UpdateBanner.tsx` | Auto-update notification banner |
 | `desktop/src/hooks/useUpdater.ts` | Custom hook for electron-updater integration |
+| `desktop/src/hooks/useDetection.ts` | Fingerprint-aware detection, shared by `ConversionStatus` and `TextScan`. `abortDetection()` — not the hook's own `finally` — is what clears the loading overlay on a genuine cancel (see its own doc comment; a third caller needs the same contract) |
 | `desktop/src/pages/ModeSelection.tsx` | Step 0 — choose redact or de-identify |
 | `desktop/src/pages/PeopleReview.tsx` | "Who's who?" — confirm each person's role (de-identify only) |
 | `desktop/src/pages/DeidentifyCompletion.tsx` | Completion screen for de-identify mode (leads with the key file) |
 | `desktop/src/pages/NoPiiFound.tsx` | Shown when detection finds nothing — a branch off `document_review`, not a numbered step |
+| `desktop/src/pages/TextScan.tsx` | Paste mode's step 2 — runs detection over `pastedText` via `useDetection` and navigates itself; replaces `conversion_status` |
+| `desktop/src/pages/PasteCompletion.tsx` | Completion screen for the paste pathway — cleaned text and (de-identify only) the name key in separate boxes, separate Copy buttons (rule #63) |
 | `desktop/src/components/ErrorBoundary.tsx` | Top-level React error boundary, wrapped around `<App/>` in `main.tsx` |
 | `desktop/src/components/ErrorFallback.tsx` | What the boundary renders after a render crash |
 | `desktop/src/components/UpdateCard.tsx` | Prominent update panel on the landing screen (the banner is used on every other screen) |
 | `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **Strips every path-like token first** — file paths in this app contain student names |
 | `desktop/src/lib/peopleRoles.ts` | `effectiveRoleMap` — the role map a run actually uses; see rule #54b |
+| `desktop/src/lib/pasteResult.ts` | Module-level holder for the real-name half of a paste clean result (`holdSensitive`/`peekSensitive`/`clearSensitive`) — never the store, never React state; see rule #63 |
 | `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
 
 ---
@@ -575,6 +589,36 @@ It used to pass `f'[Person {n}]'` into `_add_person`'s **role** parameter. The l
 
 It passes `DEFAULT_ROLE` and returns `owner.label` (set by `_rebuild()`) rather than reconstructing a string. There is no `[Person N]` label scheme any more — unclassified people render as `[Other person]`, numbered by rule #53 when several share the stem.
 
+### 60. `<pasted-text>` is a reserved detection-cache key
+
+The paste pathway caches under `PASTE_KEY = "<pasted-text>"` (`backend/main.py`), and `/api/pii/detect` rejects it explicitly. It is chosen because `<` and `>` are invalid in Windows filenames and it is not an absolute POSIX path, so it can never collide with a real document — and because `fitz.open("<pasted-text>")` raises `FileNotFoundError`, so any code that mistakes it for a document degrades safely rather than misbehaving.
+
+Selection keys become `<pasted-text>_0`, `<pasted-text>_1` — the same `f"{doc_path}_{index}"` contract used everywhere else, so `DocumentReview` and `/api/pii/manual` (rule #31) work on pasted text unchanged.
+
+### 61. A pasted page's `ocr_pages` must stay EMPTY
+
+`/api/text/detect` hard-codes `ocr_pages: []` in the cache and the response, never derived from real OCR — pasted text was never scanned. The document pathway's fuzzy verification (rule #45) triggers off exactly this flag inside `_formatted_pages`/`fuzzy_leftovers` (`src/services/deidentification_service.py`), which is correct for scans and wrong for typed text: a report naming a classmate "Smyth" while the student is "Smith" is edit-distance 1 over 5 letters, so a fuzzy pass would report a leftover and quarantine correct output.
+
+The paste pathway's own cleaning code (`src/services/text_cleanup_service.py`) never calls `fuzzy_leftovers()` at all — `blackout()` and `deidentify_paste()` verify with `verify_deidentified()` only, unconditionally. Both facts have to stay true together: flipping `ocr_pages` to a real value, or routing paste's clean step through the document pathway's shared per-page formatting, reopens the exact false-quarantine risk rule #45 exists to bound.
+
+### 62. The blackout PDF must never rely on the U+2588 glyph
+
+PyMuPDF's built-in base-14 fonts are Latin-1 only. `fitz.Font('helv').has_glyph(0x2588)` returns 0, so writing block characters into a textbox extracts back as `??????` — wrong output, not an error.
+
+`src/core/text_pdf.py`'s `render()` lays out a Latin-1 **sentinel** instead and removes it with `add_redact_annot(fill=(0,0,0))` + `apply_redactions()`, which paints the box and deletes the sentinel text in one step. The PII was never placed in the PDF, so there is nothing under the boxes either way.
+
+**The sentinel is chosen per render, never hard-coded.** `search_for()` cannot tell our sentinel from the same characters in the user's own text: `~` is a real candidate, so a report containing "Cost ~5 dollars" would have the tilde blacked out too if the sentinel were fixed to it. `choose_sentinel()` returns the first candidate absent from the cleaned text, falling back to the literal marker `[REMOVED]` — and even that marker grows a numeric suffix if the user's own writing happens to quote it verbatim.
+
+### 63. The de-identify key and the safe output must never share a text area
+
+Rule #43 has no analogue for paste — there are no originals on disk, so the key is shown on screen rather than written beside them. That creates a hazard the document pathway never had: the safe text and the re-identifying key are on the same screen, and a careless select-all-copy would put the key on the clipboard alongside the thing being pasted into an AI tool.
+
+Separate boxes, separate Copy buttons, key collapsed behind a `<details>`. `key_entries`, `ambiguity_notes` and `leftover_name_warnings` carry real names and are held in a plain **module-level variable** in `desktop/src/lib/pasteResult.ts` (`holdSensitive`/`peekSensitive`/`clearSensitive`) — never the Zustand store, echoing rule #24's precedent. It is deliberately not React `useState` either: state set inside `FinalConfirmation` would be wiped by React StrictMode's dev-only mount→unmount→mount cycle before `PasteCompletion`'s own mount ever read it. `clearSensitive()` runs on "Clean another" and whenever `setInputMode` leaves paste — never disk, never the audit log.
+
+### 64. `pastedText` must survive `setBackendReachable(false)`
+
+That setter clears `detectionParamsKey` so detection re-runs (rule #41). It must not clear the slab the user typed — and it doesn't: `setBackendReachable` in `desktop/src/store.ts` only ever touches `backendReachable` and `detectionParamsKey`. Losing several hundred words to a momentary backend blip is the worst avoidable failure in the paste pathway.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -613,9 +657,11 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 |-----|------|---------|
 | `currentScreen` | Screen | Active wizard step |
 | `workflowMode` | 'redact' \| 'deidentify' | Which pathway (default `redact`) — see rule #41 on why it doesn't reset detection |
-| `inputMode` | 'file' \| 'folder' | One document or a whole folder (default `folder`) |
+| `inputMode` | 'file' \| 'folder' \| 'paste' | One document, a whole folder, or pasted text (default `folder`) |
 | `filePath` | string | Selected single document (file mode) |
 | `fileValid` | boolean | Whether the single document exists and is a supported type |
+| `pastedText` | string | The pasted slab (paste mode) — raw PII, so it is cleared aggressively (`setInputMode` away from paste, "Clean another"); survives `setBackendReachable(false)` (rule #64) |
+| `pasteOutput` | `{ text, replacements, leftovers } \| null` | Safe half of a paste clean result. The name-bearing half never reaches the store — see rule #63 |
 | `autoAdvancedKey` | string | Input that already auto-skipped the conversion screen |
 | `folderPath` | string | Selected input folder — derived from `filePath` in file mode |
 | `studentName` | string | Student full name |
@@ -679,7 +725,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 651 tests total
+tests/                                # 686 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 31 tests: orchestrator merge, dedup, NER-primary coordination
@@ -695,8 +741,11 @@ tests/                                # 651 tests total
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
 ├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
 ├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
+├── test_text_pdf.py                  # 9 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
+├── test_text_cleanup_service.py      # 8 tests: blackout/de-identify over a string, leftover checks, all_labels() strip-list
 ├── test_deidentification_service.py  # 48 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
+├── test_backend_paste.py             # 18 tests: /api/text/* contract, reserved-key rejection, ocr_pages empty, save endpoint
 ├── test_output_read_api.py           # 8 tests: /api/output/read guards — *_deidentified.txt only, never .UNVERIFIED.txt or the key file
 ├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
 ├── test_person_roles_api.py          # 12 tests: /people + /labels contracts, roles reaching output, renumbering
