@@ -211,6 +211,7 @@ export const useStore = create<AppState>((set) => ({
       workflowMode: mode,
       redactionResults: null,
       deidentifyResults: null,
+      pasteOutput: null,
       // Selections were initialised under the OLD mode's safety assumptions.
       // Re-derive for the new mode (detection itself is NOT re-run — rule 41's
       // fingerprint stays). Discards hand-toggles; safer than carrying over
@@ -235,6 +236,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({
       inputMode: mode,
       pastedText: mode === 'paste' ? state.pastedText : '',
+      pasteOutput: mode === 'paste' ? state.pasteOutput : null,
     }));
   },
 
