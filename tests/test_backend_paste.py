@@ -79,6 +79,36 @@ def test_lone_utf16_surrogate_is_rejected_cleanly():
     assert 'codec' not in r.json()['detail'].lower()
 
 
+def test_redact_refuses_the_reserved_key(tmp_path):
+    # Mirrors /api/pii/detect's guard: with the paste cache populated, the
+    # document-shaped endpoints must not accept PASTE_KEY as if it were a
+    # real file path.
+    detect()
+    out_folder = tmp_path / 'out'
+    r = client.post('/api/redact', json={
+        'folder_path': str(out_folder), 'student_name': 'Billy Bob',
+        'documents': [PASTE_KEY], 'detected_pii': {},
+        'selected_keys': [f'{PASTE_KEY}_0']})
+    assert r.status_code == 400
+    assert not out_folder.exists()
+
+
+def test_deidentify_refuses_the_reserved_key(tmp_path):
+    # The more serious sibling of the above: DeidentificationService reads
+    # cached text_data rather than reopening a file, so the paste cache's
+    # synthetic shape used to satisfy it — writing a de-identified text file
+    # AND the real-name key file to a caller-supplied folder that was never
+    # the folder the user picked for this content.
+    detect()
+    r = client.post('/api/deidentify', json={
+        'folder_path': str(tmp_path), 'student_name': 'Billy Bob',
+        'documents': [PASTE_KEY], 'selected_keys': [f'{PASTE_KEY}_0']})
+    assert r.status_code == 400
+    assert not (tmp_path / 'deidentified').exists()
+    assert not (tmp_path / 'DO-NOT-UPLOAD-name-key.txt').exists()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_manual_pii_can_be_added_against_the_pasted_text():
     # Previously /api/pii/manual's exists()/page-count probes assumed a real
     # file and rejected PASTE_KEY with "File not found: <pasted-text>" — the

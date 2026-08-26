@@ -515,6 +515,14 @@ def _resolve_cached_selections(documents: List[str], selected_keys: List[str]):
     Shared by /api/redact and /api/deidentify so both derive selection keys the
     same way. Index order is load-bearing — a manual PII item's key is its
     position in the cached list (see CLAUDE.md rule 31).
+
+    Deliberately does NOT refuse PASTE_KEY here: /api/deidentify/people and
+    /api/deidentify/labels also call through this (via
+    _deidentify_request_from), and the paste pathway's own /api/text/people
+    and /api/text/labels legitimately route through those two with
+    documents=[PASTE_KEY] (see _paste_deidentify_body). The reserved-key guard
+    instead sits in /api/redact and /api/deidentify themselves, the two
+    endpoints that write to disk and have no legitimate paste caller.
     """
     detected_pii: Dict[Path, dict] = {}
     for doc_path_str in documents:
@@ -539,6 +547,9 @@ def _resolve_cached_selections(documents: List[str], selected_keys: List[str]):
 
 @app.post("/api/redact", response_model=RedactionResultsResponse)
 def redact_documents(req: RedactRequest):
+    if PASTE_KEY in req.documents:
+        raise HTTPException(status_code=400, detail="Invalid document path.")
+
     _redaction_control["cancel_requested"] = False
     folder_path = Path(req.folder_path)
     documents = [Path(p) for p in req.documents]
@@ -800,7 +811,18 @@ def deidentify_documents(req: DeidentifyRequestBody):
 
     A sibling of /api/redact: same cache, same selections, same cooperative
     cancel. Only the output differs.
+
+    PASTE_KEY is refused here (unlike in _deidentify_request_from, which this
+    calls into) because THIS endpoint writes to disk — a real-name key file
+    included — using req.folder_path as the destination. /api/deidentify/people
+    and /api/deidentify/labels share that helper but never write anything, and
+    the paste pathway's own /api/text/people and /api/text/labels legitimately
+    call through them with documents=[PASTE_KEY] (see _paste_deidentify_body),
+    so the guard cannot live in the shared helper without breaking those.
     """
+    if PASTE_KEY in req.documents:
+        raise HTTPException(status_code=400, detail="Invalid document path.")
+
     _redaction_control["cancel_requested"] = False
     request = _deidentify_request_from(req)
 
