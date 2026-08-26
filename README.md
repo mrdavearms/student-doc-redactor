@@ -25,19 +25,17 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
-## What's New in v1.3.1
+## What's New in v1.9.0
 
-This release is all about **reliability and safety** — making the app harder to trip up, and clearer when something needs your attention. The way you use it is exactly the same. Most important for a tool that handles students' personal information: **when redaction can't be done properly, the app now tells you, instead of quietly handing you a file that might still contain personal details.**
+**You can now paste text straight into the app — no document required.** Got a paragraph copied from an email, a portal, or someone else's report, and you just need the names out of it before it goes into an AI tool or gets shared? Paste it in, and skip the save-a-file, find-a-folder dance entirely.
 
-- **Safer redaction** — If a document can't be fully redacted, it's now clearly reported as failed rather than saved as a file that looks finished but might still contain personal information.
-- **Scanned pages protected** — If a page is an image-only scan and the text-reader (OCR) isn't available, the app stops and tells you instead of skipping that page silently.
-- **No half-finished files** — If something fails partway through, the incomplete file is cleaned up automatically, so it can't be mistaken for a finished one.
-- **More accurate name matching** — Short names (like "Joe") no longer accidentally remove unrelated words (like "Joelle") in PDF form fields.
-- **No more endless spinning** — If the engine ever stops responding, the app times out and lets you try again instead of hanging forever.
-- **Recovers from engine hiccups** — If the background engine stops unexpectedly, the app notices and prompts you to reopen it.
-- **Friendlier messages** and a **daily check for updates** while the app is open.
+- **A third way to give the app work.** Step 1 now offers **one document**, **a whole folder**, or **paste text** — pick whichever fits what you've got. Paste sits alongside the other two; it isn't a separate mode, and both black-boxing and de-identifying work on it exactly as they do for documents.
+- **Nothing touches your disk unless you ask.** A paste writes no audit log, no key file, no temporary file. You get the cleaned result on screen with a **Copy** button, and can optionally save it — as a redacted PDF, or a de-identified `.txt` — through a normal Save dialog.
+- **The name key stays on screen too, in de-identify mode.** It sits in its own collapsed box with its own Copy button, separate from the cleaned text, so a quick copy of one can't drag the other along with it.
+- **Sensible limits.** You'll get a warning past 20,000 characters, and text over 50,000 characters is declined with a pointer to the document pathway instead — at that size, a document does the job better anyway.
+- Everything else is unchanged: the same two engines, the same review screen, the same Who's who step for de-identify mode, and the same student name requirement.
 
-> Earlier reliability work from v1.3.0 — plain-English error messages, the engine startup banner, the "Something went wrong" recovery screen, cancel-and-clean-up, and the nothing-to-redact screen — is all still here.
+See the [Releases page](https://github.com/mrdavearms/student-doc-redactor/releases) for what changed in earlier versions.
 
 ---
 
@@ -77,6 +75,18 @@ One thing worth knowing: a specific role is more useful to the AI but slightly m
 **The key file.** De-identifying also saves a file called `DO-NOT-UPLOAD-name-key.txt` **with your original documents** — never in the output folder. It lists which label stands for which real person, so you can turn an AI's answer back into real names afterwards. Keep it private and never upload it. It is kept out of the output folder on purpose, so everything in there is safe to share.
 
 **What text files can't carry.** Pictures — a screenshot of an email, a scanned chart — can't go into a text file, so their contents are simply left out. Nothing from them leaks, but the AI won't see them either. The app tells you when this happens.
+
+### Three Ways to Give It Work
+
+Whichever of the two outputs above you want, you can start it from any of these:
+
+| | One document | A whole folder | Paste text |
+|--|--------------|----------------|------------|
+| **Best for** | A single report | Everything for one student at once | A paragraph copied from somewhere else |
+| **What you give it** | A file path | A folder path | Text pasted straight into the app |
+| **Saved to disk?** | Yes — alongside the original | Yes — alongside the originals | Only if you choose to Save afterwards |
+
+Paste is not a separate mode — it's a third way to hand the app something to work on. The pasted text appears in the review screen as a document called "Pasted text", and everything from there (review, Who's who, confirm) works exactly as it does for a real file. The only difference is at the end: instead of writing to an output folder, you get the cleaned result on screen to copy or optionally save.
 
 ### Two Ways to Run
 
@@ -144,14 +154,14 @@ This matters most for a tool handling children's data.
 ```mermaid
 flowchart TD
     S["0. First-Run Setup\nLibreOffice check — first launch only\nSkip if you only work with PDFs"] --> A
-    A["1. Select Folder\nChoose a folder of student documents"] --> B
+    A["1. Choose What to Work On\nOne document, a whole folder, or paste text"] --> B
     B["2. Enter Student Details\nName, parent names (optional)"] --> C
-    C["3. Convert Documents\nWord files to PDF automatically"] --> D
+    C["3. Convert / Scan\nDocuments: Word files to PDF automatically\nPasted text: nothing to convert — scanned as-is"] --> D
     D["4. Detect PII\n2 detection engines run in parallel"] --> E
     E["5. You Review Each Item\nApprove or reject every finding"] --> F
     F["6. Confirm\nSummary of what will be redacted"] --> G
-    G["7. Apply Redactions\nPermanent, verified, metadata-stripped"] --> H
-    H["8. Done\nRedacted files + audit log saved"]
+    G["7. Apply\nDocuments: permanent, verified, metadata-stripped\nPasted text: shown on screen, nothing saved yet"] --> H
+    H["8. Done\nDocuments: redacted files + audit log saved\nPasted text: copy it, or save it — your choice"]
 
     style S fill:#94A3B8,color:#fff
     style A fill:#4A90D9,color:#fff
@@ -325,6 +335,7 @@ The desktop app includes UX features designed for non-technical users:
 - **Per-document summary cards** — Expandable cards showing category breakdown and confidence indicators for each document. Never displays actual PII text.
 - **Witty progress comments** — During the redaction step (which can take a minute for large batches), rotating teacher-themed comments keep you entertained. Shuffled randomly each time.
 - **Custom output location** — Save redacted files to the default subfolder or browse to any location on your computer.
+- **Paste text** — Clean a block of pasted text without saving anything to disk unless you choose to. The result appears on screen with a Copy button, and in de-identify mode the name key is shown separately, collapsed, with its own Copy button.
 - **About modal** — Three tabs (About, How to Use, Features & Detection) accessible from the sidebar. Includes the full walkthrough content plus detection engine explanations.
 - **Cancel and clean up** — Cancelling mid-redaction shows which files were already written and lets you delete them with one click.
 - **Nothing to redact screen** — If detection finds nothing, the app tells you clearly and lets you go back to adjust names or try another folder.
@@ -551,14 +562,20 @@ You can change your mind at any point — the sidebar shows which one you chose,
 
 ---
 
-### Screen 1 — Select Folder & Enter Student Details
+### Screen 1 — Choose What to Work On & Enter Student Details
 
-- **Folder path**: Paste or type the full path to a folder containing the student's documents (PDFs and/or Word files), or click **Browse** to select it.
+First, pick **one document**, **a whole folder**, or **paste text**:
+
+- **One document / a whole folder**: Paste or type the full path, or click **Browse** to select it.
+- **Paste text**: A text box appears instead of a path field. Paste in the text you want cleaned up. A counter shows how many characters you've pasted — a warning appears past 20,000, and past 50,000 characters the app asks you to save it as a document and use that pathway instead.
+
+Then the student details, the same regardless of which you picked:
+
 - **Student name**: First and last name. The tool automatically generates variations (first name only, last name only, initials, etc.)
 - **Parent/Guardian names**: Optional. Helps catch parent names that appear in documents.
 - **Other family names**: Optional. Siblings, carers, emergency contacts.
 - **Organisation names**: Optional. Schools, clinics, hospitals — any org that could identify the student.
-- **Redact headers & footers**: Optional. Blanks the top and bottom of every page to remove letterheads and addresses.
+- **Redact headers & footers**: Optional. Blanks the top and bottom of every page to remove letterheads and addresses. For pasted text this only affects the areas the tool can recognise as a header or footer — there's no page layout to go on, so it's less exact than for a real document.
 
 Each field has a `?` tooltip explaining what it does and why it matters.
 
@@ -566,9 +583,11 @@ Each field has a `?` tooltip explaining what it does and why it matters.
 
 ---
 
-### Screen 2 — Document Conversion
+### Screen 2 — Document Conversion (or Scan Text, for pasted text)
 
-The tool shows which documents were found and whether Word files were successfully converted to PDF. PII detection runs automatically after conversion completes.
+For a document or folder, the tool shows which documents were found and whether Word files were successfully converted to PDF. PII detection runs automatically after conversion completes.
+
+For pasted text there's nothing to convert, so this screen instead reads and scans your text straight away — it's labelled **Scan Text** in the sidebar. The pasted text then appears in the next screen as a document called "Pasted text".
 
 ---
 
@@ -586,15 +605,17 @@ This is the most important screen. **You review every item the tool found** — 
 
 ### Screen 4 — Final Confirmation
 
-A summary of how many items across how many documents will be redacted, broken down by category.
+A summary of how many items will be redacted, broken down by category — across how many documents, or (for pasted text) how many words.
 
-**Output folder options:**
+**Output folder options** (documents only — pasted text has nothing to choose here, since nothing is saved until the next screen):
 - **Inside the source folder** (default) — a `redacted` subfolder is created alongside your originals
 - **Choose a different location** — browse to save redacted files anywhere on your computer
 
 ---
 
 ### Screen 5 — Complete
+
+For a document or folder:
 
 - **Green banner**: Redaction succeeded and was verified
 - **Orange banner**: Some pages were image-only (scanned) and were redacted via OCR — review recommended
@@ -603,6 +624,13 @@ A summary of how many items across how many documents will be redacted, broken d
 - **Document summary cards**: Per-document breakdown of what was redacted, by category
 - **Open Folder** button to jump straight to the output
 - **Redaction Log**: Expandable audit trail of every item redacted
+
+For pasted text, the screen is different, because there's no output folder to point you at:
+
+- **The cleaned text**, shown on screen with its own **Copy text** button
+- **Save as PDF** (redact mode) or **Save as .txt** (de-identify mode) — opens a normal Save dialog; nothing is written until you choose a location
+- **The name key** (de-identify mode only) — collapsed behind its own "Name key" section with its own Copy button, kept separate from the cleaned text so a copy of one never drags the other along
+- **Clean another** — clears the text and takes you back to Screen 1 to paste something new
 
 ---
 
@@ -656,6 +684,10 @@ Two things to notice:
 - **The log contains labels only**, never the real names — so it is safe to keep alongside your documents.
 
 If a file could not be fully checked — most often a scanned page where the OCR misread a name — it is saved as `something.UNVERIFIED.txt` instead, and the app tells you which ones to open and check before sharing.
+
+### Pasted text output
+
+Nothing is written to disk for a paste, no matter which of the two outputs you chose. There's no audit log, no key file, and no temporary file — the cleaned result exists only on screen, in the app, until you copy it or explicitly choose **Save as PDF** / **Save as .txt** and pick a location yourself. In de-identify mode, the name key is likewise only ever shown on screen — never written next to anything, because with a paste there are no originals on disk for it to sit beside.
 
 ---
 
@@ -750,6 +782,8 @@ gantt
     section Desktop App — v1.3.1
     Redaction safety hardening    :done, 2026-05, 2026-05
     Request timeouts + crash recovery :done, 2026-05, 2026-05
+    section Desktop App — v1.9
+    Paste-text pathway            :done, 2026-08, 2026-08
     section Coming Soon
     Mac code signing              :active, 2026-05, 2026-07
     section Future
@@ -876,7 +910,15 @@ student-doc-redactor/
 venv/bin/python3.13 -m pytest tests/ -v
 ```
 
-All 292 tests should pass in under 5 minutes.
+All 750 Python tests should pass — well under a minute on most machines (26 seconds on the machine this was last measured on; runtime varies with Tesseract availability).
+
+The desktop app has its own test suite, covering the pure TypeScript modules (state, API client, routing, and the Electron helper modules that have been split out into testable functions):
+
+```bash
+cd desktop && npm test
+```
+
+All 183 desktop tests should pass in a few seconds.
 
 ### Tech Stack
 
@@ -891,7 +933,7 @@ All 292 tests should pass in under 5 minutes.
 | AI / NER | Microsoft Presidio + spaCy `en_core_web_lg` |
 | OCR | Tesseract + pytesseract |
 | Word conversion | LibreOffice headless |
-| Tests | pytest (292 tests) + Vitest |
+| Tests | pytest (750 tests) + Vitest (183 tests) |
 | Language | Python 3.13+ / TypeScript |
 
 ---
