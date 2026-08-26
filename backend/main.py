@@ -33,6 +33,7 @@ from src.core.pii_detector import PIIMatch
 from src.services.text_cleanup_service import BLOCK, blackout, deidentify_paste
 from src.core.text_deidentifier import strip_labels
 from src.core.pii_orchestrator import find_person_entities
+from src.core.text_pdf import render as render_text_pdf
 
 from backend.schemas import (
     ConversionResultsResponse,
@@ -45,6 +46,8 @@ from backend.schemas import (
     PersonInfoResponse,
     CleanTextRequest,
     CleanTextResponse,
+    SaveTextRequest,
+    SaveTextResponse,
     KeyEntry,
     DetectPIIRequest,
     DetectTextRequest,
@@ -727,6 +730,26 @@ def clean_text(req: CleanTextRequest):
 def discard_text():
     """Drop the pasted text from the cache when the user leaves the flow."""
     return {"discarded": _detection_cache.pop(PASTE_KEY, None) is not None}
+
+
+@app.post("/api/text/save", response_model=SaveTextResponse)
+def save_text(req: SaveTextRequest):
+    """The only thing in the paste pathway that touches disk, and only on a
+    path the user picked in a native Save dialog."""
+    if req.kind not in ("pdf", "txt"):
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+
+    out = Path(req.path)
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if req.kind == "txt":
+            out.write_text(req.text, encoding="utf-8")
+        else:
+            render_text_pdf(req.text, out, block=BLOCK)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Saving failed: {e}") from e
+
+    return SaveTextResponse(path=str(out))
 
 
 @app.post("/api/deidentify", response_model=DeidentifyResultsResponse)

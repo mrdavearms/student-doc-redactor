@@ -91,6 +91,22 @@ class CleanTextResponse(BaseModel):
     leftover_name_warnings: List[str] = []
 
 
+class SaveTextRequest(BaseModel):
+    """
+    Write cleaned text to a path the user chose in a native dialog.
+
+    The text comes back from the client rather than the cache so what is saved
+    is byte-for-byte what the user was shown and approved.
+    """
+    text: str
+    path: str
+    kind: str  # 'pdf' | 'txt'
+
+
+class SaveTextResponse(BaseModel):
+    path: str
+
+
 class PIIMatchResponse(BaseModel):
     text: str
     category: str

@@ -1,6 +1,10 @@
 import sys, os
+import tempfile
+from pathlib import Path
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'core'))
 
+import fitz
 from fastapi.testclient import TestClient
 from backend.main import app, PASTE_KEY, PASTE_MAX_CHARS
 
@@ -156,3 +160,31 @@ def test_discard_clears_the_cache():
     assert r.status_code == 400
     # Nothing left to discard a second time.
     assert client.post('/api/text/discard').json()['discarded'] is False
+
+
+def test_saving_txt_writes_the_exact_text():
+    out = Path(tempfile.mkdtemp()) / 'out.txt'
+    r = client.post('/api/text/save', json={
+        'text': 'Hello [Student].', 'path': str(out), 'kind': 'txt'})
+    assert r.status_code == 200
+    assert out.read_text(encoding='utf-8') == 'Hello [Student].'
+
+
+def test_saving_pdf_produces_black_boxes_and_no_block_glyphs():
+    out = Path(tempfile.mkdtemp()) / 'out.pdf'
+    r = client.post('/api/text/save', json={
+        'text': 'Name: ██████ attended.', 'path': str(out), 'kind': 'pdf'})
+    assert r.status_code == 200
+    doc = fitz.open(str(out))
+    extracted = ''.join(p.get_text() for p in doc)
+    drawings = doc[0].get_drawings()
+    doc.close()
+    assert '█' not in extracted and '?' not in extracted
+    assert len(drawings) >= 1
+
+
+def test_an_unknown_kind_is_rejected():
+    out = Path(tempfile.mkdtemp()) / 'out.bin'
+    r = client.post('/api/text/save', json={
+        'text': 'x', 'path': str(out), 'kind': 'exe'})
+    assert r.status_code == 400
