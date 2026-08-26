@@ -28,6 +28,16 @@ export default function PasteCompletion() {
   // so it can't live in pasteOutput -- it's about the saved FILE, not the
   // text shown on screen.
   const [unsupportedChars, setUnsupportedChars] = useState<string[]>([]);
+  // Snapshot taken once at mount, deliberately NOT re-read from the store on
+  // every render. "Clean another" clears pasteOutput and navigates away, but
+  // Layout's AnimatePresence keeps this component mounted for its ~1s exit
+  // animation — without this snapshot it re-renders mid-fade with
+  // pasteOutput already null and flashes "Processing not complete." at
+  // someone who just succeeded. The store itself is still cleared
+  // immediately (nothing here delays that); this copy lives only in this
+  // about-to-unmount component and is garbage collected with it, the same
+  // precedent CLAUDE.md rule 24 sets for other sensitive on-screen state.
+  const [display] = useState(() => pasteOutput);
 
   const isDeidentify = workflowMode === 'deidentify';
   // Real names — read from the module-level holder, never the store
@@ -35,7 +45,7 @@ export default function PasteCompletion() {
   // render this component twice under StrictMode.
   const { key_entries, ambiguity_notes, leftover_name_warnings } = peekSensitive();
 
-  if (!pasteOutput) {
+  if (!display) {
     return (
       <div className="text-center py-12 text-slate-500">
         Processing not complete.
@@ -43,7 +53,7 @@ export default function PasteCompletion() {
     );
   }
 
-  const { text, replacements, leftovers } = pasteOutput;
+  const { text, replacements, leftovers } = display;
 
   const copyMain = async () => {
     try {
