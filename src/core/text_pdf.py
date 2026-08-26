@@ -40,11 +40,32 @@ def choose_sentinel(text: str, width: int = 6) -> str:
 
     Fixed repetition keeps every box the same width, which is what carries the
     fixed-width decision through from the text into the PDF.
+
+    If every candidate character already occurs in `text`, fall back to the
+    literal marker `[REMOVED]` -- but that marker gets no exemption from the
+    same guarantee. When `[REMOVED]` itself also occurs in `text` (the user's
+    own writing quotes the marker), it is extended with a growing numeric
+    suffix (`[REMOVED0]`, `[REMOVED00]`, ...) until the result is absent. The
+    search is bounded by len(text): a string longer than `text` can never
+    occur as a substring of it, so trying suffix lengths up to len(text) + 1
+    guarantees both termination and a collision-free result without an
+    unbounded search.
     """
     for char in SENTINEL_CANDIDATES:
         if char not in text:
             return char * width
-    return FALLBACK_SENTINEL
+
+    if FALLBACK_SENTINEL not in text:
+        return FALLBACK_SENTINEL
+
+    for n in range(1, len(text) + 2):
+        candidate = f'[REMOVED{"0" * n}]'
+        if candidate not in text:
+            return candidate
+
+    # Unreachable: at n == len(text) + 1, len(candidate) > len(text), so it
+    # cannot possibly occur as a substring of text.
+    return f'[REMOVED{"0" * (len(text) + 1)}]'
 
 
 def _page_rect() -> fitz.Rect:

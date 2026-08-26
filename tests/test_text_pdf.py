@@ -55,6 +55,29 @@ def test_choose_sentinel_falls_back_when_every_candidate_occurs():
     assert choose_sentinel(crowded) == '[REMOVED]'
 
 
+def test_choose_sentinel_avoids_collision_with_the_literal_fallback():
+    # Every single-character candidate AND the literal fallback marker are
+    # already present. A hard-coded '[REMOVED]' fallback would collide with
+    # the user's own text — exactly the bug the per-render sentinel exists to
+    # prevent, just one level down.
+    crowded = '¤¦¿~^¶§[REMOVED]'
+    sentinel = choose_sentinel(crowded)
+    assert sentinel not in crowded
+
+
+def test_the_users_own_removed_marker_is_never_boxed():
+    # Forces the fallback-collision path end to end: every single-character
+    # candidate AND the literal "[REMOVED]" are present in the user's own
+    # text. If the fallback sentinel were hard-coded, this literal occurrence
+    # would be blacked out along with the real redaction.
+    crowded = '¤¦¿~^¶§ the report says [REMOVED] verbatim.'
+    path = _render(f'{crowded} Name: {BLOCK}.')
+    doc = fitz.open(str(path))
+    extracted = ''.join(p.get_text() for p in doc)
+    doc.close()
+    assert '[REMOVED] verbatim' in extracted
+
+
 def test_long_text_paginates():
     path = _render('The student was observed in class. ' * 400)
     doc = fitz.open(str(path))
