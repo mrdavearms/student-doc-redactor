@@ -1,8 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import { useDetection } from '../hooks/useDetection';
+
+/**
+ * What this screen actually knows happened, independent of the shared
+ * `loading`/`error` store fields — those get cleared by any navigateTo(),
+ * including a Back button press, so they cannot be trusted to still describe
+ * THIS screen's scan by the time it renders. 'running' is the initial value
+ * so a scan that is genuinely in progress is never mistaken for a finished
+ * one on first paint.
+ */
+type ScanStatus = 'running' | 'succeeded' | 'declined' | 'no_text' | 'failed';
 
 /**
  * Step 2 for pasted text — the paste pathway's counterpart to ConversionStatus.
@@ -14,11 +24,13 @@ import { useDetection } from '../hooks/useDetection';
  * has no auto-advance logic of its own.
  */
 export default function TextScan() {
-  const { pastedText, navigateTo, loading, error } = useStore();
+  const { pastedText, navigateTo, loading } = useStore();
   const { runDetection, abortDetection } = useDetection();
+  const [status, setStatus] = useState<ScanStatus>('running');
 
   useEffect(() => {
-    if (!pastedText.trim()) return;
+    if (!pastedText.trim()) { setStatus('no_text'); return; }
+    setStatus('running');
     void runDetection({
       fingerprint: { paste: pastedText },
       // This is the copy shown in Layout's full-screen loading overlay — the
@@ -32,6 +44,15 @@ export default function TextScan() {
         + "while the language model loads — that's expected, not a freeze.",
       run: (names, signal) =>
         api.detectText({ text: pastedText, ...names }, { signal }),
+    }).then((outcome) => {
+      // 'ran'/'reused' navigate this screen away already; 'aborted' means a
+      // newer request or an unmount has taken over, so there is nothing of
+      // ours left to report. Only 'declined' and 'failed' leave the user
+      // sitting on this screen with nothing having happened — those are the
+      // two cases this screen must describe truthfully instead of assuming
+      // "Scan finished."
+      if (outcome === 'declined') setStatus('declined');
+      else if (outcome === 'failed') setStatus('failed');
     });
     // Standard AbortController-on-unmount pattern: cancel whatever request
     // this effect started. There is no `started` ref guarding the call above
@@ -56,17 +77,27 @@ export default function TextScan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Driven by `status`, not the shared `loading`/`error` store fields — those
+  // are cleared by any navigateTo() (including this screen's own Back
+  // button), so they cannot reliably describe what THIS mount's scan did.
+  // `status` starts at 'running' and is only ever updated from the settled
+  // outcome of the detection call this screen itself started (see the effect
+  // above), so it can't claim a scan finished when one never ran.
+  const subtitle = loading
+    ? 'Reading your text and looking for personal information.'
+    : status === 'failed'
+      ? 'The scan could not finish. See the message above, or go back and try again.'
+      : status === 'declined'
+        ? "No scan was run — you chose not to re-scan after changing your details. Go back to review them, or try again to re-scan."
+        : status === 'no_text'
+          ? "There's no text to scan. Go back and paste some text first."
+          : 'Scan finished.';
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Scanning your text</h2>
-        <p className="text-sm text-slate-400 mt-1">
-          {loading
-            ? 'Reading your text and looking for personal information.'
-            : error
-              ? 'The scan could not finish. See the message above, or go back and try again.'
-              : 'Scan finished.'}
-        </p>
+        <p className="text-sm text-slate-400 mt-1">{subtitle}</p>
       </div>
 
       {loading && (

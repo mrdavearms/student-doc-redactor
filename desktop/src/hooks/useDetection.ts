@@ -18,6 +18,16 @@ export interface DetectionSource {
 }
 
 /**
+ * What actually happened when runDetection was called, so a caller can render
+ * something true instead of assuming a call that returned meant a scan ran.
+ * 'ran'/'reused' both end in a navigateTo() away from the calling screen;
+ * 'declined'/'failed' leave the caller exactly where it was, with nothing
+ * having changed; 'aborted' means the request was cancelled (Back, unmount,
+ * or superseded) and the caller is likely already gone.
+ */
+export type DetectionOutcome = 'ran' | 'reused' | 'declined' | 'failed' | 'aborted';
+
+/**
  * Fingerprint-aware PII detection, extracted verbatim from
  * ConversionStatus.handleContinue so a future pasted-text pathway can reuse
  * it.
@@ -60,7 +70,7 @@ export function useDetection() {
     setLoading(false);
   };
 
-  const runDetection = async (source: DetectionSource) => {
+  const runDetection = async (source: DetectionSource): Promise<DetectionOutcome> => {
     const parentList = parentNames.split(',').map((n) => n.trim()).filter(Boolean);
     const familyList = familyNames.split(',').map((n) => n.trim()).filter(Boolean);
     const orgList = organisationNames.split(',').map((n) => n.trim()).filter(Boolean);
@@ -80,7 +90,7 @@ export function useDetection() {
       const totalMatches = detectionResults.documents.reduce(
         (sum, d) => sum + d.matches.length, 0);
       navigateTo(totalMatches === 0 ? 'no_pii_found' : 'document_review');
-      return;
+      return 'reused';
     }
 
     // Inputs changed — re-detection will reset review work. Warn if any exists.
@@ -94,7 +104,7 @@ export function useDetection() {
           'Your details have changed, so PII detection needs to run again. ' +
           'This will reset your review choices and remove any manually added items. Continue?'
         );
-        if (!proceed) return;
+        if (!proceed) return 'declined';
       }
     }
 
@@ -110,7 +120,7 @@ export function useDetection() {
       }, ctrl.signal);
 
       // If the user navigated away (Back) mid-request, do not force-navigate.
-      if (ctrl.signal.aborted) return;
+      if (ctrl.signal.aborted) return 'aborted';
 
       setDetectionResults(detection);
       setDetectionParamsKey(paramsKey);
@@ -120,8 +130,13 @@ export function useDetection() {
       } else {
         navigateTo('document_review');
       }
+      return 'ran';
     } catch (e) {
-      if ((e as { name?: string })?.name !== 'AbortError') setError(friendlyError(e));
+      if ((e as { name?: string })?.name !== 'AbortError') {
+        setError(friendlyError(e));
+        return 'failed';
+      }
+      return 'aborted';
     } finally {
       // Deliberately skip clearing loading when THIS request was the one
       // aborted: abortDetection() (above) already cleared it for a genuine
