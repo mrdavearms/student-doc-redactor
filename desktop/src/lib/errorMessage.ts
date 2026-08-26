@@ -11,6 +11,7 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/page \d+ out of range/i, "Couldn't load that page from the PDF."],
   [/no text was provided/i, "Paste some text before continuing."],
   [/over the [\d,]+ limit/i, "That's more text than this screen handles. Save it as a document and use the document pathway instead."],
+  [/character that can't be read properly/i, "That text has a character that can't be read properly — this can happen with text copied from certain sources. Try copying it again, or paste a different section."],
   [/cleaning text failed/i, "Something went wrong while cleaning your text. Please try again."],
   [/unsupported file type/i, "That can only be saved as a PDF or a text file."],
   [/saving failed/i, "Couldn't save the file. Check you have permission to write to that folder and try again."],

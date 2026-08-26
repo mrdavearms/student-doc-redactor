@@ -367,6 +367,27 @@ def detect_text(req: DetectTextRequest):
                     f"{PASTE_MAX_CHARS:,} limit. Save it as a document and use "
                     "the document pathway instead."),
         )
+    # A lone UTF-16 surrogate is valid JSON (JS strings permit it) but not
+    # valid Unicode text — it can arrive from corrupted clipboard data. Left
+    # unchecked it reaches spaCy/Presidio's NER analysis, which needs to
+    # encode the text and raises deep inside with an internal exception
+    # string. Reject up front with a message a teacher can act on, rather
+    # than sanitising it ourselves: this is a privacy tool, and silently
+    # rewriting the pasted text (even just to drop or replace one character)
+    # risks altering something the user needs redacted exactly as they pasted
+    # it. The document pathway can never hit this — PDF text extraction never
+    # hands back unpaired surrogates.
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "That text has a character that can't be read properly — this "
+                "can happen with text copied from certain sources. Try copying "
+                "it again, or paste a different section."
+            ),
+        )
 
     try:
         service = DetectionService(

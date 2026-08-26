@@ -1,4 +1,5 @@
 import sys, os
+import json
 import tempfile
 from pathlib import Path
 
@@ -52,6 +53,30 @@ def test_pii_detect_refuses_the_reserved_key():
         'pdf_paths': [PASTE_KEY], 'student_name': 'Billy Bob',
         'parent_names': [], 'family_names': [], 'organisation_names': []})
     assert r.status_code == 400
+
+
+def test_lone_utf16_surrogate_is_rejected_cleanly():
+    # Valid JSON (JS strings permit unpaired surrogates) but not valid
+    # Unicode — reachable from corrupted clipboard data. Previously reached
+    # spaCy/Presidio's NER analysis and 500'd with an internal exception
+    # string ("'utf-8' codec can't encode character '\ud800'...").
+    #
+    # httpx's own json= helper uses ensure_ascii=False and would raise
+    # UnicodeEncodeError itself trying to build the request — a real client
+    # (JS's JSON.stringify + fetch) always escapes a lone surrogate to plain
+    # ASCII \ud800 text on the wire, so the request body is built by hand
+    # here with stdlib json.dumps (ensure_ascii=True, the default) to match
+    # what actually reaches the backend.
+    body = json.dumps({
+        'text': 'Name: John \ud800 Smith', 'student_name': 'John Smith',
+        'parent_names': [], 'family_names': [], 'organisation_names': [],
+    })
+    r = client.post('/api/text/detect', content=body.encode('utf-8'),
+                     headers={'Content-Type': 'application/json'})
+    assert r.status_code == 400
+    assert 'character' in r.json()['detail'].lower()
+    assert 'utf-8' not in r.json()['detail'].lower()
+    assert 'codec' not in r.json()['detail'].lower()
 
 
 def test_manual_pii_can_be_added_against_the_pasted_text():

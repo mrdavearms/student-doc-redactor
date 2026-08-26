@@ -112,4 +112,12 @@ describe('paste pathway errors', () => {
     expect(friendlyError(new Error('Unsupported file type.')))
       .toMatch(/PDF or a text file/i);
   });
+
+  it('explains an unreadable character from corrupted clipboard data', () => {
+    expect(friendlyError(new Error(
+      "That text has a character that can't be read properly — this can "
+      + "happen with text copied from certain sources. Try copying it again, "
+      + "or paste a different section.")))
+      .toMatch(/character/i);
+  });
 });
