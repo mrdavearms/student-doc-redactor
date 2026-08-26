@@ -84,3 +84,32 @@ describe('friendlyError', () => {
       .toMatch(/couldn't authenticate/i);
   });
 });
+
+describe('paste pathway errors', () => {
+  it('explains an empty paste', () => {
+    expect(friendlyError(new Error('No text was provided.')))
+      .toMatch(/paste some text/i);
+  });
+
+  it('explains an oversize paste and points at documents', () => {
+    expect(friendlyError(new Error(
+      'That text is 60,000 characters, over the 50,000 limit. Save it as a ' +
+      'document and use the document pathway instead.')))
+      .toMatch(/document/i);
+  });
+
+  it('handles a clean failure', () => {
+    expect(friendlyError(new Error('Cleaning text failed: boom')))
+      .toMatch(/cleaning your text/i);
+  });
+
+  it('handles a save failure', () => {
+    expect(friendlyError(new Error('Saving failed: disk full')))
+      .toMatch(/save/i);
+  });
+
+  it('handles an unsupported file type', () => {
+    expect(friendlyError(new Error('Unsupported file type.')))
+      .toMatch(/PDF or a text file/i);
+  });
+});

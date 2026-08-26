@@ -116,6 +116,49 @@ export const api = {
       ...options,
     }, 30 * 60_000),
 
+  detectText: (params: {
+    text: string;
+    student_name: string;
+    parent_names: string[];
+    family_names: string[];
+    organisation_names: string[];
+  }, options?: RequestInit) =>
+    request<import('./types').DetectionResults>('/api/text/detect', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }, 30 * 60_000),
+
+  textPeople: (params: Record<string, unknown>, options?: RequestInit) =>
+    request<import('./types').PeopleResponse>('/api/text/people', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }),
+
+  textLabels: (params: Record<string, unknown>, options?: RequestInit) =>
+    request<import('./types').LabelPreviewResponse>('/api/text/labels', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }),
+
+  cleanText: (params: Record<string, unknown>, options?: RequestInit) =>
+    request<import('./types').CleanTextResult>('/api/text/clean', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      ...options,
+    }, 30 * 60_000),
+
+  saveText: (text: string, path: string, kind: 'pdf' | 'txt') =>
+    request<{ path: string }>('/api/text/save', {
+      method: 'POST',
+      body: JSON.stringify({ text, path, kind }),
+    }),
+
+  discardText: () =>
+    request<{ discarded: boolean }>('/api/text/discard', { method: 'POST' }),
+
   redact: (params: {
     folder_path: string;
     student_name: string;

@@ -170,6 +170,17 @@ export interface LabelPreviewResponse {
   labels: Record<string, string>;
 }
 
+export interface KeyEntry { label: string; real_name: string }
+
+export interface CleanTextResult {
+  text: string;
+  replacements: number;
+  leftovers: string[];
+  key_entries: KeyEntry[];
+  ambiguity_notes: string[];
+  leftover_name_warnings: string[];
+}
+
 export interface DeidentifyResults {
   output_folder: string;
   /** Written next to the ORIGINALS — never inside output_folder. */
