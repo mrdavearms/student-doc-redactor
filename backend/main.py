@@ -861,7 +861,16 @@ def clean_text(req: CleanTextRequest):
 
 @app.post("/api/text/discard")
 def discard_text():
-    """Drop the pasted text from the cache when the user leaves the flow."""
+    """
+    Drop the pasted text from the cache when the user leaves the flow.
+
+    Claims a generation first. Detect endpoints are synchronous, so a scan the
+    renderer abandoned keeps running and would otherwise publish the very slab
+    the user just asked to discard back into the cache — leaving it resident
+    with nothing on screen to explain why. Superseding it makes the discard
+    stick. The pop itself needs no lock: it is one atomic dict operation.
+    """
+    _begin_detection()
     return {"discarded": _detection_cache.pop(PASTE_KEY, None) is not None}
 
 

@@ -184,3 +184,31 @@ def test_an_ordinary_single_document_detection_still_publishes_and_redacts(tmp_p
     })
     assert red.status_code == 200
     assert red.json()['document_results'][0]['items_redacted'] == 1
+
+
+def test_discard_supersedes_a_scan_the_user_abandoned(monkeypatch):
+    """
+    /api/text/discard must also claim a generation.
+
+    The renderer aborts a scan by dropping the response, but the endpoint is
+    synchronous and keeps running. Without this, a scan abandoned just before
+    the user left the flow would publish the very slab they asked to discard
+    back into the cache -- leaving their pasted text resident in backend
+    memory with nothing on screen to explain why.
+    """
+    published = {}
+
+    def slow_detect(self, text):
+        # The user leaves the flow while this scan is still running.
+        assert client.post('/api/text/discard').status_code == 200
+        published['discarded_midway'] = True
+        return []
+
+    monkeypatch.setattr(DetectionService, 'detect_in_text', slow_detect)
+    resp = client.post('/api/text/detect',
+                       json=_paste_body('Billy Bob was absent.', 'Billy Bob'))
+
+    assert published['discarded_midway']
+    # The abandoned scan is superseded, so it cannot re-seed the cache.
+    assert resp.status_code == 409
+    assert PASTE_KEY not in _detection_cache

@@ -68,6 +68,11 @@ export function useDetection() {
     if (!ctrl || ctrl.signal.aborted) return;
     ctrl.abort();
     setLoading(false);
+    // Aborting only abandons the response — the backend endpoint is
+    // synchronous and runs to completion, so we no longer know whose results
+    // the cache holds. Drop the fingerprint so the next run re-detects rather
+    // than reusing results the cache may no longer back (CLAUDE.md rule 41).
+    setDetectionParamsKey('');
   };
 
   const runDetection = async (source: DetectionSource): Promise<DetectionOutcome> => {
@@ -84,8 +89,10 @@ export function useDetection() {
     });
 
     // Same inputs as the last successful run — reuse the existing results so
-    // review decisions and manually added items survive. The backend cache is
-    // only cleared by a NEW detect call, so redaction will still work.
+    // review decisions and manually added items survive. Safe because the
+    // fingerprint is only set by a run that actually published, and is cleared
+    // on abort and on any doubt about the cache, so a match means the backend
+    // still holds this run.
     if (detectionResults && detectionParamsKey && paramsKey === detectionParamsKey) {
       const totalMatches = detectionResults.documents.reduce(
         (sum, d) => sum + d.matches.length, 0);
