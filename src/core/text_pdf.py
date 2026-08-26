@@ -23,6 +23,24 @@ bundling a Unicode font (a new asset/dependency this project deliberately
 avoids), so `render()` instead reports which of the user's own characters it
 could not display, via `unsupported_characters()`, so the caller can warn
 rather than silently ship corrupted content.
+
+Most of what actually trips that failure is not exotic at all: Word and most
+web editors auto-substitute curly quotes, em/en dashes, an ellipsis
+character and a bullet character by default, so a completely ordinary pasted
+sentence routinely contains several of these -- a warning alone would fire
+on nearly every save while still handing back a PDF full of "?". So
+TRANSLITERATIONS runs FIRST, silently swapping the common typographic
+characters for their Latin-1 equivalents, and the unsupported-character scan
+and the warning it produces are reserved for what genuinely cannot be
+approximated this way -- non-Latin scripts and emoji.
+
+ORDER MATTERS. choose_sentinel() must inspect the text AFTER transliteration
+runs, not before: a substitution could otherwise introduce the very
+character a stale, pre-transliteration sentinel choice had assumed absent,
+and apply_redactions() would then black out that (legitimate) content when
+it searches the page for the sentinel. That is the exact collision this
+module exists to prevent (see choose_sentinel()'s docstring) -- reintroduced
+one step earlier if the order here is ever "simplified".
 """
 
 import re
@@ -41,6 +59,48 @@ FALLBACK_SENTINEL = '[REMOVED]'
 
 # A slab that cannot be laid out must not spin forever.
 MAX_PAGES = 200
+
+# Typographic characters that Word/web pastes routinely introduce, which fall
+# outside Latin-1 and would otherwise render as a literal "?" (each entry
+# confirmed by direct rendering, not assumed -- see unsupported_characters()
+# for why fitz.Font.has_glyph() alone can't be trusted for this). None of the
+# replacement strings contain U+2588 (the block character) or any
+# SENTINEL_CANDIDATES/FALLBACK_SENTINEL character, so transliterating can
+# never manufacture a block run or collide with a sentinel by itself --
+# choose_sentinel() still runs AFTER this substitution regardless, because
+# that guarantee must hold for whatever this table contains, today or later.
+TRANSLITERATIONS = {
+    '‘': "'",    # left single quotation mark
+    '’': "'",    # right single quotation mark
+    '“': '"',    # left double quotation mark
+    '”': '"',    # right double quotation mark
+    '′': "'",    # prime
+    '″': '"',    # double prime
+    '–': '-',    # en dash
+    # An em dash tight against its neighbouring words ("word—word") reads as
+    # a hyphenated compound if simply swapped for "-"; " - " keeps the
+    # visual pause the em dash conveys regardless of whether the source
+    # already had spaces around it (in which case this doubles up a space --
+    # a cosmetic wrinkle, not a correctness problem).
+    '—': ' - ',
+    '…': '...',  # horizontal ellipsis
+    '•': '-',    # bullet -> plain-text list marker
+    '™': '(TM)',  # trademark sign
+    '€': 'EUR',   # euro sign -- no single Latin-1 character stands in
+    # Non-breaking and other exotic spaces -> an ordinary breakable space.
+    # (NBSP itself already renders fine -- it's normalised for consistency,
+    # not because it corrupts to "?".) Zero-width space is the one exception:
+    # it has no width, so replacing it with a visible space would add one
+    # the user never typed -- it is dropped instead.
+    ' ': ' ',    # no-break space
+    ' ': ' ',    # en space
+    ' ': ' ',    # em space
+    ' ': ' ',    # figure space
+    ' ': ' ',    # thin space
+    ' ': ' ',    # hair space
+    ' ': ' ',    # narrow no-break space
+    '​': '',     # zero-width space
+}
 
 
 def choose_sentinel(text: str, width: int = 6) -> str:
@@ -136,6 +196,14 @@ def _split_for_page(text: str, rect: fitz.Rect):
     return text[:best_n], text[best_n:]
 
 
+def _transliterate(text: str) -> str:
+    """Swap common typographic characters for their Latin-1 equivalents --
+    see TRANSLITERATIONS for the table and why each entry is there."""
+    for src, dst in TRANSLITERATIONS.items():
+        text = text.replace(src, dst)
+    return text
+
+
 def unsupported_characters(text: str) -> list:
     """
     Distinct characters in `text` (first-seen order) that render()'s font
@@ -187,17 +255,30 @@ def render(text: str, out_path, block: str) -> list:
 
     Returns the distinct characters (first-seen order) of the user's OWN
     content that this renderer's font cannot display and which therefore
-    show up as "?" in the saved PDF -- empty if none. Checked against `text`
-    with the `block` runs removed, since those are never actually inserted
-    into the page (they become the sentinel, then get redacted away) and so
-    can never appear as "?" no matter what character they use. The save
-    still succeeds either way; the caller decides what to do with the list.
+    show up as "?" in the saved PDF -- empty if none. Common typographic
+    characters (curly quotes, em/en dashes, an ellipsis, ...) are silently
+    transliterated to Latin-1 equivalents before that check runs, so the
+    warning is reserved for what genuinely can't be approximated -- non-
+    Latin scripts and emoji -- see TRANSLITERATIONS. Checked with the
+    `block` runs removed, since those are never actually inserted into the
+    page (they become the sentinel, then get redacted away) and so can
+    never appear as "?" no matter what character they use. The save still
+    succeeds either way; the caller decides what to do with the list.
+
+    ORDER IS DELIBERATE: transliteration runs before choose_sentinel(),
+    never after. choose_sentinel()'s whole contract is "absent from the
+    exact text about to be laid out and later searched for" -- picking it
+    from the pre-transliteration text would let a substitution reintroduce
+    a character the choice had assumed absent, and search_for() would then
+    black out that legitimate, newly-introduced content along with the real
+    block runs. Do not reorder this.
     """
-    text = text or ''
-    unsupported = unsupported_characters(text.replace(block, ''))
+    text = _transliterate(text or '')
 
     sentinel = choose_sentinel(text)
     laid_out = text.replace(block, sentinel)
+
+    unsupported = unsupported_characters(text.replace(block, ''))
 
     doc = fitz.open()
     rect = _page_rect()

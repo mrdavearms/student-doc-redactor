@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import fitz
+import text_pdf
 from text_pdf import choose_sentinel, render, unsupported_characters
 
 BLOCK = '█' * 6
@@ -245,3 +246,82 @@ def test_render_still_saves_successfully_despite_unsupported_characters():
     doc.close()
     assert 'Notes:' in extracted
     assert '█' not in extracted
+
+
+# ── Follow-up: common typographic characters must be transliterated, not
+# just warned about, because Word/web pastes produce them by default ────────
+
+def test_the_reported_sentence_renders_with_no_question_marks():
+    # The exact coordinator-reported sentence: a curly apostrophe, curly
+    # double quotes, an em dash, and an ellipsis -- the near-default case
+    # for text pasted out of Word, not an edge case. Before this fix every
+    # one of these five characters rendered as a literal "?".
+    text = ('The student’s report — “excellent progress” '
+            '… was filed.')
+    path = _render(f'{text} Name: {BLOCK}.')
+    doc = fitz.open(str(path))
+    extracted = ''.join(p.get_text() for p in doc)
+    doc.close()
+
+    assert '?' not in extracted
+    assert "student's report" in extracted
+    assert '"excellent progress"' in extracted
+    assert '-' in extracted    # em dash -> a hyphen-based substitute
+    assert '...' in extracted  # ellipsis -> three dots
+    assert '█' not in extracted
+
+
+def test_common_typography_is_no_longer_flagged_as_unsupported():
+    # These used to show up in render()'s warning list on almost every
+    # save (Word/web auto-substitute them); they must now be silently
+    # fixed instead, so the warning is reserved for genuinely undisplayable
+    # content (non-Latin scripts, emoji).
+    text = '‘quoted’ “text” – an em—dash … • point €5 ™'
+    warnings = render(text, _tmp_path(), block=BLOCK)
+    assert warnings == []
+
+
+def test_sentinel_is_chosen_after_transliteration_not_before():
+    """
+    Regression for the ordering trap. choose_sentinel() must inspect the
+    ALREADY-TRANSLITERATED text -- not the raw text -- because its whole
+    contract is "absent from the exact string about to be laid out and
+    later searched for".
+
+    Forces the scenario with a throwaway transliteration entry (a snowman
+    character mapped to six '¤' -- matching choose_sentinel()'s default
+    width and its first-preference candidate) so the trap fires
+    deterministically regardless of what the real table contains today:
+
+    - If sentinel selection ran on the PRE-transliteration text (the bug),
+      '¤' looks absent and gets chosen as the sentinel. Transliteration then
+      introduces exactly '¤¤¤¤¤¤' into the user's own content, and
+      apply_redactions() blacks it out as if it were a real block run --
+      silently destroying legitimate content, the exact failure mode
+      choose_sentinel()'s docstring exists to prevent.
+    - Run in the correct order (transliterate, then choose), '¤' is no
+      longer absent once the substitution has happened, so a later
+      candidate is chosen instead and the user's content survives intact.
+    """
+    monkeypatch_key = '☃'  # snowman -- not a realistic paste character,
+    # chosen only so this test doesn't depend on anything already in
+    # TRANSLITERATIONS today.
+    original = dict(text_pdf.TRANSLITERATIONS)
+    text_pdf.TRANSLITERATIONS[monkeypatch_key] = '¤' * 6
+    try:
+        text = f'Code: {monkeypatch_key} recorded. Name: {BLOCK}.'
+        path = _render(text)
+        doc = fitz.open(str(path))
+        extracted = ''.join(p.get_text() for p in doc)
+        drawings = doc[0].get_drawings()
+        doc.close()
+
+        assert '¤¤¤¤¤¤' in extracted, (
+            'the introduced content was blacked out -- sentinel was chosen '
+            'before transliteration ran')
+        assert 'Code:' in extracted and 'recorded' in extracted
+        # Only the real block run was redacted, not the introduced '¤'s.
+        assert len(drawings) == 1
+    finally:
+        text_pdf.TRANSLITERATIONS.clear()
+        text_pdf.TRANSLITERATIONS.update(original)
