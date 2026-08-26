@@ -114,7 +114,7 @@ export default function FolderSelection() {
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Choose Documents & Student Details</h2>
         <p className="text-sm text-slate-400 mt-1">
-          {isDeidentify ? 'De-identify' : 'Redact'} a single document or a whole folder,
+          {isDeidentify ? 'De-identify' : 'Redact'} a single document, a whole folder, or pasted text,
           then enter the identifying information to look for.
         </p>
       </div>
@@ -128,7 +128,7 @@ export default function FolderSelection() {
       >
         <div className="flex items-center gap-2 text-slate-700 font-medium">
           What do you want to {isDeidentify ? 'de-identify' : 'redact'}?
-          <HelpTip text="Pick one document to redact just that file, or a folder to redact every PDF and Word document inside it." />
+          <HelpTip text="Pick one document to redact just that file, a folder to redact every PDF and Word document inside it, or paste text to clean a block without saving anything to disk." />
         </div>
 
         <div className="grid grid-cols-3 gap-3">
