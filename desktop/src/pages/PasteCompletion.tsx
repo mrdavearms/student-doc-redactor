@@ -38,6 +38,23 @@ export default function PasteCompletion() {
   // about-to-unmount component and is garbage collected with it, the same
   // precedent CLAUDE.md rule 24 sets for other sensitive on-screen state.
   const [display] = useState(() => pasteOutput);
+  // Snapshotted alongside `display`, for the same reason: how many items the
+  // user ticked on review, so the "fewer replacements than selected is
+  // normal" note below can be scoped to when that's actually true instead of
+  // always showing. Reused from the same detectionResults/userSelections
+  // FinalConfirmation already used to compute this run's selected count —
+  // no new store field needed.
+  const [selectedCount] = useState(() => {
+    const { detectionResults, userSelections } = useStore.getState();
+    if (!detectionResults) return 0;
+    let count = 0;
+    for (const doc of detectionResults.documents) {
+      doc.matches.forEach((_, idx) => {
+        if (userSelections[`${doc.path}_${idx}`]) count++;
+      });
+    }
+    return count;
+  });
 
   const isDeidentify = workflowMode === 'deidentify';
   // Real names — read from the module-level holder, never the store
@@ -117,7 +134,10 @@ export default function PasteCompletion() {
         </h2>
         <p className="text-sm text-slate-400 mt-1">
           {replacements} spot{replacements === 1 ? '' : 's'} {isDeidentify ? 'replaced with a label' : 'blacked out'} in
-          your text. A lower number than what you selected is normal — some selected items shared the same text.
+          your text.
+          {replacements < selectedCount && (
+            ' A lower number than what you selected is normal — some selected items shared the same text.'
+          )}
         </p>
       </div>
 

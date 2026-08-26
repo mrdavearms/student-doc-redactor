@@ -12,7 +12,7 @@ import { useDetection } from '../hooks/useDetection';
  * so a scan that is genuinely in progress is never mistaken for a finished
  * one on first paint.
  */
-type ScanStatus = 'running' | 'succeeded' | 'declined' | 'no_text' | 'failed';
+type ScanStatus = 'running' | 'declined' | 'no_text' | 'failed';
 
 /**
  * Step 2 for pasted text — the paste pathway's counterpart to ConversionStatus.
@@ -88,7 +88,7 @@ export default function TextScan() {
     : status === 'failed'
       ? 'The scan could not finish. See the message above, or go back and try again.'
       : status === 'declined'
-        ? "No scan was run — you chose not to re-scan after changing your details. Go back to review them, or try again to re-scan."
+        ? 'No scan was run — you chose not to re-scan after changing your details. Go back to review them.'
         : status === 'no_text'
           ? "There's no text to scan. Go back and paste some text first."
           : 'Scan finished.';
