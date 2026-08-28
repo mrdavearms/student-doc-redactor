@@ -15,18 +15,34 @@
 
 const MAINTAINER_EMAIL = 'dave@dandsarmstrong.com';
 
-// Windows drive paths, UNC paths, and POSIX absolute paths — including ones
-// wrapped in quotes. Greedy to the end of the path token (spaces inside
-// Windows paths are caught by the quoted variants first).
+// Paths in this app carry STUDENT NAMES, and real ones are full of spaces
+// ("C:\Users\dave\OneDrive - Dept\Billy Bob Report.pdf"). A token-bounded
+// match (\S+) stops at the first space and so leaves the surname behind —
+// which defeats the whole purpose of this file. Once a path ROOT is seen,
+// therefore, the rest of the LINE goes with it. That costs a little trailing
+// diagnostic prose; the mapped explanation is reported separately as
+// "Message shown", so nothing the maintainer needs is actually lost.
+//
+// Quoted forms come first so their closing quote bounds the match and any
+// prose after it survives.
 const PATH_PATTERNS: RegExp[] = [
-  /"[A-Za-z]:\\[^"]*"/g,      // "C:\Users\dave\Some Folder\file.pdf"
-  /'[A-Za-z]:\\[^']*'/g,
-  /[A-Za-z]:\\\S+/g,          // C:\Users\dave\file.pdf
-  /\\\\\S+/g,                 // \\server\share\file.pdf
-  /"\/[^"]*"/g,               // "/Users/dave/Some Folder/file.pdf"
-  /'\/[^']*'/g,
-  /\/(?:Users|home|Volumes|private|tmp|var|mnt|media)\/\S+/g,
+  /"[A-Za-z]:[\\/][^"\n]*"/g,   // "C:\Users\dave\Some Folder\file.pdf"
+  /'[A-Za-z]:[\\/][^'\n]*'/g,
+  /"\/[^"\n]*"/g,               // "/Users/dave/Some Folder/file.pdf"
+  /'\/[^'\n]*'/g,
+  /\\\\[^\n]*/g,               // \\server\share\file.pdf
+  // The lookbehind stops "http://host" being read as a drive letter.
+  /(?<![A-Za-z])[A-Za-z]:[\\/][^\n]*/g,
+  /\/(?:Users|home|Volumes|private|tmp|var|mnt|media)\/[^\n]*/g,
+  /~[\\/][^\n]*/g,              // ~/Documents/Billy Bob.pdf
 ];
+
+// Backstop for a filename with no path root in front of it. Space-tolerant on
+// purpose: "Billy Bob.pdf" is the shape that matters, and a token-bounded
+// match would keep the given name. It can swallow a few words of surrounding
+// prose, which is the safe direction to err in.
+const DOCUMENT_FILE_PATTERN =
+  /(?:[^\s\\/:*?"<>|]+ )*[^\s\\/:*?"<>|]+\.(?:pdf|docx?|txt|rtf|odt)\b/gi;
 
 /** Replace every path-like token — they carry student names in this app. */
 export function sanitiseForReport(text: string): string {
@@ -34,7 +50,7 @@ export function sanitiseForReport(text: string): string {
   for (const re of PATH_PATTERNS) {
     out = out.replace(re, '[path removed]');
   }
-  return out;
+  return out.replace(DOCUMENT_FILE_PATTERN, '[file removed]');
 }
 
 let lastRawError: string | null = null;
