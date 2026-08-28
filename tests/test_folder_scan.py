@@ -79,3 +79,55 @@ class TestExtensionCaseIsIgnored:
         results = ConversionService().process_folder(tmp_path)
 
         assert results.total_files == 1
+
+
+# ── Where Word conversions are written ───────────────────────────────────
+
+class TestConversionsStayOutOfTheUsersFolder:
+    """
+    Converted PDFs are unredacted copies of the student's document. They must
+    not be left sitting next to the originals, where they get synced by
+    OneDrive and swept up if the folder is dragged somewhere.
+    """
+
+    def test_folder_run_leaves_no_temp_folder_behind(self, tmp_path):
+        _make_pdf(tmp_path / "report.pdf")
+        (tmp_path / "plan.docx").write_bytes(b"not really a docx")
+
+        ConversionService().process_folder(tmp_path)
+
+        assert not (tmp_path / '.temp_converted').exists()
+
+    def test_single_document_run_leaves_no_temp_folder_behind(self, tmp_path):
+        doc = tmp_path / "plan.docx"
+        doc.write_bytes(b"not really a docx")
+
+        ConversionService().process_file(doc)
+
+        assert not (tmp_path / '.temp_converted').exists()
+
+    def test_converted_output_is_not_inside_the_source_folder(self, tmp_path):
+        from src.core.document_converter import _conversion_dir
+
+        assert not _conversion_dir().is_relative_to(tmp_path)
+
+    def test_a_legacy_temp_folder_is_cleaned_up(self, tmp_path):
+        """Existing installs have these on disk already — clear them on sight."""
+        legacy = tmp_path / '.temp_converted'
+        legacy.mkdir()
+        _make_pdf(legacy / "Billy Bob Report.pdf")
+        _make_pdf(tmp_path / "report.pdf")
+
+        ConversionService().process_folder(tmp_path)
+
+        assert not legacy.exists()
+
+    def test_each_run_starts_from_an_empty_conversion_folder(self, tmp_path):
+        from src.core.document_converter import _conversion_dir
+
+        first = _conversion_dir()
+        (first / "stale.pdf").write_bytes(b"%PDF-1.4")
+
+        second = _conversion_dir()
+
+        assert list(second.iterdir()) == []

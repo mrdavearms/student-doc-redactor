@@ -3,11 +3,62 @@ Document Converter
 Converts Word documents to PDF using LibreOffice in headless mode.
 """
 
+import atexit
 import platform
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple
 import fitz  # PyMuPDF
+
+
+# Word documents are converted to PDF before anything else can read them, and
+# those conversions are full, UNREDACTED copies of the student's document.
+#
+# They used to be written to "<the user's folder>/.temp_converted" and left
+# there permanently — nothing ever deleted them. The dot-prefix hides the
+# folder on macOS but means nothing on Windows, and school folders are
+# routinely inside OneDrive, so unredacted copies of student documents were
+# being synced to the cloud by an app whose promise is that nothing leaves the
+# machine. Dragging the folder into an AI tool took them along too.
+#
+# They now live in the OS temp area instead, in a directory private to this
+# backend process, cleared at the start of every conversion run and removed on
+# a clean exit.
+_TEMP_ROOT: Path | None = None
+
+
+def _conversion_dir() -> Path:
+    """
+    An empty directory for this conversion run's PDFs, outside the user's
+    folder.
+
+    Cleared on each call: one conversion run supersedes the previous one, which
+    is what the old in-folder behaviour did anyway by overwriting the same
+    filenames.
+    """
+    global _TEMP_ROOT
+    if _TEMP_ROOT is None:
+        _TEMP_ROOT = Path(tempfile.mkdtemp(prefix="redaction-tool-"))
+        atexit.register(shutil.rmtree, _TEMP_ROOT, True)
+
+    converted = _TEMP_ROOT / "converted"
+    shutil.rmtree(converted, ignore_errors=True)
+    converted.mkdir(parents=True, exist_ok=True)
+    return converted
+
+
+def _remove_legacy_temp_dir(folder: Path) -> None:
+    """
+    Delete a ".temp_converted" folder left behind by an earlier version.
+
+    Only ever created by this app, and holding only unredacted conversions it
+    produced, so removing it is the privacy-preserving action rather than a
+    destructive one. Best-effort: a file held open by another program is not
+    worth failing a run over.
+    """
+    shutil.rmtree(folder / '.temp_converted', ignore_errors=True)
 
 
 def _libreoffice_install_hint() -> str:
@@ -127,10 +178,12 @@ class DocumentConverter:
 
         suffix = file_path.suffix.lower()
 
+        _remove_legacy_temp_dir(file_path.parent)
+
         if suffix in ('.doc', '.docx'):
-            temp_dir = file_path.parent / '.temp_converted'
-            temp_dir.mkdir(exist_ok=True)
-            success, message, output_path = self.convert_to_pdf(file_path, temp_dir)
+            success, message, output_path = self.convert_to_pdf(
+                file_path, _conversion_dir()
+            )
             if success:
                 results['converted_files'].append(output_path)
             else:
@@ -171,9 +224,8 @@ class DocumentConverter:
             'password_protected': []
         }
 
-        # Create temp directory for converted files
-        temp_dir = folder_path / '.temp_converted'
-        temp_dir.mkdir(exist_ok=True)
+        _remove_legacy_temp_dir(folder_path)
+        temp_dir = _conversion_dir()
 
         # Find all documents.
         #
