@@ -17,7 +17,7 @@ Two frontends exist:
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (764 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 190 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 192 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -673,6 +673,30 @@ fails too the audit log names it. Never restore a bare `pass` here.
 `verify_redaction_ocr` releases its PDF handle in `finally` for the same reason:
 it was closed on the success path only, and on Windows an open handle locks the
 file the caller is about to move.
+
+
+### 68. `processFolder`/`processFile` must keep the LONG timeout
+
+`api.ts` has two timeouts, and conversion belongs with the long one even
+though it doesn't look slow. `DocumentConverter` spawns a FRESH `soffice`
+process per file — ~5.4s cold and ~0.6s warm on a fast SSD, several seconds
+each on Windows once Defender inspects every launch — so a folder of a dozen
+Word documents runs past 60 seconds.
+
+The failure was not a visible timeout: an abort is indistinguishable from an
+unreachable backend, so `friendlyError` returned "The redaction engine isn't
+responding. Please restart the app." while the backend was healthy and still
+converting, and restarting lost the run. If per-file progress is ever added,
+that is the thing to improve — not the timeout.
+
+### 69. `windowsHide: true` on the backend spawn is load-bearing
+
+`python.exe` is a console-subsystem binary, and a GUI process spawning one
+gets a console ALLOCATED for it: a black command window beside the app for its
+whole session. Node's default for the option is `false`, so it has to be asked
+for. It reads like a redundant option on a spawn that already pipes stdio —
+it is not, and piping does not suppress the console. Same category as the
+`relative` class in rule #57.
 
 ---
 
