@@ -13,6 +13,17 @@ export class BackendUnreachableError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+// Work that can legitimately take minutes, and so must not share the default.
+//
+// OCR and redaction are the obvious ones. Word conversion is the surprising
+// one: a fresh soffice process is spawned PER FILE (~5s cold, ~0.6s warm on a
+// fast SSD; several seconds each on Windows once Defender inspects every
+// launch), so a folder of a dozen Word documents ran past 60 seconds. The
+// abort is indistinguishable from a dead backend, so friendlyError told the
+// user "The redaction engine isn't responding. Please restart the app." while
+// the backend was healthy and still converting — and restarting lost the work.
+const LONG_TIMEOUT_MS = 30 * 60_000;
+
 // The API token is fetched once over IPC and cached for the session.
 // Outside Electron (vitest, browser dev without the shell) it resolves to ''
 // and no header is sent — the backend then has auth disabled too.
@@ -88,7 +99,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ folder_path }),
       ...options,
-    }),
+    }, LONG_TIMEOUT_MS),
 
   validateFile: (file_path: string) =>
     request<{ exists: boolean; is_file: boolean; supported: boolean; path: string }>(
@@ -101,7 +112,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ file_path }),
       ...options,
-    }),
+    }, LONG_TIMEOUT_MS),
 
   detectPII: (params: {
     pdf_paths: string[];
@@ -114,7 +125,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }, 30 * 60_000),
+    }, LONG_TIMEOUT_MS),
 
   detectText: (params: {
     text: string;
@@ -127,7 +138,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }, 30 * 60_000),
+    }, LONG_TIMEOUT_MS),
 
   textPeople: (params: Record<string, unknown>, options?: RequestInit) =>
     request<import('./types').PeopleResponse>('/api/text/people', {
@@ -148,7 +159,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }, 30 * 60_000),
+    }, LONG_TIMEOUT_MS),
 
   saveText: (text: string, path: string, kind: 'pdf' | 'txt') =>
     request<{ path: string; unsupported_characters: string[] }>('/api/text/save', {
@@ -177,7 +188,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }, 30 * 60_000),
+    }, LONG_TIMEOUT_MS),
 
   deidentify: (params: {
     folder_path: string;
@@ -199,7 +210,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
       ...options,
-    }, 30 * 60_000),
+    }, LONG_TIMEOUT_MS),
 
   deidentifyPeople: (params: Record<string, unknown>, options?: RequestInit) =>
     request<import('./types').PeopleResponse>('/api/deidentify/people', {

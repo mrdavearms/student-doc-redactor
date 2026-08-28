@@ -27,6 +27,55 @@ describe('request timeout', () => {
     await expectation;
   });
 
+  // Word conversion spawns a fresh soffice per file, so a folder of a dozen
+  // documents runs well past a minute. Timing out there reported a healthy
+  // backend as dead and told the user to restart, losing the run.
+  it('gives folder conversion far longer than the default minute', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', (_url: string, opts: RequestInit = {}) =>
+      new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      }),
+    );
+
+    let failure: unknown = null;
+    const p = api.processFolder('/some/folder').catch((e) => { failure = e; });
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(failure).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await p;
+    expect(failure).toBeInstanceOf(BackendUnreachableError);
+  });
+
+  it('gives single-document preparation the same long timeout', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', (_url: string, opts: RequestInit = {}) =>
+      new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      }),
+    );
+
+    let failure: unknown = null;
+    const p = api.processFile('/some/file.docx').catch((e) => { failure = e; });
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(failure).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await p;
+    expect(failure).toBeInstanceOf(BackendUnreachableError);
+  });
+
   it('propagates an external AbortError without converting it', async () => {
     const controller = new AbortController();
     vi.stubGlobal('fetch', (_url: string, opts: RequestInit = {}) =>
