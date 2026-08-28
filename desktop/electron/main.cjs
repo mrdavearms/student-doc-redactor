@@ -181,6 +181,12 @@ function startBackend() {
       REDACTION_API_TOKEN: API_TOKEN,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
+    // Windows only: python.exe is a console-subsystem binary, and a GUI
+    // process spawning one gets a console ALLOCATED for it — a black command
+    // window sitting alongside the app for as long as it is open. Node's
+    // default for this option is false, so it has to be asked for. No effect
+    // on macOS.
+    windowsHide: true,
   });
 
   backendProcess.stdout.on('data', (data) => {
