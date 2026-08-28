@@ -175,9 +175,18 @@ class DocumentConverter:
         temp_dir = folder_path / '.temp_converted'
         temp_dir.mkdir(exist_ok=True)
 
-        # Find all documents
-        word_files = list(folder_path.glob('*.doc')) + list(folder_path.glob('*.docx'))
-        pdf_files = list(folder_path.glob('*.pdf'))
+        # Find all documents.
+        #
+        # Matched on the lower-cased suffix, NOT with glob('*.pdf'): pathlib
+        # globbing is case-SENSITIVE on macOS, so a scanner-produced
+        # "SKMBT_C25016.PDF" was invisible there while the same file matched
+        # fine on Windows. In a mixed folder that meant a document was skipped
+        # silently — no error, just one fewer file in the results. Single-
+        # document mode already compared suffix.lower(); this makes the two
+        # modes agree.
+        entries = sorted(p for p in folder_path.iterdir() if p.is_file())
+        word_files = [p for p in entries if p.suffix.lower() in ('.doc', '.docx')]
+        pdf_files = [p for p in entries if p.suffix.lower() == '.pdf']
 
         # Process Word files
         for word_file in word_files:
