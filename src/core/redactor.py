@@ -997,6 +997,10 @@ class PDFRedactor:
         """
         failures = []
 
+        # The handle is released in `finally`: on Windows an open handle keeps
+        # the file locked, and the very next thing the caller does after a
+        # verification error is try to rename this file to .UNVERIFIED.pdf.
+        doc = None
         try:
             doc = fitz.open(str(pdf_path))
 
@@ -1017,10 +1021,11 @@ class PDFRedactor:
                             f"Page {page_idx + 1}: '{text}' still visible after redaction"
                         )
 
-            doc.close()
-
         except Exception as e:
             failures.append(f"OCR verification error: {str(e)}")
+        finally:
+            if doc is not None:
+                doc.close()
 
         return (len(failures) == 0, failures)
 

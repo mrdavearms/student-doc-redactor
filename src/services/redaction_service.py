@@ -4,6 +4,7 @@ Orchestrates the full redaction pipeline: folder setup, redaction, verification,
 Framework-agnostic — no Streamlit imports.
 """
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
@@ -353,14 +354,41 @@ class RedactionService:
                         )
                     result.verification_failures = ocr_failures
                     result.success = False
-                    # Quarantine the suspect file
+
+                    # Quarantine the suspect file.
+                    #
+                    # os.replace, not Path.rename: on Windows rename raises
+                    # FileExistsError when the target exists, and it does exist
+                    # the SECOND time a document fails verification — the first
+                    # run renamed its output away, so the second run gets the
+                    # plain name back and collides. The old handler swallowed
+                    # that, leaving a file that FAILED verification still named
+                    # "_redacted.pdf": indistinguishable from a clean one, and
+                    # matching /api/cleanup's *_redacted.pdf pattern. POSIX
+                    # rename replaces silently, so macOS never showed it.
+                    quarantine_path = output_path.with_suffix('.UNVERIFIED.pdf')
                     try:
-                        quarantine_path = output_path.with_suffix('.UNVERIFIED.pdf')
-                        output_path.rename(quarantine_path)
+                        os.replace(output_path, quarantine_path)
                         result.quarantine_path = quarantine_path
                         result.output_path = None
-                    except Exception:
-                        pass  # If rename fails, leave the file but still mark as failed
+                    except OSError as e:
+                        # Last resort. A file that failed verification must
+                        # never keep a name saying it was redacted, so if it
+                        # cannot be set aside it goes.
+                        result.output_path = None
+                        result.error_message = (
+                            "This document could not be verified, and the "
+                            f"unverified copy could not be set aside: {e}"
+                        )
+                        try:
+                            output_path.unlink()
+                        except OSError:
+                            logger.add_flagged_file(
+                                doc.name,
+                                f"UNVERIFIED FILE LEFT ON DISK: {output_path.name} "
+                                "failed verification and could not be renamed or "
+                                "deleted — remove it manually.",
+                            )
         else:
             logger.add_flagged_file(doc.name, f"Redaction failed: {message}")
             result.error_message = message
