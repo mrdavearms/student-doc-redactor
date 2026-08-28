@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (723 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (764 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 181 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 190 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -190,7 +190,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/components/ErrorBoundary.tsx` | Top-level React error boundary, wrapped around `<App/>` in `main.tsx` |
 | `desktop/src/components/ErrorFallback.tsx` | What the boundary renders after a render crash |
 | `desktop/src/components/UpdateCard.tsx` | Prominent update panel on the landing screen (the banner is used on every other screen) |
-| `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **Strips every path-like token first** — file paths in this app contain student names |
+| `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **A path root swallows the rest of the line** — file paths in this app contain student names, and a token-bounded (`\S+`) match stopped at the first space and left the surname behind |
 | `desktop/src/lib/peopleRoles.ts` | `effectiveRoleMap` — the role map a run actually uses; see rule #54b |
 | `desktop/src/lib/pasteResult.ts` | Module-level holder for the real-name half of a paste clean result (`holdSensitive`/`peekSensitive`/`clearSensitive`) — never the store, never React state; see rule #63 |
 | `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
@@ -619,6 +619,61 @@ Separate boxes, separate Copy buttons, key collapsed behind a `<details>`. `key_
 
 That setter clears `detectionParamsKey` so detection re-runs (rule #41). It must not clear the slab the user typed — and it doesn't: `setBackendReachable` in `desktop/src/store.ts` only ever touches `backendReachable` and `detectionParamsKey`. Losing several hundred words to a momentary backend blip is the worst avoidable failure in the paste pathway.
 
+
+### 65. Folder scanning matches on `suffix.lower()`, never `glob('*.pdf')`
+
+pathlib globbing is case-SENSITIVE on macOS and case-INSENSITIVE on Windows
+(ntpath normcases the pattern), so `glob('*.pdf')` gave the two shipping
+platforms different answers for the same folder. School photocopiers routinely
+emit uppercase names (`SKMBT_C25016.PDF`). An all-uppercase folder at least
+showed "No files available for processing"; a MIXED folder silently processed
+four of five documents and said nothing about the fifth.
+
+`process_folder` uses `iterdir()` + `suffix.lower()`, which is what
+`/api/file/validate` already did — the two input modes now agree. `is_file()`
+keeps the `redacted/` and `deidentified/` output folders out of the scan, so
+don't switch it to `rglob`. Entries are sorted so document order does not
+depend on directory order.
+
+### 66. Word conversions never touch the user's folder
+
+Converted PDFs are full, UNREDACTED copies of the student's document. They used
+to be written to `<the user's folder>/.temp_converted` and left there forever —
+nothing deleted them. The dot-prefix hides the folder on macOS and means nothing
+on Windows; school folders are routinely inside OneDrive, so those copies were
+synced to the cloud by an app whose promise is that nothing leaves the machine;
+and dragging the folder into an AI tool took them along, which is the exact
+accident the `DO-NOT-UPLOAD` key filename exists to prevent (rule #42).
+
+`document_converter._conversion_dir()` returns a directory under the OS temp
+area, private to the backend process, cleared at the start of each conversion
+run (matching the old overwrite-in-place semantics) and removed via `atexit`.
+`_remove_legacy_temp_dir()` deletes a `.temp_converted` found beside the
+documents — only this app ever creates that name.
+
+Nothing downstream may start depending on the conversion living beside the
+original: document paths are absolute, and `folder_path` (audit log location,
+default output folder, rule #50's same-folder check) is passed separately.
+
+### 67. Quarantine uses `os.replace`, and a file that fails verification never keeps its name
+
+`Path.rename` raises `FileExistsError` on Windows when the target exists, and it
+DOES exist the second time a document fails verification — the first run renamed
+its output to `.UNVERIFIED.pdf`, so the second run gets the plain name back and
+collides. With the old `except Exception: pass`, that left a file whose OCR
+verification found PII still visible sitting there named `_redacted.pdf`:
+indistinguishable from a clean one, and matching `/api/cleanup`'s
+`*_redacted.pdf` pattern. POSIX rename replaces silently, so macOS could never
+show it.
+
+`os.replace` overwrites on both platforms. If the move still fails the file is
+deleted — better no output than one whose name lies about it — and if the delete
+fails too the audit log names it. Never restore a bare `pass` here.
+
+`verify_redaction_ocr` releases its PDF handle in `finally` for the same reason:
+it was closed on the success path only, and on Windows an open handle locks the
+file the caller is about to move.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -725,7 +780,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 723 tests total
+tests/                                # 764 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
@@ -739,6 +794,8 @@ tests/                                # 723 tests total
 ├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
+├── test_folder_scan.py               # 10 tests: case-insensitive folder scan, conversions stay out of the user's folder
+├── test_quarantine.py                # 4 tests: failed-verification quarantine (os.replace), verify handle released
 ├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
 ├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
 ├── test_text_pdf.py                  # 23 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
