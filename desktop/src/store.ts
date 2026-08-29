@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand';
+import { api } from './api';
 import { dirname } from './lib/paths';
 import { buildDefaultSelections } from './lib/categories';
 import { clearSensitive } from './lib/pasteResult';
@@ -372,6 +373,12 @@ export const useStore = create<AppState>((set) => ({
 
   reset: () => {
     clearSensitive();
+    // Tell the backend to forget the last run's document text too. Its cache
+    // is otherwise resident for the life of the process, and this is the app's
+    // only "start over" — the paste pathway already had an equivalent, the
+    // document pathway did not. Fire-and-forget on purpose: starting over must
+    // work whether or not the backend answers.
+    void api.discardDetection().catch(() => {});
     set(initialState);
   },
 }));

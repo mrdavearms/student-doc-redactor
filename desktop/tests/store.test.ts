@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useStore } from '../src/store';
+import { api } from '../src/api';
 import type { PIIMatch } from '../src/types';
 
 function manualMatch(overrides: Partial<PIIMatch> = {}): PIIMatch {
@@ -133,5 +134,34 @@ describe('store: conversionFolderPath', () => {
     });
     useStore.getState().setDetectionResults({ documents: [], total_matches: 0 });
     expect(useStore.getState().redactionResults).toBeNull();
+  });
+});
+
+
+describe('reset', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // The backend caches the run's extracted document text to bridge detect ->
+  // redact. Starting over is the app's only "I'm finished" signal, so it is
+  // where that cache gets dropped — the paste pathway already had an
+  // equivalent, the document pathway did not.
+  it('asks the backend to forget the last run', () => {
+    const spy = vi.spyOn(api, 'discardDetection').mockResolvedValue({ discarded: 0 });
+
+    useStore.getState().reset();
+
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('still starts over when the backend cannot be reached', async () => {
+    vi.spyOn(api, 'discardDetection').mockRejectedValue(new Error('backend down'));
+
+    useStore.getState().setStudentName('Billy Bob');
+    useStore.getState().reset();
+
+    expect(useStore.getState().studentName).toBe('');
+    expect(useStore.getState().currentScreen).toBe('mode_selection');
+    // The rejection is swallowed, not left to surface as an unhandled one.
+    await Promise.resolve();
   });
 });

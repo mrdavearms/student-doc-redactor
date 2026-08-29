@@ -583,6 +583,33 @@ def add_manual_pii(req: AddManualPIIRequest):
     )
 
 
+@app.post("/api/detection/discard")
+def discard_detection():
+    """
+    Forget the last run: the extracted document text and everything detected
+    in it.
+
+    The cache exists to bridge detect -> redact (rule 25) and is otherwise
+    resident for the life of the backend process. The paste pathway could
+    already say "I'm finished" via /api/text/discard, but the document pathway
+    could not — so the last student's document text stayed in memory until the
+    next run replaced it, or the app closed.
+
+    Called by the store's reset(), which is the app's only "start over" and is
+    reached from both completion screens, the no-PII screen, and the error
+    boundary. Safe there because reset() also blanks detectionParamsKey, so the
+    next run re-detects rather than skipping on a stale fingerprint (rule 41).
+
+    Claims a generation first for the same reason /api/text/discard does: a
+    scan the renderer abandoned is still running, and would otherwise publish
+    itself back into the cache after the clear.
+    """
+    _begin_detection()
+    discarded = len(_detection_cache)
+    _detection_cache.clear()
+    return {"discarded": discarded}
+
+
 # ── Redaction ─────────────────────────────────────────────────────────────
 
 @app.post("/api/redact/cancel")

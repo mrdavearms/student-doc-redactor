@@ -30,6 +30,7 @@ from pathlib import Path
 import fitz
 from fastapi.testclient import TestClient
 
+from backend import main
 from backend.main import app, PASTE_KEY, _detection_cache
 from src.services.detection_service import DetectionService
 
@@ -212,3 +213,57 @@ def test_discard_supersedes_a_scan_the_user_abandoned(monkeypatch):
     # The abandoned scan is superseded, so it cannot re-seed the cache.
     assert resp.status_code == 409
     assert PASTE_KEY not in _detection_cache
+
+
+# ── Discarding a finished run ────────────────────────────────────────────
+
+class TestDiscardDetection:
+    """
+    The document pathway's equivalent of /api/text/discard. Called by the
+    store's reset(), so a finished run does not sit in memory until the next
+    one replaces it.
+    """
+
+    def test_discard_empties_the_cache(self):
+        main._detection_cache.clear()
+        main._detection_cache["/tmp/a.pdf"] = {"matches": [], "text_data": {}}
+        main._detection_cache["/tmp/b.pdf"] = {"matches": [], "text_data": {}}
+
+        r = client.post("/api/detection/discard")
+
+        assert r.status_code == 200
+        assert r.json()["discarded"] == 2
+        assert main._detection_cache == {}
+
+    def test_discard_also_clears_pasted_text(self):
+        main._detection_cache.clear()
+        main._detection_cache[main.PASTE_KEY] = {"matches": [], "text_data": {}}
+
+        client.post("/api/detection/discard")
+
+        assert main.PASTE_KEY not in main._detection_cache
+
+    def test_discard_on_an_empty_cache_is_a_no_op(self):
+        main._detection_cache.clear()
+
+        r = client.post("/api/detection/discard")
+
+        assert r.status_code == 200
+        assert r.json()["discarded"] == 0
+
+    def test_an_abandoned_scan_cannot_republish_after_a_discard(self):
+        """
+        Detection is synchronous, so a scan the renderer walked away from keeps
+        running. Without claiming a generation the discard would be undone by
+        whatever finishes next — the same trap /api/text/discard closes.
+        """
+        main._detection_cache.clear()
+        stale_generation = main._begin_detection()
+
+        client.post("/api/detection/discard")
+        republished = main._publish_detection(
+            stale_generation, {"/tmp/a.pdf": {"matches": [], "text_data": {}}}
+        )
+
+        assert republished is False
+        assert main._detection_cache == {}

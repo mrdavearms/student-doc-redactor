@@ -170,6 +170,9 @@ export const api = {
   discardText: () =>
     request<{ discarded: boolean }>('/api/text/discard', { method: 'POST' }),
 
+  discardDetection: () =>
+    request<{ discarded: number }>('/api/detection/discard', { method: 'POST' }),
+
   redact: (params: {
     folder_path: string;
     student_name: string;
