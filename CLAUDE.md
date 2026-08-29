@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (764 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (771 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 192 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 194 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -100,6 +100,7 @@ FastAPI (backend/main.py)
 ├── /api/text/people  → Who's who for pasted text (wraps /api/deidentify/people)
 ├── /api/text/labels  → label preview for pasted text (wraps /api/deidentify/labels)
 ├── /api/text/clean   → blackout or de-identify the cached pasted text
+├── /api/detection/discard → forget a finished run (documents AND paste)
 ├── /api/text/discard → drop the pasted text from the cache
 └── /api/text/save    → the only paste-pathway endpoint that touches disk, and only a path the user chose
 ```
@@ -698,6 +699,42 @@ for. It reads like a redundant option on a spawn that already pipes stdio —
 it is not, and piping does not suppress the console. Same category as the
 `relative` class in rule #57.
 
+
+### 70. Output names are claimed per RUN, not just checked with `.exists()`
+
+A document that fails verification never leaves its output under the plain
+name — redact renames it to `.UNVERIFIED.pdf`, de-identify never writes the
+`_deidentified.txt` at all. So `.exists()` sees nothing, and the NEXT document
+whose name strips to the same stem takes the same name and overwrites the first
+one's quarantined file. Two documents in, one file on disk, both results
+pointing at it, no warning — the same silent loss as rule #67, by a different
+route, and on macOS too.
+
+Reproduce with two sources that strip to one stem: `Billy Bob Report.pdf` and
+`Sarah Bob Report.pdf` both become `Report` once the student and parent names
+are removed.
+
+`execute()` therefore keeps a `claimed_names` set and passes it to
+`_process_document`, on BOTH services. Per **run** is the load-bearing part: a
+fresh set each time means re-running the same document still overwrites its own
+quarantine rather than accumulating `_2`, `_3`, `_4` copies.
+
+### 71. `/api/detection/discard` is the document pathway's "I'm finished"
+
+The detection cache holds every document's extracted text plus its PII, and is
+otherwise resident for the life of the backend process. Paste could already
+drop its slab (`/api/text/discard`); documents could not.
+
+The store's `reset()` fires it — the app's only start-over, reached from both
+completion screens, `no_pii_found`, and the error boundary. That point is safe
+precisely because `reset()` also blanks `detectionParamsKey`, so the next run
+re-detects rather than skipping on a fingerprint whose cache has gone (rule
+#41). Do not call it anywhere the wizard can still navigate back into a review.
+
+It is fire-and-forget from the renderer: starting over must work whether or not
+the backend answers. It claims a detection generation first, for the same
+reason `/api/text/discard` does.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -804,7 +841,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 764 tests total
+tests/                                # 771 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
@@ -819,7 +856,7 @@ tests/                                # 764 tests total
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
 ├── test_folder_scan.py               # 10 tests: case-insensitive folder scan, conversions stay out of the user's folder
-├── test_quarantine.py                # 4 tests: failed-verification quarantine (os.replace), verify handle released
+├── test_quarantine.py                # 7 tests: failed-verification quarantine (os.replace), per-run name claiming, verify handle released
 ├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
 ├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
 ├── test_text_pdf.py                  # 23 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
