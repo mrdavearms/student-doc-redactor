@@ -283,6 +283,14 @@ class DeidentificationService:
 
         name_variations = self._filename_variations(request)
 
+        # Output names claimed by earlier documents in THIS run. A document that
+        # fails verification never writes its _deidentified.txt, so `.exists()`
+        # sees nothing and the next document with the same stripped stem reuses
+        # the name — then overwrites the first one's .UNVERIFIED.txt. Two
+        # documents, one file, no warning. A fresh set per run keeps a RE-run
+        # overwriting its own quarantine rather than accumulating copies.
+        claimed_names: Set[str] = set()
+
         for doc in request.documents:
             if should_cancel is not None and should_cancel():
                 results.cancelled = True
@@ -304,6 +312,7 @@ class DeidentificationService:
                 name_variations=name_variations,
                 drop_header_footer=request.redact_header_footer,
                 output_filename_override=filename_override,
+                claimed_names=claimed_names,
             ))
 
         # The key file goes next to the ORIGINALS, never into the output folder:
@@ -563,6 +572,7 @@ class DeidentificationService:
         name_variations: List[str],
         drop_header_footer: bool,
         output_filename_override: Optional[str],
+        claimed_names: Optional[Set[str]] = None,
     ) -> DeidentifyDocumentResult:
         # The result's document_name is the source filename because the UI shows
         # it to the user locally. Everything written to DISK uses safe_name —
@@ -599,10 +609,13 @@ class DeidentificationService:
             if safe_stem == 'document':
                 safe_stem = 'Student document'
             output_filename = f"{safe_stem}_deidentified.txt"
+            claimed = claimed_names if claimed_names is not None else set()
             counter = 2
-            while (output_folder / output_filename).exists():
+            while (output_filename in claimed
+                   or (output_folder / output_filename).exists()):
                 output_filename = f"{safe_stem}_{counter}_deidentified.txt"
                 counter += 1
+            claimed.add(output_filename)
 
         output_path = output_folder / output_filename
 

@@ -158,6 +158,16 @@ class RedactionService:
             requested_document_count=len(request.documents),
         )
 
+        # Output names claimed by earlier documents in THIS run. `.exists()`
+        # alone is not enough: a document that fails verification has its output
+        # renamed to .UNVERIFIED.pdf, so the plain name is free again and the
+        # next document with the same stripped stem takes it — and then
+        # overwrites the first document's quarantined file. Two different
+        # documents, one file on disk, no warning. A fresh set per run means a
+        # RE-run of the same document still overwrites its own quarantine
+        # rather than accumulating copies.
+        claimed_names: Set[str] = set()
+
         for doc in request.documents:
             # Cooperative cancel: the API layer flips a flag when the user
             # clicks Cancel; we stop cleanly between documents.
@@ -173,6 +183,7 @@ class RedactionService:
                 name_variations=name_variations,
                 redact_header_footer=request.redact_header_footer,
                 output_filename_override=filename_override,
+                claimed_names=claimed_names,
             )
             results.document_results.append(doc_result)
 
@@ -247,6 +258,7 @@ class RedactionService:
         name_variations: List[str] = None,
         redact_header_footer: bool = False,
         output_filename_override: Optional[str] = None,
+        claimed_names: Optional[Set[str]] = None,
     ) -> DocumentResult:
         """Process a single document: filter selections, redact, verify."""
         doc_data = detected_pii.get(doc, {})
@@ -289,11 +301,15 @@ class RedactionService:
             safe_stem = strip_pii_from_filename(doc.stem, name_variations or [])
             output_filename = f"{safe_stem}_redacted.pdf"
 
-            # Collision guard: if another file already produced the same stripped name
+            # Collision guard: another document may strip to the same name,
+            # either on disk or earlier in this run (see claimed_names).
+            claimed = claimed_names if claimed_names is not None else set()
             counter = 2
-            while (redacted_folder / output_filename).exists():
+            while (output_filename in claimed
+                   or (redacted_folder / output_filename).exists()):
                 output_filename = f"{safe_stem}_{counter}_redacted.pdf"
                 counter += 1
+            claimed.add(output_filename)
 
         output_path = redacted_folder / output_filename
 

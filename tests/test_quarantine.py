@@ -13,7 +13,11 @@ from pathlib import Path
 import fitz
 import pytest
 
+from src.services import deidentification_service as ds_module
 from src.services import redaction_service as rs_module
+from src.services.deidentification_service import (
+    DeidentificationService, DeidentifyRequest,
+)
 from src.services.redaction_service import RedactionService, RedactionRequest
 
 
@@ -137,3 +141,84 @@ class TestVerificationHandleIsReleased:
         assert clean is False
         assert any("verification error" in f for f in failures)
         assert opened and all(d.is_closed for d in opened)
+
+
+# ── Two different documents that strip to the same output name ───────────
+
+def _same_stem_pair(tmp_path):
+    """
+    Two DIFFERENT source documents whose names both strip to "Report" once the
+    student and parent names are removed — the shape that makes their output
+    filenames collide.
+    """
+    return (_make_pdf(tmp_path / "Billy Bob Report.pdf", "Billy Bob attended."),
+            _make_pdf(tmp_path / "Sarah Bob Report.pdf", "Billy Bob attended."))
+
+
+def _match():
+    from src.core.pii_detector import PIIMatch
+    return PIIMatch(text="Billy", category="Student name", confidence=0.95,
+                    page_num=1, line_num=1, context="Billy Bob attended.")
+
+
+class TestTwoDocumentsNeverShareAQuarantineFile:
+    """
+    A document that fails verification has its output renamed away, so the
+    plain name is free again and the NEXT document with the same stripped stem
+    takes it — then overwrites the first one's quarantined file. Two documents
+    in, one file on disk, both results pointing at it, no warning.
+    """
+
+    def test_redact_keeps_both_quarantined_files(self, tmp_path):
+        a, b = _same_stem_pair(tmp_path)
+        m = _match()
+
+        service = _failing_service()
+        results = service.execute(RedactionRequest(
+            folder_path=tmp_path, student_name="Billy Bob", documents=[a, b],
+            detected_pii={d: {"matches": [m],
+                              "text_data": {"pages": {}, "ocr_pages": []}}
+                          for d in (a, b)},
+            user_selections={f"{a}_0": True, f"{b}_0": True},
+            parent_names=["Sarah Bob"],
+        ))
+
+        quarantined = [r.quarantine_path for r in results.document_results]
+        assert all(q is not None for q in quarantined)
+        assert len(set(quarantined)) == 2, "both documents claimed the same file"
+        assert len(list(results.redacted_folder.glob("*.UNVERIFIED.pdf"))) == 2
+
+    def test_deidentify_keeps_both_quarantined_files(self, tmp_path, monkeypatch):
+        a, b = _same_stem_pair(tmp_path)
+        m = _match()
+
+        monkeypatch.setattr(ds_module, "verify_deidentified",
+                            lambda text, selected, labels: ["Billy"])
+
+        results = DeidentificationService().execute(DeidentifyRequest(
+            folder_path=tmp_path, student_name="Billy Bob", documents=[a, b],
+            detected_pii={d: {"matches": [m], "text_data": {
+                "pages": {1: {"text": "Billy Bob attended.", "method": "native"}},
+                "ocr_pages": []}} for d in (a, b)},
+            user_selections={f"{a}_0": True, f"{b}_0": True},
+            parent_names=["Sarah Bob"],
+        ))
+
+        quarantined = [r.quarantine_path for r in results.document_results]
+        assert all(q is not None for q in quarantined)
+        assert len(set(quarantined)) == 2, "both documents claimed the same file"
+        assert len(list(Path(results.output_folder).glob("*.UNVERIFIED.txt"))) == 2
+
+    def test_a_rerun_of_one_document_does_not_accumulate_copies(self, tmp_path):
+        """
+        The other half of the contract: claiming is per RUN, so re-running the
+        same document overwrites its own quarantine instead of leaving a trail
+        of _2, _3, _4 files behind.
+        """
+        doc = _make_pdf(tmp_path / "report.pdf")
+        service = _failing_service()
+
+        for _ in range(3):
+            results = service.execute(_request(tmp_path, doc))
+
+        assert len(list(results.redacted_folder.glob("*.UNVERIFIED.pdf"))) == 1
