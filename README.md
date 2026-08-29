@@ -25,15 +25,16 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
-## What's New in v1.9.0
+## What's New in v1.9.2
 
-**You can now paste text straight into the app — no document required.** Got a paragraph copied from an email, a portal, or someone else's report, and you just need the names out of it before it goes into an AI tool or gets shared? Paste it in, and skip the save-a-file, find-a-folder dance entirely.
+**A maintenance release — no new features, but several things that were quietly going wrong are now fixed.** This covers both v1.9.2 and v1.9.1. Two of them may affect work you have already done.
 
-- **A third way to give the app work.** Step 1 now offers **one document**, **a whole folder**, or **paste text** — pick whichever fits what you've got. Paste sits alongside the other two; it isn't a separate mode, and both black-boxing and de-identifying work on it exactly as they do for documents.
-- **Nothing touches your disk unless you ask.** A paste writes no audit log, no key file, no temporary file. You get the cleaned result on screen with a **Copy** button, and can optionally save it — as a redacted PDF, or a de-identified `.txt` — through a normal Save dialog.
-- **The name key stays on screen too, in de-identify mode.** It sits in its own collapsed box with its own Copy button, separate from the cleaned text, so a quick copy of one can't drag the other along with it.
-- **Sensible limits.** You'll get a warning past 20,000 characters, and text over 50,000 characters is declined with a pointer to the document pathway instead — at that size, a document does the job better anyway.
-- Everything else is unchanged: the same two engines, the same review screen, the same Who's who step for de-identify mode, and the same student name requirement.
+- **Some documents could be skipped without the app saying so — Mac only.** If a file's extension was in capitals (`REPORT.PDF` rather than `report.pdf` — how many school photocopiers name their output), the Mac version didn't see it when you pointed at a **folder**. An all-capitals folder at least said "No files available for processing"; a **mixed** folder quietly processed the lower-case files and said nothing about the rest. If you have redacted a folder on a Mac containing anything scanned, compare the file count in `redacted` against the folder you started from — if it's short, run that folder again on this version. Single documents and Windows were never affected.
+- **Word documents left an unredacted copy beside your originals.** Converting a Word file to PDF wrote that copy into a hidden `.temp_converted` folder next to your documents, and nothing deleted it. The folder is hidden on a Mac but visible on Windows, and school folders usually sit inside OneDrive — so unredacted copies were being synced to the cloud. Conversions now happen in your computer's temporary area, and any old `.temp_converted` folder is deleted the next time you process that folder.
+- **"Report this problem" could include a student's name.** The email strips file paths, but stopped at the first space — so with `Billy Bob Support Report.pdf`, the surname survived. It now removes the whole path.
+- **A document that failed its final safety check could keep a name saying it was redacted** (Windows), and **two documents could end up sharing one quarantine file**. Anything that fails verification is now always set aside as `.UNVERIFIED`, and every file keeps its own.
+- **A big folder of Word documents no longer reports "the redaction engine isn't responding"** while it is working normally, and **no black command window appears** beside the app on Windows.
+- **Starting over now clears the app's memory of the run**, so the last student's text isn't held while the app stays open.
 
 See the [Releases page](https://github.com/mrdavearms/student-doc-redactor/releases) for what changed in earlier versions.
 
