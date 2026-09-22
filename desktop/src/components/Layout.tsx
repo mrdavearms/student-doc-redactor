@@ -43,7 +43,7 @@ export default function Layout({ children, updateState, onCheckForUpdates }: Lay
                     transition={{ duration: 8, ease: 'easeOut', times: [0, 0.3, 0.6, 1] }}
                   />
                 </div>
-                <p className="text-sm text-slate-500">{loadingMessage}</p>
+                <p className="text-sm text-slate-500 px-8 max-w-md text-center">{loadingMessage}</p>
               </div>
             </motion.div>
           )}
