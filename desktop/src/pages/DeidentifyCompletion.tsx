@@ -337,7 +337,7 @@ export default function DeidentifyCompletion() {
               </div>
 
               {d.output_path && openPreview[d.output_path] && previews[d.output_path] && (
-                <pre className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                <pre className="text-[12px] text-slate-500 bg-slate-50 rounded-lg p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed">
                   {previews[d.output_path]}
                 </pre>
               )}
@@ -386,7 +386,7 @@ export default function DeidentifyCompletion() {
         </button>
         {logExpanded && (
           <div className="px-5 pb-4">
-            <pre className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-4 overflow-x-auto max-h-64 overflow-y-auto leading-relaxed whitespace-pre-wrap">
+            <pre className="text-[12px] text-slate-500 bg-slate-50 rounded-lg p-4 overflow-x-auto max-h-64 overflow-y-auto leading-relaxed whitespace-pre-wrap">
               {r.log_content}
             </pre>
           </div>

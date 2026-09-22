@@ -503,7 +503,7 @@ export default function FinalConfirmation() {
                 {savePath ? (
                   <>
                     <span className="text-sm text-slate-700 font-medium">Saving to your chosen location</span>
-                    <code className="text-[11px] text-slate-500 mt-1.5 block break-all">{savePath}</code>
+                    <code className="text-[12px] text-slate-500 mt-1.5 block break-all">{savePath}</code>
                   </>
                 ) : (
                   <>
@@ -512,7 +512,7 @@ export default function FinalConfirmation() {
                       A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">{outputSubfolder}</code> folder
                       inside the document's own folder. The filename has the student's details stripped out automatically.
                     </p>
-                    <code className="text-[11px] text-slate-400 mt-1.5 block break-all">
+                    <code className="text-[12px] text-slate-400 mt-1.5 block break-all">
                       {joinPath(folderPath, outputSubfolder)}
                     </code>
                   </>
@@ -564,7 +564,7 @@ export default function FinalConfirmation() {
                 A <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-500">{outputSubfolder}</code> subfolder
                 will be created alongside your original files
               </p>
-              <code className="text-[11px] text-slate-400 mt-1.5 block truncate">
+              <code className="text-[12px] text-slate-400 mt-1.5 block truncate">
                 {defaultOutputDisplay}
               </code>
             </div>
@@ -591,7 +591,7 @@ export default function FinalConfirmation() {
               </p>
               {outputMode === 'custom' && (
                 <div className="flex gap-2 mt-2.5">
-                  <code className="flex-1 text-[11px] bg-slate-50 px-3 py-2 rounded-lg text-slate-500 overflow-x-auto min-h-[32px] flex items-center">
+                  <code className="flex-1 text-[12px] bg-slate-50 px-3 py-2 rounded-lg text-slate-500 overflow-x-auto min-h-[32px] flex items-center">
                     {customPath || 'No folder selected...'}
                   </code>
                   <button

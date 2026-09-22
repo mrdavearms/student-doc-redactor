@@ -37,7 +37,7 @@ export default function ErrorFallback({ error, onReset }: Props) {
         </button>
 
         {showDetails && (
-          <pre className="mt-3 text-[11px] text-left bg-slate-50 rounded-lg p-3 overflow-x-auto text-slate-600 whitespace-pre-wrap">
+          <pre className="mt-3 text-[12px] text-left bg-slate-50 rounded-lg p-3 overflow-x-auto text-slate-600 whitespace-pre-wrap">
             {error.message}
             {error.stack ? `\n\n${error.stack}` : ''}
           </pre>

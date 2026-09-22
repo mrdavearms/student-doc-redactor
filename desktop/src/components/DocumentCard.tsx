@@ -60,7 +60,7 @@ export default function DocumentCard({ result, categoryCounts, hasMediumConfiden
               {categoryEntries.map(([cat, count]) => (
                 <span
                   key={cat}
-                  className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500"
+                  className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500"
                 >
                   {count} {cat.toLowerCase()}{count > 1 ? 's' : ''}
                 </span>
@@ -126,7 +126,7 @@ export default function DocumentCard({ result, categoryCounts, hasMediumConfiden
               )}
 
               {renamed && (
-                <p className="text-[10px] text-primary-500 mt-2">
+                <p className="text-[11px] text-primary-500 mt-2">
                   Filename was renamed to remove PII.
                 </p>
               )}

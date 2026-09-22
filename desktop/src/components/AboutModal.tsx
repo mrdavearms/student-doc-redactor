@@ -120,7 +120,7 @@ export default function AboutModal({ open, onClose, onShowWalkthrough, updateSta
 
               {/* Footer */}
               <div className="px-6 py-4 border-t border-slate-100 text-center shrink-0">
-                <p className="text-[10px] text-slate-300">
+                <p className="text-[11px] text-slate-300">
                   © 2026 David Armstrong · Built for Australian educators
                 </p>
               </div>

@@ -81,7 +81,7 @@ export default function ModeSelection() {
             <p className="text-sm text-slate-600 font-medium">{option.blurb}</p>
             <p className="text-xs text-slate-400 leading-relaxed flex-1">{option.detail}</p>
 
-            <code className="text-[11px] bg-slate-50 text-slate-500 rounded-lg px-3 py-2 block">
+            <code className="text-[12px] bg-slate-50 text-slate-500 rounded-lg px-3 py-2 block">
               {option.example}
             </code>
 

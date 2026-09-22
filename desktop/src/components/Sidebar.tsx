@@ -82,13 +82,13 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
             <span className={isDeidentify ? 'text-primary-500' : 'text-emerald-500'}>
               {isDeidentify ? <Bot size={14} /> : <ShieldCheck size={14} />}
             </span>
-            <span className="text-[11px] text-slate-500 flex-1 leading-tight">
+            <span className="text-[12px] text-slate-500 flex-1 leading-tight">
               {isDeidentify ? 'De-identify for AI' : 'Redact documents'}
             </span>
             {!isProcessing && (
               <button
                 onClick={() => navigateTo('mode_selection')}
-                className="text-[10px] text-slate-400 hover:text-primary-500 underline transition-colors"
+                className="text-[11px] text-slate-400 hover:text-primary-500 underline transition-colors"
               >
                 change
               </button>
@@ -100,7 +100,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
       {/* Steps. The only part of the sidebar that scrolls: on a short window
           (minHeight is 600, and a 1366x768 laptop at 125% gives ~614) the
           footer must stay reachable, so the ladder gives way instead. */}
-      <nav className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-2">
         <ul className="space-y-0.5">
           {steps.map((screen, idx) => {
             const isActive = screen.key === effectiveScreen;
@@ -172,7 +172,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
           <p className="text-[10px] text-slate-300 uppercase tracking-widest font-medium">{appVersion ? `v${appVersion}` : 'v—'}</p>
           <button
             onClick={() => setAboutOpen(true)}
-            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
+            className="flex items-center gap-1 text-[12px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
           >
             <Info size={12} />
             About
@@ -180,14 +180,14 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
         </div>
         <button
           onClick={() => setWalkthroughOpen(true)}
-          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
+          className="flex items-center gap-1.5 text-[12px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
         >
           <BookOpen size={10} />
           Quick Guide
         </button>
         <button
           onClick={() => window.electronAPI?.openExternal('https://github.com/mrdavearms/student-doc-redactor')}
-          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
+          className="flex items-center gap-1.5 text-[12px] text-slate-400 hover:text-primary-500 transition-colors btn-press"
         >
           <ExternalLink size={10} />
           Report issues on GitHub

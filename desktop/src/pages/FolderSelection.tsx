@@ -309,7 +309,7 @@ export default function FolderSelection() {
               className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
                          focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
             />
-            <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated</p>
+            <p className="text-[12px] text-slate-400 mt-1">Optional, comma-separated</p>
           </div>
 
           <div>
@@ -326,7 +326,7 @@ export default function FolderSelection() {
               className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
                          focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
             />
-            <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated</p>
+            <p className="text-[12px] text-slate-400 mt-1">Optional, comma-separated</p>
           </div>
         </div>
 
@@ -344,7 +344,7 @@ export default function FolderSelection() {
             className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm
                        focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400"
           />
-          <p className="text-[11px] text-slate-400 mt-1">Optional, comma-separated — schools, clinics, etc.</p>
+          <p className="text-[12px] text-slate-400 mt-1">Optional, comma-separated — schools, clinics, etc.</p>
         </div>
 
         <label className="flex items-center gap-2 cursor-pointer">

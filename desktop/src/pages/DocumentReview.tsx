@@ -216,14 +216,14 @@ export default function DocumentReview() {
                         <span className="text-xs text-slate-400">
                           Page {match.page_num}, Line {match.line_num}
                         </span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${confColor}`}>
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${confColor}`}>
                           {match.confidence_label}
                         </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
                           {friendlyCategory(match.category)}
                         </span>
                         {isDeidentify && !isPreselected(match.category, 'deidentify') && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600">
+                          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600">
                             left out by default — tick to remove
                           </span>
                         )}

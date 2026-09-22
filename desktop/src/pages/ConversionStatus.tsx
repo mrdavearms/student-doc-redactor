@@ -285,7 +285,7 @@ function MetricCard({ label, value, color = 'slate' }: { label: string; value: n
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
       <p className={`text-2xl font-semibold ${colors[color] || colors.slate}`}>{value}</p>
-      <p className="text-[11px] text-slate-400 mt-1 uppercase tracking-wide">{label}</p>
+      <p className="text-[12px] text-slate-400 mt-1 uppercase tracking-wide">{label}</p>
     </div>
   );
 }

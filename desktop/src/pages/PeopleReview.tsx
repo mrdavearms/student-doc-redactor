@@ -231,7 +231,7 @@ export default function PeopleReview() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-slate-700">{p.full_name}</span>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[12px] text-slate-400">
                       {p.occurrences} mention{p.occurrences === 1 ? '' : 's'}
                     </span>
                     {answered && <Check size={13} className="text-emerald-500" />}
@@ -240,7 +240,7 @@ export default function PeopleReview() {
                   <p className="text-xs text-slate-400 mt-1">{reason(p)}</p>
 
                   {p.snippet && (
-                    <p className="text-[11px] text-slate-400 mt-1.5 italic border-l-2 border-slate-100 pl-2">
+                    <p className="text-[12px] text-slate-400 mt-1.5 italic border-l-2 border-slate-100 pl-2">
                       {p.snippet.length > 140 ? `${p.snippet.slice(0, 140)}…` : p.snippet}
                     </p>
                   )}
