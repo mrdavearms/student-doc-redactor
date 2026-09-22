@@ -8,7 +8,7 @@ const OPTIONS: {
   title: string;
   blurb: string;
   detail: string;
-  example: string;
+  example: { before: string; after: string };
   icon: React.ReactNode;
 }[] = [
   {
@@ -17,7 +17,7 @@ const OPTIONS: {
     blurb: 'Black out personal information.',
     detail:
       'Produces redacted PDFs you can share or keep on file. Names, contact details and other personal information are covered with solid black boxes and removed from the file underneath.',
-    example: 'Billy Bob is in Year 3.  →  ██████████ is in Year 3.',
+    example: { before: 'Billy Bob is in Year 3.', after: '██████████ is in Year 3.' },
     icon: <ShieldCheck size={22} />,
   },
   {
@@ -26,7 +26,7 @@ const OPTIONS: {
     blurb: 'Replace personal information with labels.',
     detail:
       'Produces plain text files that are safe to paste into an AI tool. Each person becomes a label, and a private key file is saved with your originals so you can turn the labels back into names afterwards.',
-    example: 'Billy Bob is in Year 3.  →  [Student] is in Year 3.',
+    example: { before: 'Billy Bob is in Year 3.', after: '[Student] is in Year 3.' },
     icon: <Bot size={22} />,
   },
 ];
@@ -82,7 +82,10 @@ export default function ModeSelection() {
             <p className="text-xs text-slate-500 leading-relaxed flex-1">{option.detail}</p>
 
             <code className="text-[12px] bg-slate-50 text-slate-500 rounded-lg px-3 py-2 block">
-              {option.example}
+              {/* Two lines on purpose: on one line it wraps mid-sentence at
+                  any width short of full screen. */}
+              <span className="block">{option.example.before}</span>
+              <span className="block">→ {option.example.after}</span>
             </code>
 
             <span className="flex items-center gap-1.5 text-sm font-medium text-primary-600 mt-1">
