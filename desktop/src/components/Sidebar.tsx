@@ -9,6 +9,12 @@ import type { UpdateState } from '../hooks/useUpdater';
 
 const WALKTHROUGH_STORAGE_KEY = 'walkthrough_dismissed';
 
+// On macOS the window uses titleBarStyle 'hiddenInset': there is no native
+// title bar, so the logo block is the only thing the user can drag the window
+// by, and it has to clear the traffic lights drawn over its top-left corner.
+// Windows keeps its native title bar, so it needs neither.
+const IS_MAC = window.electronAPI?.platform === 'darwin';
+
 const ICONS: Record<Screen, React.ReactNode> = {
   setup: <RefreshCw size={18} />,
   mode_selection: <ShieldCheck size={18} />,
@@ -60,7 +66,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
   return (
     <aside className="w-64 min-h-full bg-white border-r border-slate-200 flex flex-col">
       {/* Logo / Title */}
-      <div className="px-6 py-6 border-b border-slate-100">
+      <div className={`px-6 pb-6 border-b border-slate-100 ${IS_MAC ? 'pt-10 drag-region' : 'pt-6'}`}>
         <h1 className="text-lg tracking-tight">
           <span className="font-bold text-primary-600">Redact</span>
           <span className="text-slate-300 mx-1.5 font-light">|</span>
