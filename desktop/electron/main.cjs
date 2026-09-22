@@ -3,7 +3,7 @@
  * Spawns the Python FastAPI backend and creates the app window.
  */
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -242,6 +242,9 @@ function startBackend() {
 
 /** Create the main application window. */
 function createWindow() {
+  // The app is light-only. Without this, Windows 11 in dark mode paints a dark
+  // title bar over it.
+  nativeTheme.themeSource = 'light';
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 750,
