@@ -206,7 +206,7 @@ export default function Walkthrough({ forceOpen, onClose }: WalkthroughProps) {
                       type="checkbox"
                       checked={dontShow}
                       onChange={(e) => setDontShow(e.target.checked)}
-                      className="w-3.5 h-3.5 rounded border-slate-300 text-primary-600 focus:ring-primary-200"
+                      className="w-3.5 h-3.5 accent-primary-600 focus:ring-primary-200"
                     />
                     <span className="text-xs text-slate-400">Don't show this again</span>
                   </label>

@@ -352,7 +352,7 @@ export default function FolderSelection() {
             type="checkbox"
             checked={redactHeaderFooter}
             onChange={(e) => setRedactHeaderFooter(e.target.checked)}
-            className="w-4 h-4 rounded border-slate-300 text-primary-600
+            className="w-4 h-4 accent-primary-600
                        focus:ring-primary-200 focus:ring-offset-0"
           />
           <span className="text-sm text-slate-600 flex items-center gap-1.5">
