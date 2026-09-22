@@ -157,7 +157,7 @@ export default function RedactionProgress({ totalDocuments, isDeidentify = false
           </motion.div>
         </div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{isDeidentify ? 'De-identifying Documents' : 'Redacting Documents'}</h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           Processing {totalDocuments} document{totalDocuments === 1 ? '' : 's'}...
         </p>
       </div>

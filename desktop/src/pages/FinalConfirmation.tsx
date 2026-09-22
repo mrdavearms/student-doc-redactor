@@ -306,7 +306,7 @@ export default function FinalConfirmation() {
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Cancelled</h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-500 mt-1">
             {isLoading
               ? "Checking what was written..."
               : fileCount === 0
@@ -412,7 +412,7 @@ export default function FinalConfirmation() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Final Confirmation</h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           {isPaste
             ? (isDeidentify
                 ? 'Review your selections before de-identifying your text.'

@@ -92,7 +92,7 @@ export default function ConversionStatus() {
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
           {isFileMode ? 'Preparing Your Document' : 'Document Conversion'}
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           {isFileMode
             ? 'Checking dependencies and preparing the document you selected.'
             : 'Checking dependencies and converting Word documents to PDF.'}

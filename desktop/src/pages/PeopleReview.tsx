@@ -191,7 +191,7 @@ export default function PeopleReview() {
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
           Who&apos;s who?
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           {needsInput > 0
             ? `${needsInput} of ${people?.length} need your input.`
             : 'Check these look right, then continue.'}

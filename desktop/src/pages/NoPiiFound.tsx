@@ -51,7 +51,7 @@ export default function NoPiiFound() {
           <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
             {isDeidentify ? 'Nothing was found to replace' : 'Nothing to redact'}
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-500 mt-1">
             We scanned your pasted text and didn&apos;t find any personal information
             matching the names you gave us. Nothing needed removing, so here it is unchanged.
           </p>

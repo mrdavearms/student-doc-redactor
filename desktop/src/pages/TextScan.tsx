@@ -97,7 +97,7 @@ export default function TextScan() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Scanning your text</h2>
-        <p className="text-sm text-slate-400 mt-1">{subtitle}</p>
+        <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
       </div>
 
       {loading && (

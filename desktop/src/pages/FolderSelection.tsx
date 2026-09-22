@@ -115,7 +115,7 @@ export default function FolderSelection() {
     <div className="space-y-8">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Choose Documents & Student Details</h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           {isDeidentify ? 'De-identify' : 'Redact'} a single document, a whole folder, or pasted text,
           then enter the identifying information to look for.
         </p>

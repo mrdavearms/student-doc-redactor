@@ -103,7 +103,7 @@ export default function DocumentReview() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Review Detected PII</h2>
-        <p className="text-sm text-slate-400 mt-1">{isDeidentify ? 'Review and select which items to replace with labels.' : 'Review and select which items to redact from each document.'}</p>
+        <p className="text-sm text-slate-500 mt-1">{isDeidentify ? 'Review and select which items to replace with labels.' : 'Review and select which items to redact from each document.'}</p>
       </div>
 
       {/* Progress bar */}

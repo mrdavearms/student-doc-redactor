@@ -169,7 +169,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
       {/* Footer */}
       <div className="shrink-0 px-6 py-4 border-t border-slate-100 space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-[10px] text-slate-300 uppercase tracking-widest font-medium">{appVersion ? `v${appVersion}` : 'v—'}</p>
+          <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium">{appVersion ? `v${appVersion}` : 'v—'}</p>
           <button
             onClick={() => setAboutOpen(true)}
             className="flex items-center gap-1 text-[12px] text-slate-400 hover:text-primary-500 transition-colors btn-press"

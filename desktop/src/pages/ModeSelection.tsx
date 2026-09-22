@@ -50,7 +50,7 @@ export default function ModeSelection() {
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
           What would you like to do?
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           Both options work on the same documents and find the same personal
           information. They differ only in what you get at the end.
         </p>
@@ -79,7 +79,7 @@ export default function ModeSelection() {
             </div>
 
             <p className="text-sm text-slate-600 font-medium">{option.blurb}</p>
-            <p className="text-xs text-slate-400 leading-relaxed flex-1">{option.detail}</p>
+            <p className="text-xs text-slate-500 leading-relaxed flex-1">{option.detail}</p>
 
             <code className="text-[12px] bg-slate-50 text-slate-500 rounded-lg px-3 py-2 block">
               {option.example}

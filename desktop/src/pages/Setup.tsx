@@ -46,7 +46,7 @@ export default function Setup() {
         </div>
         <div className="text-center">
           <h2 className="text-2xl font-bold text-slate-800">You're All Set</h2>
-          <p className="text-sm text-slate-400 mt-1">Everything is ready to go.</p>
+          <p className="text-sm text-slate-500 mt-1">Everything is ready to go.</p>
         </div>
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2 text-emerald-700">
@@ -71,7 +71,7 @@ export default function Setup() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Almost Ready</h2>
-        <p className="text-sm text-slate-400 mt-1">One quick setup step before you start.</p>
+        <p className="text-sm text-slate-500 mt-1">One quick setup step before you start.</p>
       </div>
 
       <motion.section

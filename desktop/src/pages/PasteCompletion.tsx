@@ -132,7 +132,7 @@ export default function PasteCompletion() {
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
           {isDeidentify ? 'Your de-identified text is ready' : 'Your text is ready'}
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           {replacements} spot{replacements === 1 ? '' : 's'} {isDeidentify ? 'replaced with a label' : 'blacked out'} in
           your text.
           {replacements < selectedCount && (
