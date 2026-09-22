@@ -17,7 +17,7 @@ Two frontends exist:
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (771 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 194 tests across 12 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 208 tests across 13 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -165,6 +165,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `backend/schemas.py` | Pydantic request/response models |
 | `desktop/electron/main.cjs` | Electron main process — spawns backend, creates window |
 | `desktop/electron/navigation.cjs` | Pure navigation allow-list used by `main.cjs` to deny `window.open` and off-app navigation — extracted so it is unit-testable |
+| `desktop/electron/menu.cjs` | Application menu template per platform — see rule #75 |
 | `desktop/electron/macUpdate.cjs` | Pure logic for the macOS self-updater — asset choice, download URL, "can we self-update?" checks, and the swap-script text. Unit-tested |
 | `desktop/electron/macUpdateInstaller.cjs` | I/O half of the macOS self-updater — download + SHA-512 check, mount the dmg, stage the new `.app` beside the old one |
 | `desktop/electron/preload.cjs` | Electron preload — exposes `selectFolder`, `openExternal` to renderer |
@@ -568,7 +569,7 @@ Do not "simplify" the exit handler back into a single unconditional dialog eithe
 
 `PIIDetector._get_context()` wraps the matched value in `**…**` — a leftover from the Streamlit UI, which rendered markdown. React renders text verbatim, so this shipped literal asterisks to teachers on the most-used screen (`...Student: **Billy Bob**...`).
 
-It is fixed in `desktop/src/lib/context.ts` (`splitContext`), NOT in `pii_detector`, for two reasons: `_get_context` feeds the shipped **redact** pathway too, and the NER path (`pii_orchestrator`) builds context with **no markers at all**, so the same list carries both formats. `splitContext` must therefore leave unmarked text completely alone rather than assume every context is marked up — `desktop/tests/context.test.ts` asserts both shapes. If you ever do change the backend format, that test is the thing to update first.
+It is fixed in `desktop/src/lib/context.ts` (`splitContext`), NOT in `pii_detector`, for two reasons: `_get_context` feeds the shipped **redact** pathway too, and the NER path (`pii_orchestrator`) builds context with **no markers at all**, so the same list carries both formats. `splitContext` must therefore leave unmarked text completely alone rather than assume every context is marked up — `desktop/tests/context.test.ts` asserts both shapes. The one exception: when the caller passes the matched value (`DocumentReview` does), unmarked context highlights that value's first case-insensitive occurrence. Without it every NER row had no highlight — including emails, because Presidio's unmarked email match (confidence 1.0) beats the regex engine's marked one in deduplication. If you ever do change the backend format, that test is the thing to update first.
 
 ### 57. The sidebar's active highlight covers the whole `<li>`, connector included
 
@@ -775,6 +776,22 @@ local reproduction.
 
 The Windows script (`scripts/bundle-python-win.ps1`) already copies every DLL
 beside `tesseract.exe`, and Windows looks there first, so it needs none of this.
+
+### 73. On macOS the sidebar logo block is the only way to move the window
+
+`main.cjs` uses `titleBarStyle: 'hiddenInset'` on macOS, which removes the native title bar. Nothing is draggable unless the page marks it, and until September 2026 nothing did — the window could not be moved by its top edge. `Sidebar.tsx` now puts `.drag-region` (`-webkit-app-region: drag`, defined in `index.css`) on the logo block **on macOS only**, plus `pt-10` so the logo clears the traffic lights drawn over that corner. Windows keeps its native title bar and neither class.
+
+Anything clickable added inside that block needs `.no-drag`, or macOS swallows the click as the start of a window drag. The traffic lights themselves cannot be seen in a CDP screenshot (they are native, not page content), so check the gap by geometry or by eye on a real launch.
+
+### 74. The sidebar's step list is its only scroll region, and it is sized to fit at 600px
+
+The aside is `h-full`; the logo, pathway badge and footer are `shrink-0`; the step `<nav>` is `flex-1 min-h-0 overflow-y-auto`. Without that the footer (version, About, Quick Guide, Report issues) fell off the bottom of short windows with no way to scroll — the window's `minHeight` is 600 and a 1366x768 laptop at 125% scaling gives about 614px.
+
+The row padding (`py-2`), connector margin (`my-0`), list gap (`space-y-0.5`) and nav padding (`pt-3 pb-2`) are tuned so six de-identify steps fit **exactly** at 900x600 on macOS (which has the extra `pt-10`) without scrolling. Anything that adds height — a longer step label that wraps to two lines, bigger footer text — makes the list scroll at the minimum size. That is why the review step is labelled "Review findings" in `screensFor` while the page heading says "Review what was found": the longer text wraps in the 256px sidebar. Measure with `Emulation.setDeviceMetricsOverride` at 900x600 in de-identify mode after touching any of it. The connector's `relative` class (rule #57) is still load-bearing.
+
+### 75. The macOS menu must keep an Edit menu
+
+`electron/menu.cjs` replaces Electron's default menu, whose View → Reload (Cmd+R / Ctrl+R) wiped the whole wizard and whose Help menu linked to electronjs.org. On macOS it keeps an app menu (About, Hide, Quit), **Edit** (Undo, Redo, Cut, Copy, Paste, Select All) and Window (Minimise, Zoom). The Edit menu looks optional and is not: on a Mac the clipboard shortcuts are delivered through menu items, so removing it silently breaks Cmd+C / Cmd+V in every text field, including the paste pathway's textarea. Windows handles those shortcuts in the text field itself, so the packaged Windows app has no menu at all (`Menu.setApplicationMenu(null)`). Toggle Developer Tools appears only when `!app.isPackaged`. `desktop/tests/menu.test.ts` asserts all of this.
 
 ---
 
