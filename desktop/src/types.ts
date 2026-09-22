@@ -44,7 +44,7 @@ export function screensFor(
     isPaste
       ? { key: 'text_scan', label: 'Scan Text' }
       : { key: 'conversion_status', label: 'Convert Docs' },
-    { key: 'document_review', label: 'Review PII' },
+    { key: 'document_review', label: 'Review findings' },
     ...(mode === 'deidentify'
       ? [{ key: 'people_review' as Screen, label: "Who's Who" }]
       : []),

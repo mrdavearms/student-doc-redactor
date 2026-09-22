@@ -102,11 +102,12 @@ export default function DocumentReview() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Review Detected PII</h2>
+        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Review what was found</h2>
         <p className="text-sm text-slate-500 mt-1">{isDeidentify ? 'Review and select which items to replace with labels.' : 'Review and select which items to redact from each document.'}</p>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar — meaningless for pasted text, which is one "document" */}
+      {inputMode !== 'paste' && (
       <div className="space-y-1.5">
         <div className="flex justify-between text-xs text-slate-400">
           <span>Document {currentDocIndex + 1} of {totalDocs}</span>
@@ -121,6 +122,7 @@ export default function DocumentReview() {
           />
         </div>
       </div>
+      )}
 
       {/* Accept All shortcut */}
       <motion.div
@@ -213,9 +215,11 @@ export default function DocumentReview() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-slate-400">
-                          Page {match.page_num}, Line {match.line_num}
-                        </span>
+                        {inputMode !== 'paste' && (
+                          <span className="text-xs text-slate-400">
+                            Page {match.page_num}, Line {match.line_num}
+                          </span>
+                        )}
                         <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${confColor}`}>
                           {match.confidence_label}
                         </span>
@@ -229,7 +233,7 @@ export default function DocumentReview() {
                         )}
                       </div>
                       <p className="text-sm text-slate-600 mt-1 leading-relaxed break-words">
-                        {splitContext(match.context).map((seg, i) =>
+                        {splitContext(match.context, match.text).map((seg, i) =>
                           seg.matched ? (
                             <span key={i} className="bg-amber-100 px-1 rounded">{seg.text}</span>
                           ) : (

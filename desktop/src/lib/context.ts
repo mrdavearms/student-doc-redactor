@@ -9,6 +9,11 @@
  * The NER path (`pii_orchestrator`) builds its context with no markers at all,
  * so the same list carries BOTH formats. This must therefore leave unmarked
  * text completely alone rather than assume every context is marked up.
+ *
+ * For unmarked context the caller may pass the matched value: its first
+ * case-insensitive occurrence is then highlighted instead. Without that, every
+ * NER row showed no highlight at all — including emails, where Presidio's
+ * unmarked match outranks the regex engine's marked one in deduplication.
  */
 
 export interface ContextSegment {
@@ -23,8 +28,20 @@ const MARKED = /\*\*([\s\S]+?)\*\*/g;
  * Break `context` into segments, marking the parts the detector wrapped in
  * `**`. Returns a single unmatched segment when there are no markers.
  */
-export function splitContext(context: string): ContextSegment[] {
+export function splitContext(context: string, matchText?: string): ContextSegment[] {
   if (!context) return [];
+
+  if (matchText && !context.includes('**')) {
+    const at = context.toLowerCase().indexOf(matchText.toLowerCase());
+    if (at >= 0) {
+      const end = at + matchText.length;
+      return [
+        { text: context.slice(0, at), matched: false },
+        { text: context.slice(at, end), matched: true },
+        { text: context.slice(end), matched: false },
+      ].filter((seg) => seg.text !== '');
+    }
+  }
 
   const segments: ContextSegment[] = [];
   let cursor = 0;
