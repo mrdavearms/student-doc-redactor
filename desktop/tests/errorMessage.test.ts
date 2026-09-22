@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { friendlyError } from '../src/lib/errorMessage';
+import { friendlyError, friendlyDocumentError, verificationCouldNotRun } from '../src/lib/errorMessage';
 import { BackendUnreachableError } from '../src/api';
 
 describe('friendlyError', () => {
@@ -124,5 +124,33 @@ describe('paste pathway errors', () => {
       + "happen with text copied from certain sources. Try copying it again, "
       + "or paste a different section.")))
       .toMatch(/character/i);
+  });
+});
+
+describe('verification failures', () => {
+  const DYLD =
+    "OCR verification error: dyld[4321]: Library not loaded: /opt/homebrew/opt/tesseract/lib/libtesseract.5.dylib\n"
+    + "  Referenced from: /Applications/Redaction Tool.app/Contents/Resources/bundled-tesseract/tesseract";
+
+  it('maps a checker that could not load its library to plain advice', () => {
+    const out = friendlyDocumentError(DYLD);
+    expect(out).toMatch(/text checker could not run/i);
+    expect(out).not.toMatch(/dyld|homebrew|\.dylib|Applications/i);
+  });
+
+  it('maps a Windows DLL load failure the same way', () => {
+    expect(friendlyDocumentError(
+      'OCR verification error: The code execution cannot proceed because leptonica-1.84.1.dll was not found.'))
+      .toMatch(/text checker could not run/i);
+  });
+
+  it('leaves a genuine finding alone', () => {
+    const msg = "Page 1: 'Billy' still visible after redaction";
+    expect(friendlyDocumentError(msg)).toBe(msg);
+  });
+
+  it('tells a failed checker apart from a finding', () => {
+    expect(verificationCouldNotRun(DYLD)).toBe(true);
+    expect(verificationCouldNotRun("Page 1: 'Billy' still visible after redaction")).toBe(false);
   });
 });

@@ -1,7 +1,14 @@
 import { BackendUnreachableError } from '../api';
 import { recordRawError, sanitiseForReport } from './faultReport';
 
+const CHECKER_COULD_NOT_RUN =
+  'The text checker could not run on this computer, so this file could not be confirmed clean. Open it and check by eye.';
+
 const PATTERNS: Array<[RegExp, string]> = [
+  // Must precede the generic patterns below: the raw text is a dyld/DLL load
+  // error full of file paths, and it means the checker never ran, not that it
+  // found anything.
+  [/OCR verification error[\s\S]*(dyld|librar|\.dylib|\.dll|tesseract is not installed)/i, CHECKER_COULD_NOT_RUN],
   [/folder not found/i, "That folder couldn't be found. Check the path and try again."],
   [/file not found/i, "That file couldn't be opened. It may have been moved, renamed, or deleted."],
   [/no cached detection data/i, "The detection step needs to run again. Please go back one step and try again."],
@@ -46,6 +53,15 @@ export function friendlyDocumentError(raw: string | null): string {
     if (re.test(raw)) return msg;
   }
   return sanitiseForReport(raw);
+}
+
+/**
+ * True when a verification failure means the checker itself failed (e.g.
+ * Tesseract would not load), as opposed to it finding text still visible.
+ * The completion screens word their warning differently for the two.
+ */
+export function verificationCouldNotRun(message: string): boolean {
+  return /OCR verification error/i.test(message);
 }
 
 export function friendlyError(err: unknown): string {

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
-import { friendlyError, friendlyDocumentError } from '../lib/errorMessage';
+import { friendlyError, friendlyDocumentError, verificationCouldNotRun } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import { basename, dirname } from '../lib/paths';
 
@@ -156,13 +156,23 @@ export default function DeidentifyCompletion() {
             {r.verification_failures.length} file(s) need checking before you share them
             <HelpTip text="After replacing the text, the tool re-reads it to confirm nothing was missed. These files were saved with an UNVERIFIED name so they can't be shared by mistake. Open them and check before using." />
           </div>
-          <p className="text-xs text-red-600 mb-3">
-            A name may still be readable in these files — often a scanned page the OCR
-            misread. Open them and check before pasting anything into an AI tool.
-          </p>
+          {/* "Found text still visible" and "the checker could not run" need
+              different wording: the second says nothing about the file. */}
+          {r.verification_failures.some((f) => !verificationCouldNotRun(f.message)) && (
+            <p className="text-xs text-red-600 mb-3">
+              A name may still be readable in these files — often a scanned page the OCR
+              misread. Open them and check before pasting anything into an AI tool.
+            </p>
+          )}
+          {r.verification_failures.some((f) => verificationCouldNotRun(f.message)) && (
+            <p className="text-xs text-red-600 mb-3">
+              The text checker could not run on this computer, so some files could not be
+              confirmed clean. Open them and check by eye.
+            </p>
+          )}
           {r.verification_failures.map((f, i) => (
             <p key={i} className="text-xs text-red-500 py-0.5">
-              {f.filename}: {f.message}
+              {f.filename}: {friendlyDocumentError(f.message)}
             </p>
           ))}
 

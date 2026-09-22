@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
-import { friendlyError, friendlyDocumentError } from '../lib/errorMessage';
+import { friendlyError, friendlyDocumentError, verificationCouldNotRun } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import DocumentCard from '../components/DocumentCard';
 import PreviewSection from '../components/PreviewSection';
@@ -121,12 +121,22 @@ export default function Completion() {
             {r.verification_failures.length} verification failure(s)
             <HelpTip text="The tool re-checks each redacted document to confirm the text was fully removed. A failure here means the original text may still be visible — open the file and check manually." />
           </div>
-          <p className="text-xs text-red-600 mb-3">
-            The original text may still be present in these files. Review the log and check manually.
-          </p>
+          {/* "Found text still visible" and "the checker could not run" need
+              different wording: the second says nothing about the file. */}
+          {r.verification_failures.some((f) => !verificationCouldNotRun(f.message)) && (
+            <p className="text-xs text-red-600 mb-3">
+              The original text may still be present in these files. Review the log and check manually.
+            </p>
+          )}
+          {r.verification_failures.some((f) => verificationCouldNotRun(f.message)) && (
+            <p className="text-xs text-red-600 mb-3">
+              The text checker could not run on this computer, so some files could not be
+              confirmed clean. Open them and check by eye.
+            </p>
+          )}
           {r.verification_failures.map((f, i) => (
             <p key={i} className="text-xs text-red-500 py-0.5">
-              {f.filename}: {f.message}
+              {f.filename}: {friendlyDocumentError(f.message)}
             </p>
           ))}
         </motion.div>
