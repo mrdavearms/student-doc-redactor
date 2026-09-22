@@ -6,7 +6,8 @@
 #
 # Output:
 #   bundled-python/   — portable Python installation
-#   bundled-tesseract/ — Tesseract binary + tessdata (eng)
+#   bundled-tesseract/ — Tesseract binary + tessdata (eng) + lib/ (its dylibs,
+#                        relinked to @executable_path/lib and self-checked)
 #
 # Requirements: curl, tar, brew (for tesseract source only if not cached)
 
@@ -104,9 +105,54 @@ done
 # ── Bundle Tesseract ──────────────────────────────────────────────────
 echo "==> Bundling Tesseract..."
 
-if [ -d "$TESSERACT_DEST" ]; then
+TESS_LIB="$TESSERACT_DEST/lib"
+
+# Print the non-system libraries a Mach-O file links against, one per line.
+# /usr/lib and /System ship with every Mac; everything else must be bundled.
+_nonsystem_deps() {
+  otool -L "$1" | tail -n +2 | sed -E 's/^[[:space:]]+//; s/ \(compatibility.*$//' |
+    while IFS= read -r dep; do
+      case "$dep" in
+        /usr/lib/*|/System/*) ;;
+        *) echo "$dep" ;;
+      esac
+    done
+}
+
+# Print the LC_RPATH entries of a Mach-O file, one per line.
+_rpaths() {
+  otool -l "$1" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }'
+}
+
+# Resolve a load-command reference to the file on disk it refers to.
+# $1 = the reference, $2 = the ORIGINAL (Homebrew) file that contains it.
+_resolve_dep() {
+  case "$1" in
+    /opt/homebrew/*|/usr/local/*) echo "$1" ;;
+    @rpath/*|@loader_path/*)
+      # Homebrew uses these only for siblings in the same keg (libwebp ->
+      # libsharpyuv), so the referencing file's own directory is the answer.
+      echo "$(dirname "$(realpath "$2")")/${1#*/}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Run a command quietly, but show its output and fail if it fails.
+# install_name_tool and codesign print routine notices on every success.
+_quiet() {
+  local out
+  if ! out="$("$@" 2>&1)"; then
+    echo "$out" >&2
+    return 1
+  fi
+}
+
+# The bundle must also have lib/ — a bundle from before the dylibs were
+# copied has only the binary, which links to Homebrew and must be rebuilt.
+if [ -f "$TESSERACT_DEST/tesseract" ] && [ -d "$TESS_LIB" ]; then
   echo "    $TESSERACT_DEST already exists — skipping."
 else
+  rm -rf "$TESSERACT_DEST"
   # Use the Homebrew-installed tesseract as the source binary
   BREW_TESS="$(brew --prefix tesseract 2>/dev/null)/bin/tesseract"
   if [ ! -f "$BREW_TESS" ]; then
@@ -127,8 +173,86 @@ else
     echo "WARNING: eng.traineddata not found at $BREW_TESSDATA"
   fi
 
+  # Copy every non-system dylib the binary needs, recursively. Without this
+  # the binary keeps pointing at the CI runner's /opt/homebrew paths and OCR
+  # fails on any Mac without the same Homebrew Tesseract version.
+  mkdir -p "$TESS_LIB"
+  QUEUE="$(mktemp)"
+  echo "$BREW_TESS" > "$QUEUE"
+  while [ -s "$QUEUE" ]; do
+    src="$(head -n 1 "$QUEUE")"
+    sed -i '' 1d "$QUEUE"
+    while IFS= read -r dep; do
+      name="$(basename "$dep")"
+      [ -f "$TESS_LIB/$name" ] && continue
+      if ! dep_file="$(_resolve_dep "$dep" "$src")" || [ ! -f "$dep_file" ]; then
+        echo "ERROR: cannot resolve $dep (needed by $src)"
+        exit 1
+      fi
+      cp -L "$dep_file" "$TESS_LIB/$name"
+      chmod u+w "$TESS_LIB/$name"
+      echo "    Copied $name"
+      echo "$dep_file" >> "$QUEUE"
+    done < <(_nonsystem_deps "$src")
+  done
+  rm -f "$QUEUE"
+
+  # Point every reference at the bundled copies. install_name_tool breaks
+  # the code signature, so each file is re-signed ad hoc afterwards —
+  # hardened runtime refuses to load a dylib whose signature is invalid.
+  chmod u+w "$TESSERACT_DEST/tesseract"
+  for f in "$TESSERACT_DEST/tesseract" "$TESS_LIB"/*.dylib; do
+    if [ "$f" != "$TESSERACT_DEST/tesseract" ]; then
+      _quiet install_name_tool -id "@executable_path/lib/$(basename "$f")" "$f"
+    fi
+    while IFS= read -r dep; do
+      _quiet install_name_tool -change "$dep" "@executable_path/lib/$(basename "$dep")" "$f"
+    done < <(_nonsystem_deps "$f")
+    while IFS= read -r rp; do
+      _quiet install_name_tool -delete_rpath "$rp" "$f"
+    done < <(_rpaths "$f")
+    _quiet codesign -s - -f "$f"
+  done
+
   echo "    Tesseract bundled to $TESSERACT_DEST"
 fi
+
+# ── Self-check: the Tesseract bundle must not reach outside itself ─────
+# Runs even when the bundle step was skipped, so a stale bundle fails too.
+echo "==> Checking Tesseract bundle is self-contained..."
+TESS_BAD=0
+for f in "$TESSERACT_DEST/tesseract" "$TESS_LIB"/*.dylib; do
+  [ -e "$f" ] || continue
+  while IFS= read -r dep; do
+    case "$dep" in
+      @executable_path/lib/*)
+        if [ ! -f "$TESS_LIB/${dep#@executable_path/lib/}" ]; then
+          echo "    FAIL: $(basename "$f") needs $dep, which is not in the bundle"
+          TESS_BAD=1
+        fi ;;
+      *)
+        echo "    FAIL: $(basename "$f") still links to $dep"
+        TESS_BAD=1 ;;
+    esac
+  done < <(_nonsystem_deps "$f")
+  if [ -n "$(_rpaths "$f")" ]; then
+    echo "    FAIL: $(basename "$f") still has an rpath: $(_rpaths "$f" | tr '\n' ' ')"
+    TESS_BAD=1
+  fi
+  if ! codesign --verify --strict "$f" 2>/dev/null; then
+    echo "    FAIL: $(basename "$f") has an invalid code signature"
+    TESS_BAD=1
+  fi
+done
+if ! "$TESSERACT_DEST/tesseract" --version >/dev/null 2>&1; then
+  echo "    FAIL: bundled tesseract does not run"
+  TESS_BAD=1
+fi
+if [ "$TESS_BAD" -ne 0 ]; then
+  echo "ERROR: Tesseract bundle is not self-contained. Delete $TESSERACT_DEST and re-run."
+  exit 1
+fi
+echo "    OK: $(ls "$TESS_LIB" | wc -l | tr -d ' ') dylibs, no Homebrew references."
 
 echo ""
 echo "✓ Bundle complete."

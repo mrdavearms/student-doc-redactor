@@ -735,6 +735,47 @@ It is fire-and-forget from the renderer: starting over must work whether or not
 the backend answers. It claims a detection generation first, for the same
 reason `/api/text/discard` does.
 
+### 72. The Mac Tesseract bundle must be relocated, and the script checks it
+
+Homebrew's `tesseract` binary is not self-contained: it links to
+`libtesseract`, leptonica and libarchive by absolute `/opt/homebrew/...` path,
+and those pull in about a dozen more (png, jpeg, tiff, webp, sharpyuv, gif,
+openjpeg, zstd, lz4, xz, b2). Every release up to and including **v1.9.2**
+copied only the binary, so the CI runner's Homebrew paths were baked into the
+`.dmg`. On a Mac without Homebrew Tesseract at that exact version, the
+dependency check said "Tesseract OCR: Not available", `verify_redaction_ocr`
+raised the dyld error, and **every** redaction quarantined every document as
+`.UNVERIFIED.pdf` ("0 of 2 documents redacted"). The developer's own Mac hid it,
+because its Homebrew happened to have the matching version.
+
+`scripts/bundle-python-mac.sh` now walks `otool -L` recursively from the
+binary, copies each non-system dylib into `bundled-tesseract/lib/`, rewrites
+every reference (and each dylib's own id) to `@executable_path/lib/<name>`,
+deletes leftover `LC_RPATH` entries, and re-signs each file ad hoc —
+`install_name_tool` invalidates the signature, and hardened runtime refuses an
+invalid one. `@rpath/` references (the webp libraries find libsharpyuv that way)
+are resolved against the referencing file's own Homebrew directory.
+
+**The self-check at the end is the part that stops this coming back.** It runs
+even when the bundle step is skipped, and fails the build if any bundled file
+still references anything outside `/usr/lib`, `/System` or
+`@executable_path/lib`, has an rpath, has an invalid signature, or if the binary
+will not run. The skip guard requires `lib/` to exist, so a pre-fix bundle is
+rebuilt rather than trusted. electron-builder then re-signs every file with the
+hardened runtime; loading these dylibs relies on
+`com.apple.security.cs.disable-library-validation` in
+`desktop/assets/entitlements.mac.plist` — do not remove it.
+
+Check a build with `otool -L` on `bundled-tesseract/tesseract` (only
+`@executable_path/lib` and system paths) and
+`DYLD_PRINT_LIBRARIES=1 ./bundled-tesseract/tesseract --version`. A dev machine
+with Homebrew Tesseract cannot show the bug by running the app, since dyld finds
+the Homebrew copies; hiding `/opt/homebrew/Cellar/tesseract` briefly is the only
+local reproduction.
+
+The Windows script (`scripts/bundle-python-win.ps1`) already copies every DLL
+beside `tesseract.exe`, and Windows looks there first, so it needs none of this.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -963,6 +1004,7 @@ electron-builder uses `--publish always` to upload assets into that release. `bu
 - **Do NOT push tags to trigger builds unless code is merged to `main` first.** Triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - **Pushing a `v*` tag via Bash requires bypass permissions** — the tool's classifier blocks tag pushes that trigger public releases.
 - **Branch pushes trigger NO CI** — only `v*` tags run a workflow. Pushing `test`/`main` is free; only release tags consume GitHub Actions minutes (no Cloud Build exists for this repo).
+- **The Mac bundle step fails the build if Tesseract is not self-contained** (rule #72). `bundle-python-mac.sh` still takes Tesseract from `brew install tesseract` on the runner; the workflow step is unchanged, but a red "Bundle Python + Tesseract (Mac)" step now means a Homebrew path would have shipped.
 - **Version-sync before tagging:** bump `desktop/package.json` AND both `version` fields in `desktop/package-lock.json` to match the tag. electron-builder names/publishes artifacts from the `package.json` version while `release-notes` derives the version from the tag — a mismatch puts artifacts on the wrong release and breaks the download links (existing users keep being told they're up to date). The `verify-version` CI job now hard-fails the release in seconds if `desktop/package.json` ≠ tag, before any build runs; `cd desktop && npm ci` still guards package.json↔lockfile drift.
 - **Changelog auto-generates from commit subjects** since the previous tag — use conventional-commit style (`fix(scope): subject`) so release notes read cleanly.
 - `GH_TOKEN` is provided by `secrets.GITHUB_TOKEN` (no manual secret needed).
