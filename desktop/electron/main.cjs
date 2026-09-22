@@ -3,7 +3,7 @@
  * Spawns the Python FastAPI backend and creates the app window.
  */
 
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { isAllowedNavigation } = require('./navigation.cjs');
+const { buildMenuTemplate } = require('./menu.cjs');
 const {
   downloadUrlFor,
   pickMacAsset,
@@ -246,7 +247,9 @@ function createWindow() {
     height: 750,
     minWidth: 900,
     minHeight: 600,
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' }
+      : { autoHideMenuBar: true }),
     backgroundColor: '#f8fafc',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -648,6 +651,12 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('ready', async () => {
+    const menuTemplate = buildMenuTemplate({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      appName: app.name,
+    });
+    Menu.setApplicationMenu(menuTemplate ? Menu.buildFromTemplate(menuTemplate) : null);
     startBackend();
 
     try {
