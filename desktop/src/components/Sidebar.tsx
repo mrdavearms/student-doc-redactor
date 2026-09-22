@@ -64,9 +64,9 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
   }, []);
 
   return (
-    <aside className="w-64 min-h-full bg-white border-r border-slate-200 flex flex-col">
+    <aside className="w-64 h-full shrink-0 bg-white border-r border-slate-200 flex flex-col">
       {/* Logo / Title */}
-      <div className={`px-6 pb-6 border-b border-slate-100 ${IS_MAC ? 'pt-10 drag-region' : 'pt-6'}`}>
+      <div className={`shrink-0 px-6 pb-6 border-b border-slate-100 ${IS_MAC ? 'pt-10 drag-region' : 'pt-6'}`}>
         <h1 className="text-lg tracking-tight">
           <span className="font-bold text-primary-600">Redact</span>
           <span className="text-slate-300 mx-1.5 font-light">|</span>
@@ -77,7 +77,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
 
       {/* Chosen pathway */}
       {showModeBadge && (
-        <div className="px-4 pt-4">
+        <div className="shrink-0 px-4 pt-4">
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">
             <span className={isDeidentify ? 'text-primary-500' : 'text-emerald-500'}>
               {isDeidentify ? <Bot size={14} /> : <ShieldCheck size={14} />}
@@ -97,9 +97,11 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
         </div>
       )}
 
-      {/* Steps */}
-      <nav className="flex-1 px-4 py-6">
-        <ul className="space-y-1">
+      {/* Steps. The only part of the sidebar that scrolls: on a short window
+          (minHeight is 600, and a 1366x768 laptop at 125% gives ~614) the
+          footer must stay reachable, so the ladder gives way instead. */}
+      <nav className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+        <ul className="space-y-0.5">
           {steps.map((screen, idx) => {
             const isActive = screen.key === effectiveScreen;
             const isCompleted = idx < currentIdx;
@@ -118,7 +120,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
 
                 <div
                   className={`
-                    relative flex items-center gap-3 px-3 py-2.5 rounded-lg
+                    relative flex items-center gap-3 px-3 py-2 rounded-lg
                     transition-colors duration-150
                     ${isActive ? 'text-primary-700 font-medium' : ''}
                     ${isCompleted ? 'text-slate-600' : ''}
@@ -150,7 +152,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
                     so an unpositioned connector gets painted over and the
                     active step's line disappears. */}
                 {idx < steps.length - 1 && (
-                  <div className="relative ml-[22px] w-px h-2 my-0.5">
+                  <div className="relative ml-[22px] w-px h-2 my-0">
                     <div
                       className={`w-full h-full ${
                         isCompleted ? 'bg-emerald-300' : 'bg-slate-200'
@@ -165,7 +167,7 @@ export default function Sidebar({ updateState, onCheckForUpdates }: SidebarProps
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-slate-100 space-y-2">
+      <div className="shrink-0 px-6 py-4 border-t border-slate-100 space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-[10px] text-slate-300 uppercase tracking-widest font-medium">{appVersion ? `v${appVersion}` : 'v—'}</p>
           <button
