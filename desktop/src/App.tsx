@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
 import UpdateCard from './components/UpdateCard';
@@ -95,8 +96,16 @@ function App() {
     }
   };
 
-  // Don't render until dep check completes (avoids flash of folder_selection then redirect)
-  if (!depsChecked) return null;
+  // Until the dependency check answers we don't know whether to show the
+  // landing screen or Setup, so the screen slot holds a placeholder. The
+  // check can take several seconds on first launch (the language model loads
+  // behind it), and a blank window for that long reads as a crash.
+  const startingUp = (
+    <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+      <RefreshCw size={24} className="animate-spin text-primary-500" />
+      <p className="mt-3 text-sm">Starting up…</p>
+    </div>
+  );
 
   return (
     <Layout updateState={updateState} onCheckForUpdates={checkForUpdates}>
@@ -150,7 +159,7 @@ function App() {
           </span>
         </div>
       )}
-      {renderScreen()}
+      {depsChecked ? renderScreen() : startingUp}
     </Layout>
   );
 }
