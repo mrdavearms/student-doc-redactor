@@ -55,6 +55,10 @@ class DocumentResult:
     ocr_warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
     quarantine_path: Optional[Path] = None
+    # The input document this result is for. document_name alone is not
+    # unique: Report.docx (converted to Report.pdf) and Report.pdf in one
+    # folder share a name, so the UI keys on this instead.
+    source_path: Optional[Path] = None
 
 
 @dataclass
@@ -286,6 +290,7 @@ class RedactionService:
             output_path=None,
             success=False,
             items_redacted=len(selected_matches),
+            source_path=doc,
         )
 
         # Note OCR pages — these are redacted via image-level redaction

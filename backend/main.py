@@ -699,6 +699,7 @@ def redact_documents(req: RedactRequest):
             document_results=[
                 DocumentResultResponse(
                     document_name=r.document_name,
+                    source_path=str(r.source_path),
                     output_path=str(r.output_path) if r.output_path else None,
                     success=r.success,
                     items_redacted=r.items_redacted,

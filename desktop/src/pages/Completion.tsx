@@ -10,35 +10,17 @@ import { friendlyError, friendlyDocumentError, verificationCouldNotRun } from '.
 import HelpTip from '../components/HelpTip';
 import DocumentCard from '../components/DocumentCard';
 import PreviewSection from '../components/PreviewSection';
+import { selectedCountsByPath, type DocumentSummaryMeta } from '../lib/documentSummary';
 
 export default function Completion() {
   const { redactionResults, detectionResults, userSelections, reset, setError } = useStore();
   const [logExpanded, setLogExpanded] = useState(false);
 
-  // Build per-document category counts from detection results
+  // Per-document category counts from detection results, keyed by path
+  // (a filename repeats across a folder — see lib/documentSummary.ts).
   const docMeta = useMemo(() => {
-    if (!redactionResults || !detectionResults) return new Map<string, { counts: Record<string, number>; hasMedium: boolean }>();
-
-    const meta = new Map<string, { counts: Record<string, number>; hasMedium: boolean }>();
-
-    for (const doc of detectionResults.documents) {
-      const counts: Record<string, number> = {};
-      let hasMedium = false;
-      doc.matches.forEach((match, idx) => {
-        const key = `${doc.path}_${idx}`;
-        if (userSelections[key]) {
-          counts[match.category] = (counts[match.category] || 0) + 1;
-          if (match.confidence_label === 'medium' || match.confidence_label === 'low') {
-            hasMedium = true;
-          }
-        }
-      });
-      // Map by filename to match against document_results
-      // doc.path is backslash-separated on Windows — never split on '/'.
-      const filename = doc.filename;
-      meta.set(filename, { counts, hasMedium });
-    }
-    return meta;
+    if (!redactionResults || !detectionResults) return new Map<string, DocumentSummaryMeta>();
+    return selectedCountsByPath(detectionResults, userSelections);
   }, [redactionResults, detectionResults, userSelections]);
 
   // Build preview document list
@@ -46,19 +28,12 @@ export default function Completion() {
     if (!redactionResults) return [];
     return redactionResults.document_results
       .filter((d) => d.success && d.output_path)
-      .map((d) => {
-        // Find original path from detection results
-        const origDoc = detectionResults?.documents.find(
-          (det) => det.filename === d.document_name || det.path.endsWith(d.document_name)
-        );
-        return {
-          originalPath: origDoc?.path || '',
-          redactedPath: d.output_path!,
-          filename: d.document_name,
-        };
-      })
-      .filter((d) => d.originalPath);
-  }, [redactionResults, detectionResults]);
+      .map((d) => ({
+        originalPath: d.source_path,
+        redactedPath: d.output_path!,
+        filename: d.document_name,
+      }));
+  }, [redactionResults]);
 
   if (!redactionResults) {
     return (
@@ -190,11 +165,11 @@ export default function Completion() {
           className="space-y-2"
         >
           <h3 className="text-sm font-medium text-slate-600 mb-1">Document Summary</h3>
-          {r.document_results.map((d, i) => {
-            const meta = docMeta.get(d.document_name) || { counts: {}, hasMedium: false };
+          {r.document_results.map((d) => {
+            const meta = docMeta.get(d.source_path) || { counts: {}, hasMedium: false };
             return (
               <DocumentCard
-                key={i}
+                key={d.source_path}
                 result={d}
                 categoryCounts={meta.counts}
                 hasMediumConfidence={meta.hasMedium}

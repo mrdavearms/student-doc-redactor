@@ -173,6 +173,9 @@ class RedactRequest(BaseModel):
 
 class DocumentResultResponse(BaseModel):
     document_name: str
+    # The input path, as sent in RedactRequest.documents. document_name is
+    # not unique across a folder (Report.docx converts to Report.pdf).
+    source_path: str
     output_path: Optional[str]
     success: bool
     items_redacted: int

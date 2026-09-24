@@ -226,3 +226,39 @@ class TestRedactionCancel:
         finally:
             # Never leave the flag set — a later test would phantom-cancel.
             backend_main._redaction_control["cancel_requested"] = False
+
+
+class TestSourcePathInResults:
+    """Each document result names the input path it came from. document_name
+    alone is not unique: Report.docx converts to <temp>/001/Report.pdf, so it
+    and a native Report.pdf in the same folder share a name — and the
+    completion screen keyed its cards on that name."""
+
+    def test_two_documents_with_one_filename_keep_separate_source_paths(self, tmp_path):
+        a = tmp_path / "001" / "Report.pdf"
+        b = tmp_path / "Report.pdf"
+        a.parent.mkdir()
+        _make_pdf(a, "Student Joe Bloggs attended the review.")
+        _make_pdf(b, "Student Joe Bloggs attended the meeting.")
+
+        det = client.post("/api/pii/detect", json={
+            "pdf_paths": [str(a), str(b)],
+            "student_name": "Joe Bloggs",
+            "parent_names": [], "family_names": [], "organisation_names": [],
+        })
+        assert det.status_code == 200, det.text
+
+        red = client.post("/api/redact", json={
+            "folder_path": str(tmp_path),
+            "student_name": "Joe Bloggs",
+            "parent_names": [], "family_names": [], "organisation_names": [],
+            "redact_header_footer": False,
+            "documents": [str(a), str(b)],
+            "detected_pii": {},
+            "selected_keys": [f"{a}_0", f"{b}_0"],
+            "folder_action": "overwrite",
+        })
+        assert red.status_code == 200, red.text
+        results = red.json()["document_results"]
+        assert [r["document_name"] for r in results] == ["Report.pdf", "Report.pdf"]
+        assert [r["source_path"] for r in results] == [str(a), str(b)]

@@ -104,6 +104,8 @@ export interface DetectionResults {
 
 export interface DocumentResult {
   document_name: string;
+  /** The input path — document_name repeats across a folder (Report.docx → Report.pdf). */
+  source_path: string;
   output_path: string | null;
   success: boolean;
   items_redacted: number;
