@@ -97,9 +97,17 @@ export interface DocumentPII {
   ocr_pages: number[];
 }
 
+/** A document detection could not read. It is NOT in `documents`. */
+export interface FailedDocument {
+  path: string;
+  filename: string;
+  reason: string;
+}
+
 export interface DetectionResults {
   documents: DocumentPII[];
   total_matches: number;
+  failed_documents: FailedDocument[];
 }
 
 export interface DocumentResult {

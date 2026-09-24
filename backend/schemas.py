@@ -130,9 +130,17 @@ class DocumentPIIResponse(BaseModel):
     ocr_pages: List[int]
 
 
+class FailedDocument(BaseModel):
+    """A document detection could not read. Shown on the review screen."""
+    path: str
+    filename: str
+    reason: str
+
+
 class DetectionResultsResponse(BaseModel):
     documents: List[DocumentPIIResponse]
     total_matches: int
+    failed_documents: List[FailedDocument] = []
 
 
 class AddManualPIIRequest(BaseModel):

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ShieldCheck, RotateCcw, ArrowLeft, ArrowRight, AlertTriangle, Copy } from 'lucide-react';
 import { useStore } from '../store';
+import FailedDocumentsNotice from '../components/FailedDocumentsNotice';
 
 export default function NoPiiFound() {
   const detectionResults = useStore((s) => s.detectionResults);
@@ -96,6 +97,8 @@ export default function NoPiiFound() {
       animate={{ opacity: 1, y: 0 }}
       className="flex flex-col items-center justify-center py-16 text-center space-y-6"
     >
+      <FailedDocumentsNotice failed={detectionResults.failed_documents} />
+
       <div
         className={`w-20 h-20 rounded-full flex items-center justify-center ${
           isDeidentify ? 'bg-amber-50' : 'bg-emerald-50'

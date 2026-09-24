@@ -144,6 +144,13 @@ describe('verification failures', () => {
       .toMatch(/text checker could not run/i);
   });
 
+  it('maps a detection extraction failure without leaking the file path', () => {
+    const out = friendlyDocumentError(
+      "Error extracting text from PDF: cannot open /Users/dave/Billy Bob report.pdf: broken xref");
+    expect(out).toMatch(/couldn't be opened as a PDF/i);
+    expect(out).not.toMatch(/Billy|Users/);
+  });
+
   it('leaves a genuine finding alone', () => {
     const msg = "Page 1: 'Billy' still visible after redaction";
     expect(friendlyDocumentError(msg)).toBe(msg);

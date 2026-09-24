@@ -6,7 +6,7 @@ Framework-agnostic — no Streamlit imports.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from src.core.pii_orchestrator import PIIOrchestrator
 from src.core.pii_detector import PIIMatch
@@ -27,8 +27,12 @@ class DocumentPII:
 @dataclass
 class DetectionResults:
     """PII detection results across all documents"""
+    # Only the documents that were scanned. A document that could not be read
+    # is listed in failed_documents instead, so the caller can show it — a
+    # dropped document must never be silent.
     documents: List[Path] = field(default_factory=list)
     pii_by_document: Dict[Path, DocumentPII] = field(default_factory=dict)
+    failed_documents: List[Tuple[Path, str]] = field(default_factory=list)
 
     @property
     def total_matches(self) -> int:
@@ -63,20 +67,27 @@ class DetectionService:
             pdf_paths: List of PDF file paths to scan
 
         Returns:
-            DetectionResults with per-document PII data
+            DetectionResults with per-document PII data. A document that
+            fails to extract or scan does not abort the run: it goes into
+            failed_documents with the reason, and is left out of documents.
         """
-        results = DetectionResults(documents=list(pdf_paths))
+        results = DetectionResults()
 
         for pdf_path in pdf_paths:
-            text_data = self._extractor.extract_text_from_pdf(pdf_path)
+            try:
+                text_data = self._extractor.extract_text_from_pdf(pdf_path)
 
-            pii_matches = []
-            for page_num, page_data in text_data['pages'].items():
-                matches = self._orchestrator.detect_pii_in_text(
-                    page_data['text'], page_num
-                )
-                pii_matches.extend(matches)
+                pii_matches = []
+                for page_num, page_data in text_data['pages'].items():
+                    matches = self._orchestrator.detect_pii_in_text(
+                        page_data['text'], page_num
+                    )
+                    pii_matches.extend(matches)
+            except Exception as e:
+                results.failed_documents.append((pdf_path, str(e)))
+                continue
 
+            results.documents.append(pdf_path)
             results.pii_by_document[pdf_path] = DocumentPII(
                 matches=pii_matches,
                 text_data=text_data,

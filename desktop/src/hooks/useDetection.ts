@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useStore } from '../store';
 import { friendlyError } from '../lib/errorMessage';
+import { allDocumentsFailed, failedDocumentsMessage } from '../lib/failedDocuments';
 import type { DetectionResults } from '../types';
 
 export interface DetectionSource {
@@ -128,6 +129,13 @@ export function useDetection() {
 
       // If the user navigated away (Back) mid-request, do not force-navigate.
       if (ctrl.signal.aborted) return 'aborted';
+
+      // Nothing was scanned at all. Going on to "nothing to redact" would
+      // call an unread folder clean; stay here and say which files failed.
+      if (allDocumentsFailed(detection)) {
+        setError(failedDocumentsMessage(detection.failed_documents));
+        return 'failed';
+      }
 
       setDetectionResults(detection);
       setDetectionParamsKey(paramsKey);

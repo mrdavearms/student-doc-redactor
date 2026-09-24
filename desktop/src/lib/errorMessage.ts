@@ -31,6 +31,8 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/reading people failed/i, "Something went wrong while working out who's who. Please go back one step and try again."],
   [/label preview failed/i, "Couldn't preview the labels — your choices are still saved."],
   [/no extracted text available/i, "That document's text couldn't be read. Please go back one step and try again."],
+  // DetectionService.failed_documents — the document was skipped, not the run.
+  [/error extracting text from pdf/i, "This file couldn't be opened as a PDF. It may be damaged or password-protected."],
   [/api token/i, "The app couldn't authenticate with its redaction engine. Please restart the app."],
   [/permission denied|errno 13|winerror 32|being used by another process/i,
     "The file couldn't be written — it may be open in another program (like Adobe Reader or Word). Close it there and try again."],

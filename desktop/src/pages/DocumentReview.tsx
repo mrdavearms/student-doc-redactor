@@ -10,6 +10,7 @@ import HelpTip from '../components/HelpTip';
 import { friendlyCategory, isPreselected } from '../lib/categories';
 import { splitContext } from '../lib/context';
 import { previousDocWithMatches } from '../lib/reviewNavigation';
+import FailedDocumentsNotice from '../components/FailedDocumentsNotice';
 
 export default function DocumentReview() {
   const isDeidentify = useStore.getState().workflowMode === 'deidentify';
@@ -127,6 +128,8 @@ export default function DocumentReview() {
         </div>
       </div>
       )}
+
+      <FailedDocumentsNotice failed={detectionResults.failed_documents} />
 
       {/* Accept All shortcut */}
       <motion.div

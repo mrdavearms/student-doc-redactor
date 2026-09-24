@@ -53,6 +53,7 @@ from backend.schemas import (
     DetectPIIRequest,
     DetectTextRequest,
     DetectionResultsResponse,
+    FailedDocument,
     DocumentPIIResponse,
     DocumentResultResponse,
     HealthResponse,
@@ -408,6 +409,10 @@ def detect_pii(req: DetectPIIRequest):
     return DetectionResultsResponse(
         documents=doc_responses,
         total_matches=results.total_matches,
+        failed_documents=[
+            FailedDocument(path=str(p), filename=p.name, reason=reason)
+            for p, reason in results.failed_documents
+        ],
     )
 
 

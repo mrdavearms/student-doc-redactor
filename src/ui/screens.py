@@ -226,6 +226,9 @@ def _run_detection():
 
     detection_results = service.detect_all(all_pdfs)
 
+    for failed_path, reason in detection_results.failed_documents:
+        st.warning(f"Could not scan {failed_path.name}: {reason}")
+
     # Store in session state (convert DetectionResults to the dict format screens expect)
     st.session_state.detected_pii = {
         doc: {
