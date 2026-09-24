@@ -22,12 +22,26 @@ class TestRedactTextSearch:
     def setup_method(self):
         self.redactor = PDFRedactor()
 
-    def test_very_short_text_under_3_chars_is_skipped(self):
-        """Text shorter than 3 characters must never be searched or redacted."""
-        page, doc = _make_page_with_text("Jo Smith")
+    def test_single_character_text_is_skipped(self):
+        """A single character must never be searched or redacted."""
+        page, doc = _make_page_with_text("J Smith")
+        self.redactor._redact_text_search(page, "J")
+        assert len(list(page.annots())) == 0
+        doc.close()
+
+    def test_two_char_name_is_redacted_when_case_matches(self):
+        """'Jo' is a real name and must be blacked out (whole word, as written)."""
+        page, doc = _make_page_with_text("Jo Smith joined. Jo's work. jo")
         self.redactor._redact_text_search(page, "Jo")
-        annots = list(page.annots())
-        assert len(annots) == 0, "2-char string should not create redaction annotations"
+        # "Jo" and "Jo's" match; the lowercase "jo" does not
+        assert len(list(page.annots())) == 2
+        doc.close()
+
+    def test_two_char_name_does_not_match_the_english_word(self):
+        """The surname 'Do' must never black out the verb 'do'."""
+        page, doc = _make_page_with_text("We do our best. do it.")
+        self.redactor._redact_text_search(page, "Do")
+        assert len(list(page.annots())) == 0
         doc.close()
 
     def test_short_text_that_is_not_a_whole_word_is_skipped(self):
@@ -269,3 +283,135 @@ class TestWholeWordVerification:
         r = PDFRedactor()
         is_clean, _ = r.verify_redaction(pdf, "Ann")
         assert not is_clean
+
+
+class TestDocumentWideRedaction:
+    """A selected text is redacted on every page, not only where it was detected.
+
+    Detection runs per page, and NER can tag a name on one page while missing
+    it on another. Verification checks the whole document, so a per-page
+    redaction left the name readable and quarantined the file as UNVERIFIED.
+    """
+
+    def _two_page_pdf(self, path, page1, page2):
+        doc = fitz.open()
+        for text in (page1, page2):
+            page = doc.new_page()
+            page.insert_text((72, 100), text, fontsize=12)
+        doc.save(str(path))
+        doc.close()
+
+    def test_text_detected_on_page_two_is_also_removed_from_page_one(self, tmp_path):
+        src = tmp_path / "report.pdf"
+        out = tmp_path / "report_redacted.pdf"
+        self._two_page_pdf(src, "Ms Priya Raman observed the class.", "Signed: P. Raman")
+
+        r = PDFRedactor()
+        ok, _ = r.redact_pdf(src, out, [RedactionItem(page_num=2, text="Raman")])
+        assert ok
+
+        doc = fitz.open(str(out))
+        texts = [page.get_text() for page in doc]
+        doc.close()
+        assert "Raman" not in texts[0], "page 1 still shows the name selected on page 2"
+        assert "Raman" not in texts[1]
+        assert "Priya" in texts[0], "unselected text must be left alone"
+
+        is_clean, msg = r.verify_redaction(out, "Raman")
+        assert is_clean, msg
+
+    def test_bbox_item_is_still_applied_on_its_own_page(self, tmp_path):
+        src = tmp_path / "report.pdf"
+        out = tmp_path / "report_redacted.pdf"
+        self._two_page_pdf(src, "Student: Ann Chen", "Nothing here.")
+
+        doc = fitz.open(str(src))
+        rect = doc[0].search_for("Chen")[0]
+        doc.close()
+
+        r = PDFRedactor()
+        ok, _ = r.redact_pdf(
+            src, out,
+            [RedactionItem(page_num=1, text="Chen", bbox=(rect.x0, rect.y0, rect.x1, rect.y1))],
+        )
+        assert ok
+        doc = fitz.open(str(out))
+        assert "Chen" not in doc[0].get_text()
+        assert "Nothing here." in doc[1].get_text()
+        doc.close()
+
+
+_TRUETYPE = next((p for p in [
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+] if os.path.exists(p)), None)
+
+
+class TestApostrophesAndQuotes:
+
+    def test_curly_apostrophe_surname_is_redacted(self, tmp_path):
+        """Word writes O’Brien (U+2019); detection reports O'Brien. Both must
+        be found, or the surname stays readable and the file is quarantined."""
+        if not _TRUETYPE:
+            pytest.skip("needs a TrueType font: the base-14 fonts cannot encode U+2019")
+        src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_font(fontname="tt", fontfile=_TRUETYPE)
+        page.insert_text((72, 100), "Siobhan O\u2019Brien reads well. O\u2019Brien is kind.",
+                         fontsize=11, fontname="tt")
+        doc.save(str(src))
+        doc.close()
+
+        r = PDFRedactor()
+        ok, _ = r.redact_pdf(src, out, [RedactionItem(1, "O'Brien"),
+                                        RedactionItem(1, "Siobhan O'Brien")])
+        assert ok
+        text = fitz.open(str(out))[0].get_text()
+        assert "Brien" not in text
+        assert r.verify_redaction(out, "O'Brien")[0]
+
+    def test_visibility_check_folds_apostrophes(self):
+        from redactor import _pii_visible_in_text
+        assert _pii_visible_in_text("O'Brien", "Ms O\u2019Brien attended")
+        assert _pii_visible_in_text("O\u2019Brien", "Ms O'Brien attended")
+
+    def test_short_name_in_quotes_or_brackets_is_redacted(self):
+        """PyMuPDF's word list keeps the quotes: ("Joe") is one word."""
+        page, doc = _make_page_with_text('Joseph ("Joe") Bloggs, [Joe], Joe. Joel and major stay.')
+        r = PDFRedactor()
+        r._redact_text_search(page, "Joe")
+        page.apply_redactions()
+        text = page.get_text()
+        assert "Joe" not in text.replace("Joel", "")
+        assert "Joel" in text and "major" in text
+        doc.close()
+
+
+class TestRedactionRectPadding:
+
+    def test_tight_line_spacing_keeps_neighbouring_lines_intact(self, tmp_path):
+        """search_for returns the font's full line box, which at single
+        spacing already overlaps the lines above and below; padding it
+        vertically deleted letters from them."""
+        src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        y = 100
+        for line in ["Sarah has made progress in maths.",
+                     "Sarah enjoys reading with Sarah.",
+                     "Her reading is at level 22."]:
+            page.insert_text((72, y), line, fontsize=11)
+            y += 12
+        doc.save(str(src))
+        doc.close()
+
+        ok, _ = PDFRedactor().redact_pdf(src, out, [RedactionItem(1, "Sarah")])
+        assert ok
+        text = fitz.open(str(out))[0].get_text()
+        assert "Sarah" not in text
+        assert "has made progress in maths." in text
+        assert "enjoys reading with" in text
+        assert "Her reading is at level 22." in text

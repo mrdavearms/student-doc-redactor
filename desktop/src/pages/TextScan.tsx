@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { useStore } from '../store';
+import { digest } from '../lib/digest';
 import { api } from '../api';
 import { useDetection } from '../hooks/useDetection';
 
@@ -32,7 +33,9 @@ export default function TextScan() {
     if (!pastedText.trim()) { setStatus('no_text'); return; }
     setStatus('running');
     void runDetection({
-      fingerprint: { paste: pastedText },
+      // A digest, not the text: the fingerprint lives in the store for the
+      // rest of the session and must not be a second copy of the slab.
+      fingerprint: { paste: digest(pastedText) },
       // This is the copy shown in Layout's full-screen loading overlay — the
       // only thing visible while this runs, since the overlay blurs the page
       // behind it. The first scan of a session also loads the language model

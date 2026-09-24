@@ -29,6 +29,7 @@ from src.core.pseudonym_map import (
     is_person_category,
 )
 from src.core.role_suggester import suggest_role
+from src.core.pii_detector import generate_name_variations
 from src.core.pii_orchestrator import find_person_entities
 from src.core.redactor import (
     FOOTER_ZONE_FRACTION,
@@ -301,19 +302,29 @@ class DeidentificationService:
                 (m.text or '').strip().lower()
                 for m in all_matches if id(m) not in selected_ids
             } - {(m.text or '').strip().lower() for m in selected_by_doc[doc]}
-            results.document_results.append(self._process_document(
-                doc=doc,
-                selected_matches=selected_by_doc[doc],
-                deselected_texts=deselected_texts,
-                text_data=request.detected_pii.get(doc, {}).get('text_data', {}),
-                pmap=pmap,
-                output_folder=output_folder,
-                logger=logger,
-                name_variations=name_variations,
-                drop_header_footer=request.redact_header_footer,
-                output_filename_override=filename_override,
-                claimed_names=claimed_names,
-            ))
+            try:
+                doc_result = self._process_document(
+                    doc=doc,
+                    selected_matches=selected_by_doc[doc],
+                    deselected_texts=deselected_texts,
+                    text_data=request.detected_pii.get(doc, {}).get('text_data', {}),
+                    pmap=pmap,
+                    output_folder=output_folder,
+                    logger=logger,
+                    name_variations=name_variations,
+                    drop_header_footer=request.redact_header_footer,
+                    output_filename_override=filename_override,
+                    claimed_names=claimed_names,
+                )
+            except Exception as e:  # noqa: BLE001 — one document must not sink the run
+                # Every earlier document's output is already on disk; without
+                # the key file that follows, none of it can be decoded.
+                doc_result = DeidentifyDocumentResult(
+                    document_name=doc.name, output_path=None, success=False,
+                    items_replaced=0, error_message=f"De-identification failed: {e}",
+                )
+                logger.add_flagged_file(doc.name, doc_result.error_message)
+            results.document_results.append(doc_result)
 
         # The key file goes next to the ORIGINALS, never into the output folder:
         # the originals are already sensitive, so it adds no new exposure there,
@@ -330,7 +341,12 @@ class DeidentificationService:
         if results.cancelled:
             logger.set_cancelled(True)
         results.log_content = logger.generate_log()
-        results.log_path = logger.save_log(LOG_FILE_NAME)
+        try:
+            results.log_path = logger.save_log(LOG_FILE_NAME)
+        except OSError:
+            # A read-only source folder (a network share, say) must not turn a
+            # finished run into "failed". The log is still in log_content.
+            results.log_path = None
 
         return results
 
@@ -351,6 +367,10 @@ class DeidentificationService:
             if name and name.strip():
                 variations.append(name.strip())
                 variations.extend(p for p in name.split() if len(p) >= 3)
+        # The student's nicknames are replaced in the text, so they must come
+        # out of the filename too: "Joe Bloggs Report.pdf" for student Joseph.
+        _, nicknames = generate_name_variations(request.student_name, include_nicknames=True)
+        variations.extend(nicknames)
         for org in request.organisation_names:
             if org and org.strip():
                 variations.append(org.strip())
@@ -683,10 +703,16 @@ class DeidentificationService:
         # exactly as the replace pass did. Decorating first would blind both
         # passes to a PII value straddling a table-cell boundary.
         leftovers = verify_deidentified(full_output, selected_texts, labels)
+        # Near misses on OCR text are WARNINGS, not quarantine. Ordinary words
+        # sit one letter from common names — "than"/Ethan, "grade"/Grace,
+        # "names"/James, "carry"/Harry — so quarantining on them set aside most
+        # scanned reports whose output was in fact clean. The names are shown
+        # on screen for the user to check; see leftover_name_warnings.
+        fuzzy_hits: List[str] = []
         for page_num in sorted(ocr_pages & set(page_outputs)):
             for item in fuzzy_leftovers(page_outputs[page_num], selected_texts, labels):
-                if item not in leftovers:
-                    leftovers.append(item)
+                if item not in leftovers and item not in fuzzy_hits:
+                    fuzzy_hits.append(item)
 
         # Only now do cell separators become visible table dividers.
         full_output = full_output.replace(_CELL_SEP, ' | ')
@@ -708,7 +734,14 @@ class DeidentificationService:
 
         if leftovers:
             quarantine = output_folder / f"{PurePath(output_filename).stem}.UNVERIFIED.txt"
-            self._write_text(quarantine, full_output, total_replacements)
+            try:
+                self._write_text(quarantine, full_output, total_replacements)
+            except Exception as e:
+                # A locked or read-only target used to escape as an exception
+                # and abort the whole run — no key file, no audit log.
+                result.error_message = f"Could not write output file: {e}"
+                logger.add_flagged_file(safe_name, result.error_message)
+                return result
             result.quarantine_path = quarantine
             result.verification_failures = [
                 f"Possible remaining reference to \"{item}\"" for item in leftovers
@@ -729,6 +762,7 @@ class DeidentificationService:
 
         result.output_path = output_path
         result.success = True
+        result.leftover_name_warnings.extend(fuzzy_hits)
 
         # The net under everything: sweep the finished output for anything NER
         # still reads as a person. Catches names DETECTION missed, which the

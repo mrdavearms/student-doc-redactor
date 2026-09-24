@@ -15,7 +15,7 @@ export default function PeopleReview() {
     detectionResults, userSelections, folderPath, studentName,
     parentNames, familyNames, organisationNames, redactHeaderFooter,
     personRoles, personCustomLabels, ignoredPeople, inputMode, workflowMode,
-    navigateTo, setError, setPersonRole, setPersonIgnored,
+    navigateTo, setPersonRole, setPersonIgnored,
     acceptSuggestedRoles, peopleAutoSkippedKey, setPeopleAutoSkippedKey,
   } = useStore();
 
@@ -27,6 +27,13 @@ export default function PeopleReview() {
   const [roleOptions, setRoleOptions] = useState<{ key: string; label: string }[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  // Why the people could not be loaded. Kept SEPARATE from `people`: an
+  // error used to leave `people` as [], which the zero-people auto-skip below
+  // read as "nobody to classify" and navigated on — wiping the error message
+  // with it. The user reached Final Confirmation having classified no one,
+  // every person became [Other person], and Back could not return here.
+  const [loadFailed, setLoadFailed] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [customOpen, setCustomOpen] = useState<Record<string, boolean>>({});
   const skipKey = useRef('');
 
@@ -73,7 +80,7 @@ export default function PeopleReview() {
       familyNames, organisationNames, redactHeaderFooter, personRoles,
       personCustomLabels, ignoredPeople, people, isPaste, workflowMode]);
 
-  // Load the people once on mount.
+  // Load the people on mount (and again on "Try again").
   useEffect(() => {
     let cancelled = false;
     fetchPeople(requestBody())
@@ -90,12 +97,11 @@ export default function PeopleReview() {
         if (/no cached detection data/i.test((e as Error)?.message ?? '')) {
           useStore.getState().setDetectionParamsKey('');
         }
-        setError(friendlyError(e));
-        setPeople([]);
+        setLoadFailed(friendlyError(e));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [attempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Labels are recomputed by the backend on every change: reassigning one
   // person can renumber every other person sharing that role, so the whole set
@@ -143,6 +149,28 @@ export default function PeopleReview() {
     return (
       <div className="py-16 text-center text-sm text-slate-400">
         Working out who&apos;s who…
+      </div>
+    );
+  }
+
+  if (loadFailed !== null) {
+    return (
+      <div className="py-16 text-center space-y-4">
+        <p className="text-sm text-slate-600">{loadFailed}</p>
+        <div className="flex justify-center gap-2">
+          <button
+            onClick={() => navigateTo('document_review')}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 border border-slate-200 transition-colors btn-press"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          <button
+            onClick={() => { setLoading(true); setLoadFailed(null); setAttempt((a) => a + 1); }}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 transition-all btn-press"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }

@@ -11,7 +11,7 @@ slip through readable.
 import re
 from typing import Dict, List, Tuple
 
-from redactor import _PII_SEP, _pii_visible_in_text, fuzzy_word_match
+from redactor import _PII_SEP, _is_case_sensitive_pii, _pii_visible_in_text, fuzzy_word_match
 
 
 # A match must not start or end inside a longer alphanumeric run. Plain \b
@@ -31,10 +31,28 @@ def _pattern_for(pii_text: str) -> str:
     pattern would have replaced. If the two drifted apart, correctly processed
     files would start quarantining themselves.
     """
-    tokens = [re.escape(t) for t in re.split(_PII_SEP + r"+", pii_text.lower()) if t]
+    # Two-letter PII is matched as written even though the combined pattern is
+    # compiled IGNORECASE: "(?-i:Do)" replaces the surname Do, not every "do".
+    if _is_case_sensitive_pii(pii_text):
+        return '(?-i:' + _any_apostrophe(re.escape(pii_text.strip())) + ')'
+    tokens = [_any_apostrophe(re.escape(t))
+              for t in re.split(_PII_SEP + r"+", pii_text.lower()) if t]
     if not tokens:
         return ''
     return (_PII_SEP + r"*").join(tokens)
+
+
+_APOSTROPHES = "['’‘]"
+
+
+def _any_apostrophe(escaped_token: str) -> str:
+    """
+    Let an apostrophe in the PII match either form in the text. Detection
+    reports "O'Brien" (it normalises to straight quotes) while the extracted
+    text still says "O’Brien", and the output must keep the text's own
+    characters — so the PATTERN is made tolerant rather than the text folded.
+    """
+    return re.sub("['’‘]", lambda _: _APOSTROPHES, escaped_token)
 
 
 def deidentify_text(text: str, selected_matches: List, pmap) -> Tuple[str, int]:
@@ -128,10 +146,10 @@ def verify_deidentified(text: str, selected_texts: List[str], labels=None) -> Li
     redaction verification (never substring — 'Ann' inside 'Annual' is not a
     leak).
     """
-    haystack = strip_labels(text, labels).lower()
+    haystack = strip_labels(text, labels)
     return [
         pii for pii in selected_texts
-        if pii and len(pii.strip()) >= 3 and _pii_visible_in_text(pii.strip(), haystack)
+        if pii and len(pii.strip()) >= 2 and _pii_visible_in_text(pii.strip(), haystack)
     ]
 
 
@@ -158,7 +176,26 @@ def fuzzy_leftovers(text: str, selected_texts: List[str], labels=None) -> List[s
         for token in re.split(_PII_SEP + r"+", (pii or '').strip().lower()):
             if not token.isalpha() or len(token) < 5:
                 continue
-            if any(fuzzy_word_match(word, token) for word in words):
+            # "Kew Primary School" must not flag every later "school", nor
+            # "12 Smith Street" every "street".
+            if token in _FUZZY_GENERIC_TOKENS:
+                continue
+            # An exact hit on ONE token of a multi-word value is not a near
+            # miss of the value; whole-value visibility is verify_deidentified's
+            # job, and a lone surname the user left unticked is their call.
+            if any(word != token and fuzzy_word_match(word, token) for word in words):
                 leftovers.append(pii.strip())
                 break
     return leftovers
+
+
+_FUZZY_GENERIC_TOKENS = {
+    'school', 'primary', 'secondary', 'college', 'clinic', 'centre', 'center',
+    'hospital', 'practice', 'academy', 'institute', 'university', 'department',
+    'service', 'services', 'psychology', 'medical', 'health', 'group', 'street',
+    'road', 'avenue', 'drive', 'court', 'place', 'lane', 'crescent', 'boulevard',
+    'terrace', 'close', 'grove', 'highway', 'parade', 'circuit', 'esplanade',
+    'north', 'south', 'east', 'west', 'upper', 'lower', 'state', 'public',
+    'catholic', 'christian', 'grammar', 'anglican', 'community', 'family',
+    'children', 'learning', 'support', 'education', 'district', 'regional',
+}

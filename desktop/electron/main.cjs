@@ -172,6 +172,13 @@ function startBackend() {
     '-m', 'uvicorn', 'backend.main:app',
     '--port', String(BACKEND_PORT),
     '--host', '127.0.0.1',
+    // On quit we send SIGTERM. Without a bound, uvicorn waits for any
+    // in-flight request to finish — a redaction of a scanned folder can run
+    // for minutes — and meanwhile holds port 8765, so the NEXT launch found
+    // "another copy" and told the user to restart the computer. With the
+    // bound it gives up on the request, runs its exit handlers (which delete
+    // the converted-copy temp folder) and exits.
+    '--timeout-graceful-shutdown', '3',
   ], {
     cwd: appRoot,
     env: {
@@ -557,7 +564,16 @@ ipcMain.handle('save-file-as', async (_event, defaultPath, kind) => {
 });
 
 ipcMain.handle('open-external', async (_event, url) => {
-  await shell.openExternal(url);
+  // Only web pages and mail links. Every caller is hard-coded to one of
+  // these; a file: URL from a compromised renderer would open a local file.
+  let parsed;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'mailto:') return;
+  await shell.openExternal(parsed.href);
 });
 
 ipcMain.handle('get-api-token', () => API_TOKEN);
@@ -679,21 +695,40 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('window-all-closed', () => {
   app.isQuitting = true;
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
-  }
   app.quit();
 });
 
-app.on('before-quit', () => {
+// Stop the backend, then quit. `kill()` alone only ASKS uvicorn to stop; on
+// macOS it kept running an in-flight redaction (and the port) after the app
+// window had gone. Ask, wait briefly for the exit, force it if need be, and
+// only then let the app go — an orphaned backend blocks the next launch.
+let backendShutdown = null;
+app.on('before-quit', (event) => {
   app.isQuitting = true;
   if (updateCheckInterval) {
     clearInterval(updateCheckInterval);
     updateCheckInterval = null;
   }
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
+  if (!backendProcess) return;
+  if (backendShutdown) {
+    // Second pass, after the wait below: the backend is gone or was killed.
+    return;
   }
+  event.preventDefault();
+  const proc = backendProcess;
+  backendProcess = null;
+  backendShutdown = new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+      resolve();
+    }, 6000);
+    proc.once('exit', () => { clearTimeout(timer); resolve(); });
+    try {
+      proc.kill();
+    } catch {
+      clearTimeout(timer);
+      resolve();
+    }
+  });
+  backendShutdown.then(() => app.quit());
 });

@@ -78,17 +78,17 @@ def test_manual_item_is_appended_and_redacted_end_to_end():
         assert "STUDENTREF12345" not in out_text
 
 
-def test_manual_item_rejects_text_under_3_chars():
+def test_manual_item_rejects_text_under_2_chars():
     with tempfile.TemporaryDirectory() as tmp:
         pdf = Path(tmp) / "report.pdf"
         _make_pdf(pdf, "Some content.")
         _detect(pdf)
 
         resp = client.post("/api/pii/manual", json={
-            "doc_path": str(pdf), "text": "Jo", "page_num": 1,
+            "doc_path": str(pdf), "text": "J", "page_num": 1,
         })
         assert resp.status_code == 400
-        assert "at least 3 characters" in resp.json()["detail"]
+        assert "at least 2 characters" in resp.json()["detail"]
 
 
 def test_manual_item_rejects_out_of_range_page():

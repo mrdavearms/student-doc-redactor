@@ -37,7 +37,12 @@ class AustralianAddressRecognizer(PatternRecognizer):
     PATTERNS = [
         Pattern(
             "AU_ADDRESS",
-            r"(?:(?:Unit|Flat|Apt|Apartment)\s+)?(?:\d+[A-Za-z]?\s*/\s*)?\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),?\s+[A-Za-z\s]+,?\s+(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT)\s+\d{4}",
+            # Presidio compiles patterns with DOTALL|MULTILINE|IGNORECASE, so
+            # the free-text runs must not cross a line break ([A-Za-z ] rather
+            # than [A-Za-z\s]) and the state is matched as written ((?-i:…)),
+            # or "3 sessions this term in the way\nthat was agreed with the
+            # NSW 2024 planning group" is an address.
+            r"(?:(?:Unit|Flat|Apt|Apartment) )?(?:\d+[A-Za-z]? ?/ ?)?\d+ [A-Za-z ]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Lane|Ln|Way|Crescent|Cres|Boulevard|Blvd|Terrace|Tce|Close|Cl|Grove|Gr|Highway|Hwy|Parade|Pde|Circuit|Cct|Loop|Rise|Vale|Mews|Esplanade|Esp),? [A-Za-z ]+,? (?-i:VIC|Vic|NSW|Nsw|QLD|Qld|SA|WA|TAS|Tas|NT|ACT) \d{4}",
             0.85,
         ),
     ]
@@ -138,7 +143,8 @@ class CentrelinkCRNRecognizer(EntityRecognizer):
 class DateOfBirthRecognizer(EntityRecognizer):
     """Detects dates of birth — only when preceded by a DOB-related label."""
 
-    DOB_LABELS = [r"DOB", r"D\.O\.B\.", r"Date of Birth", r"Date of birth", r"Born", r"Birth Date"]
+    # Whole words only — "Born" must not fire on "Osborne" or "stubborn".
+    DOB_LABELS = [r"\bDOB\b", r"\bD\.O\.B\.?", r"\bDate of Birth\b", r"\bBorn\b", r"\bBirth Date\b"]
     _MONTHS = (
         r"(?:January|February|March|April|May|June|July|August|September|"
         r"October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
@@ -165,29 +171,31 @@ class DateOfBirthRecognizer(EntityRecognizer):
         import re
         results = []
 
-        for label_pat in self.DOB_LABELS:
-            label_regex = re.compile(label_pat, re.IGNORECASE)
-            if not label_regex.search(text):
-                continue
-
-            for date_pat in self.DATE_PATTERNS:
-                for match in re.finditer(date_pat, text):
-                    results.append(
-                        RecognizerResult(
-                            entity_type="AU_DOB",
-                            start=match.start(),
-                            end=match.end(),
-                            score=0.9,
-                            analysis_explanation=AnalysisExplanation(
-                                recognizer=self.__class__.__name__,
-                                original_score=0.9,
-                                pattern_name="AU_DOB",
-                                pattern=date_pat,
-                            ),
+        # The label and the date must share a LINE, as in PIIDetector._detect_dob.
+        # Checking the whole page turned every assessment and review date on a
+        # page that mentioned "DOB" anywhere into a date of birth.
+        offset = 0
+        for line in text.split("\n"):
+            has_label = any(re.search(label_pat, line, re.IGNORECASE)
+                            for label_pat in self.DOB_LABELS)
+            if has_label:
+                for date_pat in self.DATE_PATTERNS:
+                    for match in re.finditer(date_pat, line):
+                        results.append(
+                            RecognizerResult(
+                                entity_type="AU_DOB",
+                                start=offset + match.start(),
+                                end=offset + match.end(),
+                                score=0.9,
+                                analysis_explanation=AnalysisExplanation(
+                                    recognizer=self.__class__.__name__,
+                                    original_score=0.9,
+                                    pattern_name="AU_DOB",
+                                    pattern=date_pat,
+                                ),
+                            )
                         )
-                    )
-            if results:
-                break  # Found matches with first matching label
+            offset += len(line) + 1
 
         return results
 
@@ -214,7 +222,8 @@ class StudentNameRecognizer(EntityRecognizer):
         for variation in self.name_variations:
             if len(variation) < 3:
                 continue
-            pattern = re.compile(r"\b" + re.escape(variation) + r"\b", re.IGNORECASE)
+            pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(variation) + r"(?![A-Za-z0-9])",
+                                 re.IGNORECASE)
             for match in pattern.finditer(text):
                 results.append(
                     RecognizerResult(

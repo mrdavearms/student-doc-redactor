@@ -118,7 +118,22 @@ def clean_person_name(raw: str):
     tokens = ' '.join((raw or '').split()).split()
     while tokens and tokens[0].lower().rstrip('.') in _HONORIFICS:
         tokens = tokens[1:]
+    # NER hands over possessive and sentence-final spans ("Billy Bob's",
+    # "Sarah Williams."). Registered as written they minted a phantom
+    # [Other person] for a person already known — the student included.
+    if tokens:
+        last = _POSSESSIVE_RE.sub('', tokens[-1])
+        # Keep the full stop on an initial ("Sarah W.") — it is part of the
+        # written form the variations are keyed on.
+        if len(last.rstrip('.,;:')) >= 2:
+            last = last.rstrip('.,;:')
+        tokens[-1] = last
+        if not tokens[-1]:
+            tokens = tokens[:-1]
     if not tokens or len(tokens) > 4:
+        return None
+    # A lone initial ("P.") is not a person.
+    if len(tokens) == 1 and len(tokens[0].strip(".'’-")) < 2:
         return None
     for token in tokens:
         core = token.strip(".'’-")
@@ -281,13 +296,21 @@ class PseudonymMap:
         self._owners.append(owner)
         index = len(self._owners) - 1
 
-        for var in list(variations) + list(nicknames):
+        for var in variations:
             key = _norm(var)
             if not key:
                 continue
             owner.variations.add(key)
             kind = 'surname' if (surname and key == surname) else 'other'
             self._claims.setdefault(key, []).append((index, kind))
+        # A nickname is a weaker claim than a real name: "Liam" belongs to the
+        # classmate Liam Chen before it belongs to the student William.
+        for var in nicknames:
+            key = _norm(var)
+            if not key:
+                continue
+            owner.variations.add(key)
+            self._claims.setdefault(key, []).append((index, 'nickname'))
         # The exact entered name always maps, even if shorter than the
         # variation filter's 3-character floor (students named "Jo").
         owner.variations.add(_norm(full_name))
@@ -357,6 +380,14 @@ class PseudonymMap:
             if len(distinct) == 1:
                 resolved[key] = self._owners[claims[0][0]].label
                 continue
+            # Someone's actual name beats someone else's nickname for it.
+            real = [c for c in claims if c[1] != 'nickname']
+            if real and len(real) < len(claims):
+                claims = real
+                distinct = {idx for idx, _ in claims}
+                if len(distinct) == 1:
+                    resolved[key] = self._owners[claims[0][0]].label
+                    continue
             # Shared by several people. A surname shared by everyone who claims
             # it is genuinely ambiguous — neither safe nor honest to guess.
             if all(kind == 'surname' for _, kind in claims):
@@ -392,10 +423,20 @@ class PseudonymMap:
         cand_norms = {_norm(v) for v in cand_variations if v.strip()}
         cand_norms.add(norm)
 
+        # "Marcus Van" (what a contextual rule captures from "Parent: Marcus
+        # Van Der Berg") is the start of a known full name, not a new person.
+        cand_tokens = norm.split()
+
+        def _is_prefix_of(owner_name: str) -> bool:
+            owner_tokens = _norm(owner_name).split()
+            return (len(cand_tokens) >= 2 and len(owner_tokens) > len(cand_tokens)
+                    and owner_tokens[:len(cand_tokens)] == cand_tokens)
+
         matched = [
             (index, owner) for index, owner in enumerate(self._owners)
             if not owner.is_org
-            and (norm in owner.variations or _norm(owner.full_name) in cand_norms)
+            and (norm in owner.variations or _norm(owner.full_name) in cand_norms
+                 or _is_prefix_of(owner.full_name))
         ]
         if matched:
             matched.sort(key=lambda pair: (pair[1].priority, pair[1].seq))
@@ -409,6 +450,13 @@ class PseudonymMap:
             # key file. Only genuinely new forms are claimed; a form someone
             # else already claims keeps its existing resolution, or adding it
             # here would quietly break the shared-surname rule.
+            # A bare first name seen before the full name ("Sarah" on line 1,
+            # "Sarah Williams" on line 3) registered an owner with no surname,
+            # so the surname claimed here was kind 'other' and a shared
+            # "Williams" never became [Family name].
+            cand_parts = full_name.split()
+            if owner.surname is None and len(cand_parts) >= 2:
+                owner.surname = _norm(cand_parts[-1])
             for variation in cand_norms:
                 if variation and variation not in self._claims:
                     owner.variations.add(variation)
@@ -555,10 +603,13 @@ class PseudonymMap:
         if not re.fullmatch(r"[A-Za-z][A-Za-z '’-]*", cleaned):
             return None
 
+        # Lowercased on both sides on purpose: a label must not contain a
+        # name in ANY case, so the two-letter case-sensitive rule that
+        # protects "do" and "he" in running text does not apply here.
         haystack = cleaned.lower()
         for owner in self._owners:
             for variation in owner.variations:
-                if len(variation) >= 3 and _pii_visible_in_text(variation, haystack):
+                if len(variation) >= 2 and _pii_visible_in_text(variation, haystack):
                     return None
         return cleaned[0].upper() + cleaned[1:]
 

@@ -131,3 +131,31 @@ class TestConversionsStayOutOfTheUsersFolder:
         second = _conversion_dir()
 
         assert list(second.iterdir()) == []
+
+
+class TestWordFilesThatShareAStem:
+    def test_doc_and_docx_with_one_stem_both_reach_the_results(self, tmp_path, monkeypatch):
+        """LibreOffice names the output after the source stem, so Report.doc
+        and Report.docx both wrote converted/Report.pdf and the second
+        silently replaced the first."""
+        from src.core.document_converter import DocumentConverter
+        (tmp_path / "Report.doc").write_bytes(b"old")
+        (tmp_path / "Report.docx").write_bytes(b"new")
+
+        def fake_convert(self, input_file, output_dir):
+            out = output_dir / f"{input_file.stem}.pdf"
+            _make_pdf(out, input_file.suffix)
+            return True, "Conversion successful", out
+
+        monkeypatch.setattr(DocumentConverter, "convert_to_pdf", fake_convert)
+        results = ConversionService().process_folder(tmp_path)
+        assert len(results.converted_files) == 2
+        assert len(set(results.converted_files)) == 2
+        assert all(Path(p).exists() for p in results.converted_files)
+
+    def test_word_lock_files_are_ignored(self, tmp_path):
+        (tmp_path / "~$Report.docx").write_bytes(b"lock")
+        _make_pdf(tmp_path / "Report.pdf")
+        results = ConversionService().process_folder(tmp_path)
+        assert results.total_files == 1
+        assert results.flagged_count == 0

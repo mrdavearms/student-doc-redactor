@@ -454,3 +454,40 @@ class TestIntegration:
         assert any('bloggs' == t or 'jane bloggs' == t or 'jane' == t for t in name_texts)
         # "bloggsel" must NOT appear as a student name match
         assert not any('bloggsel' in t for t in name_texts)
+
+
+class TestLabelAndPatternPrecision:
+    """False positives and false negatives found in the September 2026 audit."""
+
+    def test_born_inside_a_word_is_not_a_dob_label(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text(
+            "Meeting with Ms Dobson on 3/4/2024. Billy can be stubborn 5/6/2024.", 1)
+        assert not [m for m in matches if m.category == 'Date of birth']
+
+    def test_born_as_a_word_is_still_a_label(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text("Born: 1/2/2015", 1)
+        assert [m.text for m in matches if m.category == 'Date of birth'] == ["1/2/2015"]
+
+    def test_legislation_citation_is_not_an_address(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text(
+            "2 adjustments are in place under the Disability Discrimination Act 1992.", 1)
+        assert not [m for m in matches if m.category == 'Address']
+
+    def test_title_case_state_is_still_an_address(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text("Lives at 14 Wattle Court, Toowong Qld 4066.", 1)
+        assert [m.text for m in matches if m.category == 'Address'] == [
+            "14 Wattle Court, Toowong Qld 4066"]
+
+    def test_current_format_passport_number(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text("Passport Number: PA1234567", 1)
+        assert [m.text for m in matches if m.category == 'Passport number'] == ["PA1234567"]
+
+    def test_spaced_ndis_number(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text("NDIS Number: 430 123 456", 1)
+        assert [m.text for m in matches if m.category == 'NDIS number'] == ["430 123 456"]

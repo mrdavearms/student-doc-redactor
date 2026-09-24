@@ -72,8 +72,8 @@ export default function DocumentReview() {
 
   const handleAddManual = async () => {
     const trimmed = manualText.trim();
-    if (trimmed.length < 3) {
-      setManualFieldError('Enter at least 3 characters.');
+    if (trimmed.length < 2) {
+      setManualFieldError('Enter at least 2 characters.');
       return;
     }
     setManualFieldError(null);

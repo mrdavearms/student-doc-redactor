@@ -238,13 +238,20 @@ export const useStore = create<AppState>((set) => ({
       inputMode: mode,
       pastedText: mode === 'paste' ? state.pastedText : '',
       pasteOutput: mode === 'paste' ? state.pasteOutput : null,
+      // A different input is a different detection run; a stale fingerprint
+      // here let the wizard skip detection against a cache the backend had
+      // already dropped, and the final step then failed with a cache miss.
+      detectionParamsKey: state.inputMode === mode ? state.detectionParamsKey : '',
     }));
   },
 
   setPastedText: (text) => set({ pastedText: text }),
 
-  // "Clean another" on the completion screen.
-  clearPastedText: () => set({ pastedText: '' }),
+  // "Clean another" on the completion screen. The completion screen has
+  // already asked the backend to drop the pasted text, so the fingerprint
+  // that would let detection be skipped must go with it — pasting the same
+  // text again otherwise reused results the backend no longer held.
+  clearPastedText: () => set({ pastedText: '', detectionParamsKey: '' }),
 
   setPasteOutput: (o) => set({ pasteOutput: o }),
 

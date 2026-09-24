@@ -236,13 +236,22 @@ class DocumentConverter:
         # silently — no error, just one fewer file in the results. Single-
         # document mode already compared suffix.lower(); this makes the two
         # modes agree.
-        entries = sorted(p for p in folder_path.iterdir() if p.is_file())
+        # "~$Report.docx" is the lock file Word keeps beside an open document,
+        # on both platforms; it is not a document and LibreOffice cannot open it.
+        entries = sorted(p for p in folder_path.iterdir()
+                         if p.is_file() and not p.name.startswith('~$'))
         word_files = [p for p in entries if p.suffix.lower() in ('.doc', '.docx')]
         pdf_files = [p for p in entries if p.suffix.lower() == '.pdf']
 
-        # Process Word files
-        for word_file in word_files:
-            success, message, output_path = self.convert_to_pdf(word_file, temp_dir)
+        # Process Word files. Each conversion gets its own sub-folder:
+        # LibreOffice names the output after the source stem, so "Report.doc"
+        # and "Report.docx" in one folder both produced converted/Report.pdf and
+        # the second silently overwrote the first — one document never reached
+        # detection, and nothing said so.
+        for index, word_file in enumerate(word_files, start=1):
+            out_dir = temp_dir / f"{index:03d}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            success, message, output_path = self.convert_to_pdf(word_file, out_dir)
             if success:
                 results['converted_files'].append(output_path)
             else:

@@ -259,7 +259,9 @@ def check_dependencies():
 @app.post("/api/folder/process", response_model=ConversionResultsResponse)
 def process_folder(req: ProcessFolderRequest):
     folder = Path(req.folder_path)
-    if not folder.exists():
+    # A relative path would resolve against the backend's own working
+    # directory — the app's resources folder — never a folder the user meant.
+    if not folder.is_absolute() or not folder.is_dir():
         raise HTTPException(status_code=400, detail=f"Folder not found: {req.folder_path}")
 
     try:
@@ -516,8 +518,8 @@ def add_manual_pii(req: AddManualPIIRequest):
         )
 
     text = req.text.strip()
-    if len(text) < 3:
-        raise HTTPException(status_code=400, detail="Manual PII text must be at least 3 characters.")
+    if len(text) < 2:
+        raise HTTPException(status_code=400, detail="Manual PII text must be at least 2 characters.")
 
     if req.doc_path == PASTE_KEY:
         # No file on disk for pasted text — it lives entirely in the cache
@@ -1072,7 +1074,9 @@ def open_folder(req: OpenFolderRequest):
     if system == "Darwin":
         subprocess.Popen(["open", str(folder)])
     elif system == "Windows":
-        subprocess.Popen(["explorer", str(folder)])
+        # Not `explorer <path>`: explorer.exe splits its argument on commas
+        # even inside quotes, so "Reports, 2026" opened the wrong place.
+        os.startfile(str(folder))  # type: ignore[attr-defined]
     else:
         subprocess.Popen(["xdg-open", str(folder)])
 
@@ -1082,7 +1086,7 @@ def open_folder(req: OpenFolderRequest):
 @app.post("/api/folder/validate")
 def validate_folder(req: ProcessFolderRequest):
     folder = Path(req.folder_path)
-    exists = folder.exists()
+    exists = folder.is_absolute() and folder.exists()
     is_dir = folder.is_dir() if exists else False
     return {"exists": exists, "is_directory": is_dir, "path": req.folder_path}
 

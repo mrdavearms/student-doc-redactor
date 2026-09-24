@@ -40,6 +40,38 @@ class PIIMatch:
             return 'low'
 
 
+# Capitalised words that follow "Parent" in school documents without naming a
+# parent: "Parent Teacher Interview", "Parent Information Evening", "Parent
+# Portal", "Parent Helper". A capture whose first or last word is one of these
+# is an event or a role, not a person.
+_EVENT_WORDS = {
+    'teacher', 'teachers', 'information', 'interview', 'interviews', 'portal',
+    'contact', 'contacts', 'meeting', 'meetings', 'evening', 'night', 'morning',
+    'helper', 'helpers', 'volunteer', 'volunteers', 'session', 'sessions',
+    'feedback', 'survey', 'email', 'phone', 'signature', 'consent', 'workshop',
+    'conference', 'group', 'support', 'liaison', 'engagement', 'involvement',
+    'communication', 'newsletter', 'handbook', 'payment', 'payments', 'access',
+    'login', 'account', 'form', 'forms', 'name', 'details', 'declaration',
+    'agreement', 'report', 'reports', 'comment', 'comments', 'concern',
+    'concerns', 'request', 'response', 'education', 'program', 'programs',
+    'network', 'association', 'committee', 'council', 'representative',
+}
+
+
+# Words a user might type into the parent/family boxes that are not names.
+_ENTERED_NAME_STOPWORDS = {
+    'the', 'and', 'family', 'families', 'mum', 'mom', 'dad', 'mother', 'father',
+    'parent', 'parents', 'guardian', 'carer', 'nan', 'nana', 'pop', 'grandma',
+    'grandpa', 'grandmother', 'grandfather', 'aunty', 'auntie', 'aunt', 'uncle',
+    'step', 'brother', 'sister', 'sibling', 'partner', 'of', 'or',
+}
+
+
+def _is_event_phrase(name: str) -> bool:
+    tokens = name.lower().split()
+    return bool(tokens) and (tokens[0] in _EVENT_WORDS or tokens[-1] in _EVENT_WORDS)
+
+
 # Words that must never be extracted as a person name from contextual detection.
 # Stored at module level for O(1) lookup on every match.
 _CONTEXTUAL_NAME_EXCLUDE = {
@@ -65,9 +97,53 @@ _CONTEXTUAL_NAME_EXCLUDE = {
 }
 
 
+# Two-letter names are real names. "Jo", "Al", "Di" and the surnames Li, Wu,
+# Ng, Xu, Vo, Vu, Do, Le, Ho, Lu, Hu, Su, Yu, He, Ma, An are all common in
+# Australian schools, and until September 2026 every one of them was silently
+# dropped by a three-character minimum — so a student named "Mei Li" had "Li"
+# visible in every output, including "Mr Li" and "Li's". They are kept, but
+# matched CASE-SENSITIVELY: "Do" the surname, never "do" the verb; "He" the
+# surname, never "he" the pronoun. Longer names stay case-insensitive.
+MIN_NAME_LENGTH = 2
+CASE_SENSITIVE_MAX_LEN = 2
+
+
+def match_flags(text: str) -> int:
+    """`re` flags for matching one PII string — see MIN_NAME_LENGTH."""
+    return 0 if len(text.strip()) <= CASE_SENSITIVE_MAX_LEN else re.IGNORECASE
+
+
+# Boundaries for matching a name variation. Plain \b fails when the variation
+# starts or ends with punctuation ("Jane S.", "J.S."): \b after a full stop
+# needs a word character to follow, so those forms only ever matched when glued
+# to the next word. The orchestrator has used these lookarounds for NER
+# variations since the start; the user-entered path now matches.
+_NAME_LEFT = r'(?<![A-Za-z0-9])'
+_NAME_RIGHT = r'(?![A-Za-z0-9])'
+
+# Leading titles are not part of a name. A parent typed as "Mr John Bob" must
+# still find "John Bob" and "John" in the text.
+_NAME_HONORIFICS = {'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'prof', 'professor',
+                    'sir', 'rev', 'fr', 'sr', 'br'}
+# Lowercase surname particles: "Jan van der Berg" has the surname "van der
+# Berg", not "Berg" alone (though "Berg" is kept as well).
+_SURNAME_PARTICLES = {'van', 'von', 'der', 'den', 'de', 'del', 'della', 'di',
+                      'da', 'du', 'la', 'le', 'ten', 'ter', 'al', 'el', 'bin',
+                      'binte', 'ibn', 'st', 'mac', 'mc', 'o'}
+# A letter, then letters, apostrophes, full stops or hyphens: O'Brien,
+# Smith-Jones, St., Zoë. Anything else ("(mother)", "12") is not a name token.
+_NAME_TOKEN = re.compile(r"[^\W\d_](?:[^\W\d_]|['’.\-])*")
+
+
 def generate_name_variations(name: str, preserve_short_name: str = None,
                              include_nicknames: bool = False) -> tuple:
     """Generate name variations for detection. Standalone version for use by orchestrator.
+
+    Handles the ways names are actually written: a leading title ("Mr John
+    Bob"), "Surname, First" class-list order, hyphenated names (each half is a
+    variation, since reports routinely use one half of a double-barrelled
+    surname), lowercase particles ("van der Berg"), and middle names ("Billy
+    Robert Bob" is written "Billy Bob" in the body of the report).
 
     Returns:
         Tuple of (variations_list, nickname_list). nickname_list is empty unless
@@ -76,19 +152,58 @@ def generate_name_variations(name: str, preserve_short_name: str = None,
     name = name.strip()
     if not name:
         return [], []
-    parts = name.split()
     variations = [name]
+
+    # "Smith, John" → "John Smith" for the purpose of finding first/last.
+    core = name
+    if ',' in name and len(name.split(',')) == 2:
+        surname_part, given_part = (p.strip() for p in name.split(','))
+        if surname_part and given_part:
+            core = f"{given_part} {surname_part}"
+            variations.append(core)
+
+    # Drop titles and anything that is not a name-like token.
+    parts = [p.strip(',') for p in core.split()]
+    while parts and parts[0].lower().rstrip('.') in _NAME_HONORIFICS:
+        parts = parts[1:]
+    parts = [p for p in parts if _NAME_TOKEN.fullmatch(p)]
+    stripped = ' '.join(parts)
+    if stripped and stripped != name:
+        variations.append(stripped)
+
     if len(parts) >= 2:
-        first, last = parts[0], parts[-1]
-        variations.append(first)
-        variations.append(last)
+        first = parts[0]
+        # Surname = the last token plus any lowercase particles before it.
+        last_start = len(parts) - 1
+        while last_start > 1 and parts[last_start - 1].lower() in _SURNAME_PARTICLES:
+            last_start -= 1
+        last = ' '.join(parts[last_start:])
+        last_word = parts[-1]
+        # A bare initial ("P." in "P. Raman") is not a name on its own.
+        if len(first.rstrip('.')) >= 2:
+            variations.append(first)
+        if len(last_word.rstrip('.')) >= 2:
+            variations.append(last)
+            if last != last_word:
+                variations.append(last_word)
+        if last_start > 1:
+            # Middle names are dropped in running text: "Billy Robert Bob"
+            # is written "Billy Bob".
+            variations.append(f"{first} {last}")
         variations.append(f"{first[0]}. {last}")
-        variations.append(f"{first} {last[0]}.")
-        variations.append(f"{first[0]}.{last[0]}.")
+        variations.append(f"{first} {last_word[0]}.")
+        variations.append(f"{first[0]}.{last_word[0]}.")
         # Full initials string (e.g. "JS" for "Jane Smith")
         initials = ''.join(p[0] for p in parts)
         if len(initials) >= 3:
             variations.append(initials)
+        # Each half of a hyphenated name: "Smith-Jones" is written as
+        # "Smith" or "Jones" as often as in full.
+        for token in (first, last_word):
+            if '-' in token:
+                variations.extend(h for h in token.split('-') if h)
+    elif len(parts) == 1 and '-' in parts[0]:
+        variations.extend(h for h in parts[0].split('-') if h)
 
     # Nickname expansion
     nickname_vars = []
@@ -104,15 +219,26 @@ def generate_name_variations(name: str, preserve_short_name: str = None,
 
     # Filter main variations
     preserve = preserve_short_name or name
-    variations = [v for v in variations if len(v) >= 3 or v == preserve]
+    variations = [v for v in variations if len(v) >= MIN_NAME_LENGTH or v == preserve]
     variations = list(dict.fromkeys(v.strip() for v in variations if v.strip()))
 
     # Filter nicknames: min 3 chars and not a common word
     filtered_nicks = []
     if include_nicknames and nickname_vars:
         filtered_nicks = [n for n in set(nickname_vars)
-                          if len(n) >= 3 and n.lower() not in _CONTEXTUAL_NAME_EXCLUDE]
+                          if len(n) >= 3 and n.lower() not in _CONTEXTUAL_NAME_EXCLUDE
+                          and n.lower() not in _NICKNAME_CALENDAR_EXCLUDE]
     return variations, filtered_nicks
+
+
+# Nicknames that are also month or weekday abbreviations. "Dec" for Declan
+# flagged every "Dec 2024" in a report at medium confidence, ticked by
+# default. "Jan" is kept: it is a common given name in its own right.
+_NICKNAME_CALENDAR_EXCLUDE = {
+    'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov',
+    'dec', 'mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'sat',
+    'sun',
+}
 
 
 class PIIDetector:
@@ -150,7 +276,12 @@ class PIIDetector:
     ADDRESS_PATTERN = (
         UNIT_PREFIX
         + r'\d+\s+[A-Za-z\s]+(?:' + STREET_TYPES + r'),?\s+[A-Za-z\s]+,?\s+'
-        + r'(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT|Victoria|New South Wales|Queensland|'
+        # The state is matched case-SENSITIVELY inside an otherwise
+        # case-insensitive pattern. With a global IGNORECASE, "in place under
+        # the Disability Discrimination Act 1992" was an address: "place" the
+        # street type, "Act" the state, "1992" the postcode. Legislation
+        # citations are routine in psychologists' reports.
+        + r'(?-i:VIC|Vic|NSW|Nsw|QLD|Qld|SA|WA|TAS|Tas|NT|ACT|Victoria|New South Wales|Queensland|'
         + r'South Australia|Western Australia|Tasmania|Northern Territory|'
         + r'Australian Capital Territory)\s+\d{4}'
     )
@@ -197,22 +328,25 @@ class PIIDetector:
     STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d{3,}\b'
 
     # NDIS participant number (9 digits, requires keyword)
-    NDIS_PATTERN = r'(?i)(?:ndis|participant)\s*(?:number|no\.?|#)?\s*:?\s*(\d{9})\b'
+    # Printed as "430 123 456" as often as "430123456".
+    NDIS_PATTERN = r'(?i)(?:ndis|participant)\s*(?:number|no\.?|#)?\s*:?\s*(\d{3}\s?\d{3}\s?\d{3})\b'
 
     # Australian Business Number (11 digits, requires keyword)
     ABN_PATTERN = r'(?i)abn\s*:?\s*(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b'
 
     # Passport number (requires keyword)
-    PASSPORT_PATTERN = r'(?i)passport\s*(?:number|no\.?|#)?\s*:?\s*([A-Z]\d{7})\b'
+    # One letter + 7 digits (pre-2003) or two letters + 7 digits (current).
+    PASSPORT_PATTERN = r'(?i)passport\s*(?:number|no\.?|#)?\s*:?\s*([A-Z]{1,2}\d{7})\b'
 
     # DOB label patterns (must precede date)
+    # Whole words only: without \b, "Born" fired on "Osborne", "stubborn" and
+    # "Dobson", turning every date on that line into a date of birth.
     DOB_LABELS = [
-        r'DOB',
-        r'D\.O\.B\.',
-        r'Date of Birth',
-        r'Born',
-        r'Birth Date',
-        r'Date of birth'
+        r'\bDOB\b',
+        r'\bD\.O\.B\.?',
+        r'\bDate of Birth\b',
+        r'\bBorn\b',
+        r'\bBirth Date\b',
     ]
 
     # Month-name fragment shared by the date patterns below
@@ -269,10 +403,14 @@ class PIIDetector:
             family_names: List of other family member names
             organisation_names: List of organisation/school names to detect
         """
-        self.student_name = student_name.strip()
-        self.parent_names = [n.strip() for n in (parent_names or [])]
-        self.family_names = [n.strip() for n in (family_names or [])]
-        self.organisation_names = [n.strip() for n in (organisation_names or [])]
+        # Names go through the same normalisation as the text they are
+        # searched in. A surname pasted from Word carries a curly apostrophe
+        # ("O’Brien"); the page text is normalised to "O'Brien" before
+        # matching, so an unnormalised name could never be found.
+        self.student_name = _normalise_text(student_name).strip()
+        self.parent_names = [_normalise_text(n).strip() for n in (parent_names or []) if n and n.strip()]
+        self.family_names = [_normalise_text(n).strip() for n in (family_names or []) if n and n.strip()]
+        self.organisation_names = [_normalise_text(n).strip() for n in (organisation_names or []) if n and n.strip()]
 
         # Generate name variations
         self.name_variations = self._generate_name_variations()
@@ -353,7 +491,7 @@ class PIIDetector:
         """Detect student name variations"""
         matches = []
         for variation in self.name_variations:
-            pattern = re.compile(r'\b' + re.escape(variation) + r'\b', re.IGNORECASE)
+            pattern = re.compile(_NAME_LEFT + re.escape(variation) + _NAME_RIGHT, match_flags(variation))
             for match in pattern.finditer(line):
                 context = self._get_context(line, match.start(), match.end())
                 matches.append(PIIMatch(
@@ -367,7 +505,7 @@ class PIIDetector:
 
         # Nickname variations at lower confidence
         for nick in getattr(self, '_nickname_variations', []):
-            pattern = re.compile(r'\b' + re.escape(nick) + r'\b', re.IGNORECASE)
+            pattern = re.compile(_NAME_LEFT + re.escape(nick) + _NAME_RIGHT, re.IGNORECASE)
             for m in pattern.finditer(line):
                 matches.append(PIIMatch(
                     text=m.group(), category="Student name (nickname)", confidence=0.75,
@@ -618,7 +756,7 @@ class PIIDetector:
                 for match in pattern.finditer(line):
                     name = match.group(1)
                     # Skip common words, articles, prepositions, and professional titles
-                    if name.lower() not in _CONTEXTUAL_NAME_EXCLUDE:
+                    if name.lower() not in _CONTEXTUAL_NAME_EXCLUDE and not _is_event_phrase(name):
                         found_name = True
                         context = self._get_context(line, match.start(1), match.end(1))
                         matches.append(PIIMatch(
@@ -638,7 +776,8 @@ class PIIDetector:
                     if next_line:
                         name_only = re.compile(r'^' + _name_pat)
                         m = name_only.match(next_line.strip())
-                        if m and m.group(1).lower() not in _CONTEXTUAL_NAME_EXCLUDE:
+                        if (m and m.group(1).lower() not in _CONTEXTUAL_NAME_EXCLUDE
+                                and not _is_event_phrase(m.group(1))):
                             matches.append(PIIMatch(
                                 text=m.group(1), category=category,
                                 confidence=0.60, page_num=page_num,
@@ -646,34 +785,61 @@ class PIIDetector:
                                 context=next_line.strip()[:80]
                             ))
 
-        # Also check user-provided parent/family names
+        # Also check user-provided parent/family names. Like the student, a
+        # parent is written by first name alone ("Marcus said…") far more often
+        # than in full, and a title typed into the box ("Mr John Bob") must not
+        # stop "John Bob" from being found — so the same variations apply.
         for parent_name in self.parent_names:
-            pattern = re.compile(r'\b' + re.escape(parent_name) + r'\b', re.IGNORECASE)
-            for match in pattern.finditer(line):
-                context = self._get_context(line, match.start(), match.end())
-                matches.append(PIIMatch(
-                    text=match.group(),
-                    category='Parent/Guardian (user-provided)',
-                    confidence=0.95,
-                    page_num=page_num,
-                    line_num=line_num,
-                    context=context
-                ))
+            variations = self._entered_name_variations(parent_name)
+            for variation in variations:
+                pattern = re.compile(_NAME_LEFT + re.escape(variation) + _NAME_RIGHT, match_flags(variation))
+                for match in pattern.finditer(line):
+                    context = self._get_context(line, match.start(), match.end())
+                    matches.append(PIIMatch(
+                        text=match.group(),
+                        category='Parent/Guardian (user-provided)',
+                        confidence=0.95,
+                        page_num=page_num,
+                        line_num=line_num,
+                        context=context
+                    ))
 
         for family_name in self.family_names:
-            pattern = re.compile(r'\b' + re.escape(family_name) + r'\b', re.IGNORECASE)
-            for match in pattern.finditer(line):
-                context = self._get_context(line, match.start(), match.end())
-                matches.append(PIIMatch(
-                    text=match.group(),
-                    category='Family member (user-provided)',
-                    confidence=0.95,
-                    page_num=page_num,
-                    line_num=line_num,
-                    context=context
-                ))
+            variations = self._entered_name_variations(family_name)
+            for variation in variations:
+                pattern = re.compile(_NAME_LEFT + re.escape(variation) + _NAME_RIGHT, match_flags(variation))
+                for match in pattern.finditer(line):
+                    context = self._get_context(line, match.start(), match.end())
+                    matches.append(PIIMatch(
+                        text=match.group(),
+                        category='Family member (user-provided)',
+                        confidence=0.95,
+                        page_num=page_num,
+                        line_num=line_num,
+                        context=context
+                    ))
 
         return matches
+
+    @staticmethod
+    def _entered_name_variations(name: str) -> List[str]:
+        """
+        Variations of a user-entered parent/family name. The typed string is
+        always kept; single-word variations that are relationship words or
+        articles are not — "The Smith family" or "Nan Jean" in the box must not
+        flag every "the" or "nan" in the document.
+        """
+        name = name.strip()
+        if not name:
+            return []
+        core = ' '.join(t for t in name.split()
+                        if t.lower().strip(',') not in _ENTERED_NAME_STOPWORDS) or name
+        variations, _ = generate_name_variations(core, include_nicknames=False)
+        out = [name] + [
+            v for v in variations
+            if not all(t.lower() in _ENTERED_NAME_STOPWORDS for t in v.split())
+        ]
+        return list(dict.fromkeys(out))
 
     def _detect_organisation_names(self, line: str, page_num: int, line_num: int) -> List[PIIMatch]:
         """Detect user-provided organisation names and their significant words."""

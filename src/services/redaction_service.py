@@ -133,6 +133,9 @@ class RedactionService:
             organisation_names=request.organisation_names,
         )
         name_variations = list(_detector.name_variations)
+        # Nicknames are redacted in the document, so strip them from the
+        # filename as well: "Joe Bloggs Report.pdf" for student Joseph.
+        name_variations.extend(getattr(_detector, '_nickname_variations', []))
         for name in request.parent_names + request.family_names:
             if len(name) >= 3 and name not in name_variations:
                 name_variations.append(name)
@@ -201,7 +204,13 @@ class RedactionService:
         if results.cancelled:
             logger.set_cancelled(True)
         results.log_content = logger.generate_log()
-        results.log_path = logger.save_log()
+        try:
+            results.log_path = logger.save_log()
+        except OSError:
+            # A read-only source folder (a network share, say) must not turn a
+            # finished run — every redacted file already written — into
+            # "Redaction failed". The log is still returned in log_content.
+            results.log_path = None
 
         return results
 

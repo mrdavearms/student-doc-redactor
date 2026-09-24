@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (771 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (829 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 208 tests across 13 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 213 tests across 14 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -238,19 +238,19 @@ Added in `a699268`. Values in practice: `'regex'`, `'presidio'`, and `'manual'` 
 
 ### 5. DOB detection requires a label on the same line
 
-`_detect_dob()` only fires if a DOB label (DOB, Date of Birth, Born, etc.) appears on the same line as the date. Standalone dates are not flagged. Intentional.
+`_detect_dob()` only fires if a DOB label (DOB, Date of Birth, Born, etc.) appears on the same line as the date. Standalone dates are not flagged. Intentional. The Presidio `DateOfBirthRecognizer` follows the same per-LINE rule — it used to test the whole page for a label and then flag every date on it, so every assessment and review date on a report's front page became `[Date of birth]`. Both label lists are whole-word (`\bBorn\b`): "Osborne", "stubborn" and "Dobson" are not labels.
 
 ### 6. Student ID requires 3+ digits (not 1+)
 
 `STUDENT_ID_PATTERN = r'\b[A-Z]{3}\d{3,}\b'` — the `{3,}` is deliberate. `FEN12` should NOT match. `FEN123` should. Don't change to `\d+`.
 
-### 7. Name variations filter: min 3 chars, but always preserve `self.student_name`
+### 7. Two-letter names are real names, and they match CASE-SENSITIVELY
 
-```python
-variations = [v for v in variations if len(v) >= 3 or v == self.student_name]
-```
+Until September 2026 every name part under three characters was dropped — by the variation filter, the redactor (`_redact_text_search` returned early), the OCR matcher, both verifiers and the de-identify verifier, all consistently. So a student called "Jo Nguyen" had "Jo" readable in every output, and "Mei Li" had "Li" readable (including "Mr Li" and "Li's"). Li, Wu, Ng, Xu, Vo, Vu, Do, Le, Ho, Lu, Hu, Su, Yu, He, Ma and An are all common in Australian schools; the redactor and verifier skipped them together, so the run reported success.
 
-The `or v == self.student_name` guard is important for students with short names (e.g. "Jo"). Don't remove it.
+`MIN_NAME_LENGTH = 2` in `pii_detector.py` now governs the variation filter, and `match_flags(text)` / `redactor._is_case_sensitive_pii(text)` make any PII string of two characters or fewer match **exactly as written**: the surname "Do" never blacks out the verb "do", nor "He" the pronoun. Detection, `_redact_text_search` (+ `_is_whole_word_match`), the OCR matcher, `_pii_visible_in_text` (which now takes the ORIGINAL-case haystack and lowercases internally), `text_deidentifier._pattern_for` (an inline `(?-i:…)` group) and `/api/pii/manual` all agree on this rule. Change it in one place and the file quarantines itself. The one deliberate exception is `PseudonymMap.sanitise_custom_role`, which lowercases both sides: a label must not contain a name in any case. Trade-off accepted: a sentence-initial "Do not…" or "He is…" is offered as a match for a student surnamed Do or He, and the review screen lets the user untick it — a black box on a word beats a surname in every output.
+
+`generate_name_variations` also strips a leading title ("Mr John Bob" → "John Bob", "John"), understands "Smith, John", keeps lowercase particles in the surname ("van der Berg"), yields each half of a hyphenated name, adds "first last" for a three-token name ("Billy Robert Bob" → "Billy Bob"), and never emits a bare initial ("P." from "P. Raman"). User-entered parent and family names go through it too, so a parent referred to by first name is found without relying on NER.
 
 ### 8. Presidio is an optional dependency (but required in bundled app)
 
@@ -262,6 +262,8 @@ The `or v == self.student_name` guard is important for students with short names
 - `verify_redaction_ocr(pdf_path, texts)` — slow, renders at 300 DPI and OCRs. More thorough. Used for comprehensive post-redaction checks.
 
 Both verifiers use the module-level `_pii_visible_in_text()` whole-word check — never revert to substring matching, which falsely quarantined correctly-redacted files when a short name ('Ann') appeared inside an ordinary word ('Annual'). The helper splits PII on whitespace *and* hyphens so OCR variants like 'smith - jones' are still caught.
+
+**Straight and curly apostrophes are the same character everywhere.** Detection normalises the page text to `'` and reports "O'Brien"; Word writes "O’Brien" (U+2019) into the PDF, and that is what `search_for`, the OCR word list and the verifiers see. Before `_fold_apostrophes` (redactor) and `_any_apostrophe` (text_deidentifier), every O'Brien, O'Connor and D'Souza in a Word-authored report was reported as redacted with the surname still readable, then quarantined by the OCR verifier. `PIIDetector.__init__` normalises the entered names for the same reason. PyMuPDF's base-14 fonts cannot encode U+2019 (it renders as a middle dot), so a test of this needs an embedded TrueType font — see `tests/test_redactor.py::TestApostrophesAndQuotes`.
 
 ### 10. Metadata stripping happens inside `redact_pdf()`
 
@@ -290,6 +292,12 @@ The OCR redaction pipeline:
 5. Replace page content: `page.clean_contents()` → clear content streams → `page.insert_image()`
 
 OCR warnings are now **informational** (not error/skip signals). The audit log notes which pages used OCR redaction.
+
+### 11a. A selected text is redacted on EVERY page, not only where it was detected
+
+Detection is per page, and NER can tag "P. Raman" on page 2 while missing "Ms Priya Raman" on page 1. Verification (rightly) checks the whole document, so the per-page redaction that `redact_pdf` used to do left the name readable on page 1 and quarantined the file as UNVERIFIED — "0 of 1 documents redacted" with no way to succeed short of adding the item by hand. `redact_pdf` now searches every unique selected text on every text-layer page, and passes the full document-level item list to `_redact_ocr_page` (it always did to `_redact_embedded_images`). bbox-anchored items are still applied on their own page. Once the user has said a string is PII, it is PII wherever it appears. De-identification always worked document-wide, through the pseudonym map.
+
+Two more things in the same area: `_is_whole_word_match` accepts punctuation on BOTH sides of the word (PyMuPDF's word list keeps the quotes, so `("Joe")` is one word — a `startswith` check never matched it), and `_pad_redaction_rect` pads a search rect sideways but pulls it IN vertically. `search_for` returns the font's full line box, which at single spacing already overlaps the lines above and below; the old 1pt padding in every direction deleted letters from neighbouring lines. Header/footer zones on a text-layer page are multiplied by `page.derotation_matrix`: annotation rects are unrotated coordinates, `page.rect` is the displayed page, and on a `/Rotate 90` scan the unconverted zones blanked two vertical stripes of body text.
 
 ### 12. Every embedded image is OCR-scanned for PII (Stage 2)
 
@@ -483,9 +491,11 @@ Reports routinely name classmates and siblings. The naive merge rule ("this name
 
 `PseudonymMap.register_person()` merges only when the full names match or one full name appears in the other's `generate_name_variations()` output (so "S. Williams" is "Sarah Williams"). Shared tokens then resolve separately: a surname claimed by every claimant → `[Family name]`; a given name → the highest-priority claimant (Student > Parent > Family member > Person). Both are recorded in the key file's ambiguity notes.
 
-### 45. De-identify verification adds a fuzzy pass on OCR text
+### 45. De-identify verification adds a fuzzy pass on OCR text — as a WARNING
 
-In redaction a garbled OCR word only means a black box lands slightly off. In de-identify mode the OCR text **is** the deliverable, so "Bi11y" would ship readable. `fuzzy_leftovers()` re-checks OCR-sourced pages using `redactor.fuzzy_word_match` — the same rule as rule #32, lifted to module level precisely so the thresholds are stated once.
+In redaction a garbled OCR word only means a black box lands slightly off. In de-identify mode the OCR text **is** the deliverable, so "Bil1y" would ship readable. `fuzzy_leftovers()` re-checks OCR-sourced pages using `redactor.fuzzy_word_match` — the same rule as rule #32, lifted to module level precisely so the thresholds are stated once.
+
+Its hits go into `leftover_name_warnings` (shown on the completion screen), **not** into quarantine. Ordinary words sit one letter from common first names — "than"/Ethan, "grade"/Grace, "names"/James, "carry"/Harry, "peer"/Peter — so quarantining on a fuzzy hit set aside most scanned reports whose output was in fact clean. The pass also skips generic organisation and street words (`_FUZZY_GENERIC_TOKENS`: "Kew Primary School" must not flag every later "school") and exact single-token hits (whole-value visibility is `verify_deidentified`'s job). Exact leftovers still quarantine.
 
 Both verifiers strip the inserted labels first (`strip_labels`). Without that, a person genuinely named "Person" would see `[Person 1]` reported as their name still being visible and quarantine a correctly processed file.
 
@@ -564,6 +574,8 @@ Four things hold this together, and removing any one restores the trap:
 **The identity check is the load-bearing one, and it is not obvious why.** Without it the other three still fail, because they lose a race: uvicorn spends several seconds loading spaCy *before* it touches the port, so the orphan answers health long before our own process gets as far as `address already in use`. `backendReady` is therefore already true when the exit arrives, the exit takes the crashed-mid-session branch, and the user is told "Redaction Engine Stopped" on every launch until they reboot. Verified by force-quitting the packaged `.dmg` and relaunching — a dev-mode test cannot reach this, because dev and packaged spawn different interpreters.
 
 Do not "simplify" the exit handler back into a single unconditional dialog either — it races `waitForBackend` and reports the wrong cause.
+
+**Quitting must actually stop the backend.** `backendProcess.kill()` sends SIGTERM, and uvicorn's default response to that is to wait for in-flight requests — a redaction of a scanned folder runs for minutes — while still holding the port, so the next launch found "another copy". The spawn passes `--timeout-graceful-shutdown 3`, and `before-quit` prevents the default, waits for the child's `exit` (SIGKILL after 6s), then calls `app.quit()` again. The graceful route matters because it runs the backend's `atexit` cleanup of the converted-copy temp folder (rule #66).
 
 ### 56. Detection context carries markdown bold; the RENDERER strips it, never the detector
 
@@ -650,6 +662,11 @@ accident the `DO-NOT-UPLOAD` key filename exists to prevent (rule #42).
 `document_converter._conversion_dir()` returns a directory under the OS temp
 area, private to the backend process, cleared at the start of each conversion
 run (matching the old overwrite-in-place semantics) and removed via `atexit`.
+Each Word file converts into its own numbered sub-folder (`001/`, `002/`…):
+LibreOffice names the output after the source stem, so `Report.doc` and
+`Report.docx` in one folder both wrote `converted/Report.pdf` and the second
+silently replaced the first — one document never reached detection. Word's
+`~$Report.docx` lock files are skipped by the scan.
 `_remove_legacy_temp_dir()` deletes a `.temp_converted` found beside the
 documents — only this app ever creates that name.
 

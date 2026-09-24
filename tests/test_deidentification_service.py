@@ -328,7 +328,13 @@ class TestVerification:
             assert results.document_results[0].quarantine_path is None
             assert results.document_results[0].success
 
-    def test_ocr_misread_quarantines_the_file(self):
+    def test_ocr_misread_is_warned_about_not_quarantined(self):
+        """A near miss on OCR text is a warning to check, not a quarantine.
+
+        Ordinary words sit one letter from common names ("than"/Ethan,
+        "grade"/Grace, "names"/James), so quarantining on a fuzzy hit set
+        aside most scanned reports whose output was in fact clean.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             doc = Path(tmp) / "scan.pdf"
             _make_pdf(doc, ["placeholder"])
@@ -341,10 +347,27 @@ class TestVerification:
                          student_name="Sarah Williams", ocr_pages=[1])
             )
             doc_result = results.document_results[0]
-            assert not doc_result.success
-            assert doc_result.quarantine_path is not None
-            assert doc_result.quarantine_path.name.endswith(".UNVERIFIED.txt")
-            assert doc_result.verification_failures
+            assert doc_result.success
+            assert doc_result.quarantine_path is None
+            assert "Sarah Williams" in doc_result.leftover_name_warnings
+
+    def test_common_word_near_a_name_is_not_flagged_on_ocr_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "scan.pdf"
+            _make_pdf(doc, ["placeholder"])
+            page_text = "Ethan Smith did better than expected. The school reports well."
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Ethan Smith"), _match("Ethan"),
+                                    _match("Kew Primary School")], page_text,
+                         student_name="Ethan Smith", ocr_pages=[1])
+            )
+            doc_result = results.document_results[0]
+            assert doc_result.success
+            assert doc_result.quarantine_path is None
+            # "school" is a generic word: the organisation must not be flagged
+            # because the text mentions a school. ("than" is one letter from
+            # "Ethan", so the student's name may legitimately be warned about.)
+            assert "Kew Primary School" not in doc_result.leftover_name_warnings
 
 
 class TestImagesAndCancel:
@@ -503,15 +526,19 @@ class TestSourceFilenameNeverLeaks:
             assert "Bob" not in results.log_content
 
     def test_quarantine_log_entry_does_not_name_the_source(self):
+        from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
             doc = Path(tmp) / "Sarah Williams Report.pdf"
             _make_pdf(doc, ["placeholder"])
 
-            results = DeidentificationService().execute(
-                _request(tmp, doc, [_match("Sarah Williams")],
-                         "Sarnh Williams attended today.",
-                         student_name="Sarah Williams", ocr_pages=[1])
-            )
+            # Force an exact leftover so the document is quarantined.
+            with patch('src.services.deidentification_service.verify_deidentified',
+                       return_value=["Sarah Williams"]):
+                results = DeidentificationService().execute(
+                    _request(tmp, doc, [_match("Sarah Williams")],
+                             "Sarah Williams attended today.",
+                             student_name="Sarah Williams")
+                )
             assert results.document_results[0].quarantine_path is not None
             assert "Sarah" not in results.log_content
 
@@ -814,3 +841,62 @@ class TestFilenameFallback:
             )
             assert results.document_results[0].output_path.name == \
                 "Support Plan_deidentified.txt"
+
+
+class TestOneDocumentCannotSinkTheRun:
+
+    def test_a_failing_document_is_reported_and_the_key_file_still_written(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "a.pdf"
+            good = Path(tmp) / "b.pdf"
+            _make_pdf(bad, ["placeholder"])
+            _make_pdf(good, ["placeholder"])
+            text = "Billy Bob is in Year 3."
+            request = _request(tmp, good, [_match("Billy Bob")], text)
+            request.documents = [bad, good]
+            request.detected_pii[bad] = request.detected_pii[good]
+            request.user_selections[f"{bad}_0"] = True
+
+            real = DeidentificationService._process_document
+
+            def flaky(self, doc, **kwargs):
+                if doc == bad:
+                    raise PermissionError("locked")
+                return real(self, doc, **kwargs)
+
+            with patch.object(DeidentificationService, "_process_document", flaky):
+                results = DeidentificationService().execute(request)
+
+            assert len(results.document_results) == 2
+            assert results.document_results[0].error_message
+            assert results.document_results[1].success
+            assert results.key_file_path is not None and results.key_file_path.exists()
+            assert results.log_content
+
+    def test_read_only_source_folder_does_not_fail_the_run(self):
+        from unittest.mock import patch
+        from src.core.logger import RedactionLogger
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "report.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+            with patch.object(RedactionLogger, "save_log", side_effect=PermissionError("read-only")):
+                results = DeidentificationService().execute(
+                    _request(tmp, doc, [_match("Billy Bob")], text)
+                )
+            assert results.document_results[0].success
+            assert results.log_path is None
+            assert "Billy" not in results.log_content
+
+
+class TestNicknamesInFilenames:
+    def test_students_nickname_is_stripped_from_the_output_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "Joe Bloggs Report.pdf"
+            text = "Joseph Bloggs is in Year 3."
+            _make_pdf(doc, [text])
+            results = DeidentificationService().execute(
+                _request(tmp, doc, [_match("Joseph Bloggs")], text, student_name="Joseph Bloggs")
+            )
+            assert "Joe" not in results.document_results[0].output_path.name

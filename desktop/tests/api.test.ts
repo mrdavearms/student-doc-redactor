@@ -136,3 +136,13 @@ describe('api token header', () => {
     await expect(api.health()).rejects.toThrow('Invalid or missing API token');
   });
 });
+
+describe('error bodies', () => {
+  it('turns a validation-error list into readable text, not "[object Object]"', async () => {
+    vi.stubGlobal('fetch', async () => new Response(
+      JSON.stringify({ detail: [{ loc: ['body', 'student_name'], msg: 'field required' }] }),
+      { status: 422, headers: { 'Content-Type': 'application/json' } },
+    ));
+    await expect(api.health()).rejects.toThrow(/student_name/);
+  });
+});

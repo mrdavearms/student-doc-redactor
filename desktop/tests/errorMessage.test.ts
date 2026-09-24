@@ -44,8 +44,8 @@ describe('friendlyError', () => {
   });
 
   it('maps manual-PII text-too-short to a friendly message', () => {
-    expect(friendlyError(new Error('Manual PII text must be at least 3 characters.')))
-      .toMatch(/at least 3 characters/i);
+    expect(friendlyError(new Error('Manual PII text must be at least 2 characters.')))
+      .toMatch(/at least 2 characters/i);
   });
 
   it('maps manual-PII out-of-range page to a friendly message', () => {

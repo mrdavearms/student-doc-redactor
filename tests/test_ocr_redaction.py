@@ -282,18 +282,35 @@ class TestRedactOcrPageMatching:
 
     @patch('redactor.pytesseract.get_tesseract_version')
     @patch('redactor.pytesseract.image_to_data')
-    def test_short_text_under_3_chars_skipped(self, mock_ocr, mock_tess_ver):
-        """PII text shorter than 3 characters should be skipped."""
+    def test_single_char_text_skipped(self, mock_ocr, mock_tess_ver):
+        """PII text shorter than 2 characters should be skipped."""
         mock_tess_ver.return_value = '5.0'
         mock_ocr.return_value = self._mock_ocr_data([
-            ("Jo", 100, 50, 40, 30),
+            ("J", 100, 50, 40, 30),
             ("Smith", 160, 50, 90, 30),
         ])
 
         page, doc = _make_image_only_page()
-        items = [RedactionItem(page_num=1, text="Jo")]
+        items = [RedactionItem(page_num=1, text="J")]
         count = self.redactor._redact_ocr_page(page, items)
         assert count == 0
+        doc.close()
+
+    @patch('redactor.pytesseract.get_tesseract_version')
+    @patch('redactor.pytesseract.image_to_data')
+    def test_two_char_name_matched_as_written(self, mock_ocr, mock_tess_ver):
+        """'Jo' is covered on a scanned page; the lowercase word 'do' is not."""
+        mock_tess_ver.return_value = '5.0'
+        mock_ocr.return_value = self._mock_ocr_data([
+            ("Jo", 100, 50, 40, 30),
+            ("do", 160, 50, 40, 30),
+            ("Do", 220, 50, 40, 30),
+        ])
+
+        page, doc = _make_image_only_page()
+        count = self.redactor._redact_ocr_page(
+            page, [RedactionItem(page_num=1, text="Jo"), RedactionItem(page_num=1, text="Do")])
+        assert count == 2
         doc.close()
 
     @patch('redactor.pytesseract.get_tesseract_version')

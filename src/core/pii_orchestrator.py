@@ -11,7 +11,8 @@ import bisect
 import re
 import threading
 from typing import List, Optional
-from pii_detector import PIIDetector, PIIMatch, generate_name_variations
+from pii_detector import (PIIDetector, PIIMatch, generate_name_variations,
+                          MIN_NAME_LENGTH, match_flags)
 
 
 # The spaCy model behind Presidio takes ~0.6s to wire up per call. Load it
@@ -231,10 +232,16 @@ class PIIOrchestrator:
             for m in ner_matches:
                 if 'name' in m.category.lower() or m.category == 'Person':
                     m.confidence = max(m.confidence, 0.90)
-                    # Generate variations for NER-discovered names
-                    variations, _ = generate_name_variations(m.text, include_nicknames=False)
+                    # Generate variations for NER-discovered names. PDF
+                    # extraction hands NER run-together spans ("Sarah Williams
+                    # Classroom Teacher", separated by a run of spaces), and
+                    # taking the last word of THAT as a surname flagged every
+                    # "classroom" on the page. Cut the span at the first run of
+                    # two or more spaces before deriving anything from it.
+                    span = re.split(r'\s{2,}|\t', m.text.strip())[0]
+                    variations, _ = generate_name_variations(span, include_nicknames=False)
                     for var in variations:
-                        if var.lower() != m.text.lower() and len(var) >= 3:
+                        if var.lower() != m.text.lower() and len(var) >= MIN_NAME_LENGTH:
                             # A bare honorific is not a name (see _NAME_TITLES).
                             if var.lower() in _NAME_TITLES:
                                 continue
@@ -243,7 +250,7 @@ class PIIOrchestrator:
                             # with punctuation, like "J. Smith" or "S.W.")
                             var_pattern = (r'(?<![A-Za-z0-9])' + re.escape(var)
                                            + r'(?![A-Za-z0-9])')
-                            for match in re.finditer(var_pattern, text, re.IGNORECASE):
+                            for match in re.finditer(var_pattern, text, match_flags(var)):
                                 line_num = _line_number_at(newline_offsets, match.start())
                                 all_matches.append(PIIMatch(
                                     text=match.group(), category="Person name (NER variation)",

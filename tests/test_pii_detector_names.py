@@ -60,10 +60,36 @@ class TestNameVariations:
         detector = PIIDetector("Jane Smith")
         assert "JS" not in detector.name_variations
 
-    def test_two_char_first_name_filtered_out(self):
-        # "Jo" is only 2 chars; it should not appear in variations
+    def test_two_char_first_name_is_kept(self):
+        # "Jo" is a real name. It used to be dropped by a 3-character minimum,
+        # which left it visible in every output for a student called Jo.
         detector = PIIDetector("Jo Nguyen")
-        assert "Jo" not in detector.name_variations
+        assert "Jo" in detector.name_variations
+
+    def test_two_char_surname_is_kept(self):
+        # Li, Wu, Ng, Xu, Vo, Do, Le, Ho are common Australian surnames.
+        detector = PIIDetector("Mei Li")
+        assert "Li" in detector.name_variations
+
+    def test_two_char_name_matches_as_written_only(self):
+        # Two-letter names are matched case-SENSITIVELY so the surname "Do"
+        # is never confused with the verb "do", nor "He" with the pronoun.
+        detector = PIIDetector("Anh Do")
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "Do is a quiet student. We do our best. Do you agree?", 1)]
+        assert texts.count("Do") == 2
+        assert "do" not in texts
+
+    def test_two_char_name_detected_standalone(self):
+        detector = PIIDetector("Mei Li")
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "Li is settled. Mr Li attended. Li's work is neat. LI", 1)]
+        assert texts.count("Li") == 3
+        assert "LI" not in texts  # all-caps only matches via the full name
+
+    def test_single_letter_parts_are_still_dropped(self):
+        detector = PIIDetector("J Smith")
+        assert "J" not in detector.name_variations
 
     def test_short_student_name_itself_preserved(self):
         # Even if student_name is only 2 chars it must be preserved
@@ -79,9 +105,9 @@ class TestNameVariations:
         # For a single-word name the code branch for >= 2 parts is skipped,
         # so only the full name (and possibly nothing else) should be present.
         detector = PIIDetector("Aristotle")
-        # No variation should be shorter than 3 chars (unless it IS the full name)
+        # No variation should be shorter than 2 chars (unless it IS the full name)
         for v in detector.name_variations:
-            assert len(v) >= 3 or v == detector.student_name
+            assert len(v) >= 2 or v == detector.student_name
 
     def test_three_part_name_first_and_last_included(self):
         # For "Mary Jane Watson", first = "Mary", last = "Watson" should appear
@@ -90,11 +116,12 @@ class TestNameVariations:
         assert "Watson" in detector.name_variations
 
     def test_all_variations_meet_minimum_length(self):
-        # Every variation must be >= 3 chars OR be the literal student_name
+        # Every variation must be >= 2 chars OR be the literal student_name
         detector = PIIDetector("Al Smith")
+        assert "Al" in detector.name_variations
         for v in detector.name_variations:
-            assert len(v) >= 3 or v == detector.student_name, (
-                f"Variation {v!r} is shorter than 3 chars and is not the student name"
+            assert len(v) >= 2 or v == detector.student_name, (
+                f"Variation {v!r} is shorter than 2 chars and is not the student name"
             )
 
     def test_variations_are_strings(self):
@@ -571,3 +598,95 @@ class TestNicknameExpansion:
         text = "The Art program runs weekly"
         matches = [m for m in detector.detect_pii_in_text(text, 1) if m.text.lower() == "art"]
         assert len(matches) == 0
+
+
+from pii_detector import generate_name_variations
+
+
+class TestNamesAsTheyAreActuallyWritten:
+    """Variations for the ways names really appear in reports."""
+
+    def test_initials_forms_match_in_text(self):
+        # "Jane S." and "J.S." end in a full stop, which \b could not follow;
+        # they only ever matched when glued to the next word.
+        detector = PIIDetector("Jane Smith")
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "Report for Jane S. from Term 2. Student J.S. was seen. Student: J.S.", 1)]
+        assert "Jane S." in texts
+        assert texts.count("J.S.") == 2
+
+    def test_hyphenated_surname_halves_are_variations(self):
+        detector = PIIDetector("Sarah Smith-Jones")
+        assert "Smith" in detector.name_variations
+        assert "Jones" in detector.name_variations
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "Sarah Smith was seen. The Jones family attended.", 1)]
+        assert "Smith" in texts and "Jones" in texts
+
+    def test_surname_particles_are_part_of_the_surname(self):
+        variations = generate_name_variations("Jan van der Berg")[0]
+        assert "van der Berg" in variations
+        assert "Berg" in variations
+
+    def test_class_list_order_is_understood(self):
+        variations = generate_name_variations("Smith, John")[0]
+        assert "John Smith" in variations
+        assert "Smith" in variations
+        assert "Smith," not in variations
+
+    def test_middle_name_is_dropped_in_running_text(self):
+        # "Billy Robert Bob" is written "Billy Bob" in the body of a report.
+        variations = generate_name_variations("Billy Robert Bob")[0]
+        assert "Billy Bob" in variations
+
+    def test_leading_title_is_not_part_of_the_name(self):
+        variations = generate_name_variations("Mr John Bob")[0]
+        assert "John Bob" in variations
+        assert "John" in variations
+        assert "Mr" not in variations
+
+    def test_a_lone_initial_is_not_a_variation(self):
+        variations = generate_name_variations("P. Raman")[0]
+        assert "P." not in variations
+        assert "Raman" in variations
+
+    def test_parent_first_name_alone_is_found(self):
+        detector = PIIDetector("Billy Bob", parent_names=["Mr John Chen"])
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "John Chen attended. John said so. Mr John Chen signed.", 1)]
+        assert texts.count("John Chen") == 2
+        assert "John" in texts
+
+    def test_curly_apostrophe_in_the_entered_name_still_matches(self):
+        # A name pasted from Word carries U+2019; the page text is normalised
+        # to a straight quote before matching, so the name must be as well.
+        detector = PIIDetector("Siobhan O\u2019Brien")
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "Siobhan O\u2019Brien reads well. O'Brien too.", 1)]
+        assert texts.count("O'Brien") == 2
+
+    def test_parent_event_phrases_are_not_parents(self):
+        detector = PIIDetector("Billy Bob")
+        matches = detector.detect_pii_in_text(
+            "Parent Teacher Interview held in Term 2. Parent Information Evening attended. "
+            "Parent: Sarah Jones.", 1)
+        contextual = [m.text for m in matches if m.category == 'Parent/Guardian']
+        assert contextual == ["Sarah Jones"]
+
+    def test_calendar_abbreviations_are_not_nicknames(self):
+        detector = PIIDetector("Declan Murphy")
+        matches = detector.detect_pii_in_text("Assessed Dec 2024. Review due Mon.", 1)
+        assert not [m for m in matches if m.category == 'Student name (nickname)']
+
+    def test_relationship_words_typed_into_the_family_box_are_not_names(self):
+        detector = PIIDetector("Billy Bob", family_names=["The Smith family", "Nan Jean"])
+        texts = [m.text for m in detector.detect_pii_in_text(
+            "The class met the family. Nan Jean and Jean came. Smith too.", 1)]
+        assert "The" not in texts and "the" not in texts and "family" not in texts
+        assert "Nan" not in texts
+        assert "Jean" in texts and "Smith" in texts
+
+    def test_common_first_name_of_a_parent_is_still_found(self):
+        detector = PIIDetector("Billy Bob", parent_names=["Bob Smith"])
+        texts = [m.text for m in detector.detect_pii_in_text("Bob came in.", 1)]
+        assert "Bob" in texts

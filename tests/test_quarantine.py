@@ -222,3 +222,29 @@ class TestTwoDocumentsNeverShareAQuarantineFile:
             results = service.execute(_request(tmp_path, doc))
 
         assert len(list(results.redacted_folder.glob("*.UNVERIFIED.pdf"))) == 1
+
+
+def test_read_only_source_folder_does_not_fail_a_finished_redaction(tmp_path):
+    """Every redacted file is written before the audit log is saved; a
+    PermissionError on the log used to surface as 'Redaction failed'."""
+    from unittest.mock import patch
+    from src.core.logger import RedactionLogger
+    from src.services.redaction_service import RedactionService, RedactionRequest
+    from src.core.pii_detector import PIIMatch
+
+    src = tmp_path / "report.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "Billy Bob is in Year 3.", fontsize=12)
+    doc.save(str(src))
+    doc.close()
+    match = PIIMatch(text="Billy Bob", category="Student name", confidence=0.95,
+                     page_num=1, line_num=1, context="")
+    request = RedactionRequest(
+        folder_path=tmp_path, student_name="Billy Bob", documents=[src],
+        detected_pii={src: {"matches": [match], "text_data": {"ocr_pages": []}}},
+        user_selections={f"{src}_0": True},
+    )
+    with patch.object(RedactionLogger, "save_log", side_effect=PermissionError("read-only")):
+        results = RedactionService().execute(request)
+    assert results.document_results[0].success
+    assert results.log_path is None

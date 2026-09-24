@@ -77,7 +77,10 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    // FastAPI's own validation errors (422) carry `detail` as a list; as an
+    // Error message that stringified to "[object Object]".
+    const detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+    throw new Error(detail || `HTTP ${res.status}`);
   }
   return res.json();
 }
@@ -85,8 +88,12 @@ async function request<T>(
 export const api = {
   health: () => request<{ status: string; version: string }>('/api/health'),
 
+  // The first call loads the language model (several seconds on a school
+  // laptop with antivirus inspecting every file), so it must not be on the
+  // short timeout — that reported "engine isn't responding" while the
+  // backend was fine and still loading.
   checkDependencies: () =>
-    request<import('./types').DependencyStatus>('/api/dependencies/check'),
+    request<import('./types').DependencyStatus>('/api/dependencies/check', undefined, LONG_TIMEOUT_MS),
 
   validateFolder: (folder_path: string) =>
     request<{ exists: boolean; is_directory: boolean; path: string }>(

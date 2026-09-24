@@ -165,3 +165,23 @@ describe('reset', () => {
     await Promise.resolve();
   });
 });
+
+describe('store: detection fingerprint follows the input', () => {
+  it('"Clean another" drops the fingerprint with the pasted text', () => {
+    // The completion screen has asked the backend to forget the pasted text,
+    // so a matching fingerprint would skip detection against a cache that is
+    // gone and the final step would fail with a cache miss.
+    useStore.setState({ pastedText: 'Billy Bob was absent.', detectionParamsKey: 'fp-1' });
+    useStore.getState().clearPastedText();
+    expect(useStore.getState().pastedText).toBe('');
+    expect(useStore.getState().detectionParamsKey).toBe('');
+  });
+
+  it('changing the input mode drops the fingerprint; re-selecting the same mode keeps it', () => {
+    useStore.setState({ inputMode: 'folder', detectionParamsKey: 'fp-1' });
+    useStore.getState().setInputMode('folder');
+    expect(useStore.getState().detectionParamsKey).toBe('fp-1');
+    useStore.getState().setInputMode('paste');
+    expect(useStore.getState().detectionParamsKey).toBe('');
+  });
+});

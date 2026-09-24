@@ -199,3 +199,31 @@ class TestStudentNameRecognizer:
         # "JS" (2 chars) should be skipped
         texts = ["The JS library is great. Jane Smith is here."[r.start:r.end] for r in results]
         assert "JS" not in texts
+
+
+class TestDobLabelScope:
+    def test_label_only_covers_dates_on_its_own_line(self):
+        # A page mentioning "DOB" once must not turn every other date on it
+        # into a date of birth.
+        rec = DateOfBirthRecognizer()
+        text = "Student: Billy Bob\nDOB: 12/03/2015\n\nAssessment date: 14/05/2024\nReview: 3/6/2024"
+        results = _run_recognizer(rec, text)
+        assert [text[r.start:r.end] for r in results] == ["12/03/2015"]
+
+    def test_born_inside_another_word_is_not_a_label(self):
+        rec = DateOfBirthRecognizer()
+        results = _run_recognizer(rec, "Osborne Park Primary School report date: 12/03/2024")
+        assert results == []
+
+
+class TestAddressRecognizerScope:
+    def test_address_does_not_cross_a_line_break(self):
+        rec = AustralianAddressRecognizer()
+        text = ("Billy attended 3 sessions this term in the way\n"
+                "that was agreed with the NSW 2024 planning group.")
+        assert _run_recognizer(rec, text) == []
+
+    def test_lowercase_state_word_is_not_a_state(self):
+        rec = AustralianAddressRecognizer()
+        text = "2 adjustments are in place under the Disability Discrimination Act 1992."
+        assert _run_recognizer(rec, text) == []

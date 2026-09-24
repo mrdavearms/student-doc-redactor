@@ -427,3 +427,20 @@ class TestLineNumberResolutionMatchesOldFormula:
         newline_offsets = newline_offsets_for(text)
         for pos in range(len(text) + 1):
             assert _line_number_at(newline_offsets, pos) == _naive_line_number(text, pos)
+
+
+class TestRunTogetherSpans:
+    def test_variations_stop_at_a_run_of_spaces(self):
+        """PDF extraction hands NER "Sarah Williams        Classroom Teacher";
+        the surname must be Williams, not Classroom."""
+        orch = _orchestrator(require_ner=False)
+        orch.presidio_analyzer = object()  # pretend NER is on
+        span = PIIMatch(
+            text="Sarah Williams        Classroom", category="Person name (NER)",
+            confidence=0.9, page_num=1, line_num=1, context="", source="presidio",
+        )
+        orch._run_presidio = lambda text, page_num: [span]
+        text = "Sarah Williams        Classroom\nThe classroom was noisy. Williams agrees."
+        texts = {m.text for m in orch.detect_pii_in_text(text, 1)}
+        assert "Williams" in texts
+        assert "classroom" not in texts and "Classroom" not in texts

@@ -153,3 +153,30 @@ class TestZoneRedaction:
 
         os.unlink(str(pdf_path))
         os.unlink(str(output))
+
+
+class TestRotatedPages:
+    def test_zones_follow_the_displayed_page_on_a_rotated_page(self, tmp_path):
+        """Annotation rects are unrotated coordinates; page.rect is the page
+        as displayed. On a /Rotate 90 page the unconverted zones left the
+        letterhead alone and blanked two vertical stripes of body text."""
+        src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        for row in range(20):
+            for col in range(8):
+                page.insert_text((30 + col * 70, 40 + row * 40), f"w{row}c{col}", fontsize=9)
+        page.set_rotation(90)
+        displayed = {w[4]: fitz.Rect(w[:4]) * page.rotation_matrix
+                     for w in page.get_text("words")}
+        height = page.rect.height
+        doc.save(str(src))
+        doc.close()
+
+        ok, _ = PDFRedactor().redact_pdf(src, out, [RedactionItem(1, "zzz")],
+                                         redact_header_footer=True)
+        assert ok
+        kept = {w[4] for w in fitz.open(str(out))[0].get_text("words")}
+        for word, rect in displayed.items():
+            in_zone = rect.y0 < height * HEADER_ZONE_FRACTION or rect.y1 > height * (1 - FOOTER_ZONE_FRACTION)
+            assert (word not in kept) == in_zone, f"{word} displayed at {rect}"

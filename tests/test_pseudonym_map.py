@@ -560,3 +560,58 @@ class TestDiscoveredPeopleGetAValidRole:
         pmap = PseudonymMap(student_name="Billy Bob")
         pmap.register_person("Sarah Williams")
         assert pmap.assign_role("Sarah Williams", "teacher") == "[Teacher]"
+
+
+from pseudonym_map import FALLBACK_NAME_LABEL
+
+
+class TestIdentityEdgeCasesFromTheAudit:
+
+    def test_possessive_span_is_the_same_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.register_person("Billy Bob's") == STUDENT_LABEL
+        assert pmap.register_person("Sarah Williams.") == pmap.register_person("Sarah Williams")
+        assert [l for l, _ in pmap.key_entries() if l.startswith("[Other person")] == ["[Other person]"]
+
+    def test_first_name_seen_before_full_name_still_yields_family_name(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        pmap.register_person("Sarah")
+        pmap.register_person("Sarah Williams")
+        pmap.register_person("Tom Williams")
+        assert pmap.label_for("Williams", "Person name (NER)") == SHARED_SURNAME_LABEL
+
+    def test_another_persons_real_name_beats_the_students_nickname(self):
+        pmap = PseudonymMap(student_name="William Bob")
+        other = pmap.register_person("Liam Chen")
+        assert pmap.label_for("Liam", "Person name (NER)") == other
+        assert pmap.label_for("William", "Student name") == STUDENT_LABEL
+
+    def test_start_of_a_known_full_name_is_that_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Marcus Van Der Berg"])
+        assert pmap.register_person("Marcus Van") == pmap.label_for("Marcus Van Der Berg", "Parent/Guardian")
+        assert not [l for l, _ in pmap.key_entries() if l.startswith("[Other person")]
+
+    def test_student_with_a_middle_name_is_still_the_student(self):
+        pmap = PseudonymMap(student_name="Billy Robert Bob")
+        assert pmap.register_person("Billy Bob") == STUDENT_LABEL
+
+    def test_parent_entered_with_a_title_is_one_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob", parent_names=["Mr John Chen"])
+        parent = pmap.label_for("Mr John Chen", "Parent/Guardian (user-provided)")
+        assert pmap.register_person("John Chen") == parent
+        assert pmap.label_for("John", "Person name (NER variation)") == parent
+
+    def test_two_letter_first_name_is_the_student(self):
+        pmap = PseudonymMap(student_name="Jo Bloggs")
+        assert pmap.register_person("Jo") == STUDENT_LABEL
+
+    def test_custom_role_cannot_smuggle_a_two_letter_name(self):
+        pmap = PseudonymMap(student_name="Jo Bloggs")
+        assert pmap.sanitise_custom_role("Jo's mum") is None
+        # ("Joanne" is a formal form of the nickname Jo, so it is rightly rejected too.)
+        assert pmap.sanitise_custom_role("Sarah's colleague") is not None
+
+    def test_a_lone_initial_is_not_a_person(self):
+        pmap = PseudonymMap(student_name="Billy Bob")
+        assert pmap.register_person("P.") == FALLBACK_NAME_LABEL
+        assert not [l for l, _ in pmap.key_entries() if l.startswith("[Other person")]

@@ -64,16 +64,28 @@ class TestOCRVerification:
             assert len(failures) > 0
 
     @needs_tesseract
-    def test_short_strings_skipped_in_ocr_check(self):
-        """Strings shorter than 3 characters should be skipped to avoid false positives."""
+    def test_single_char_strings_skipped_in_ocr_check(self):
+        """Single characters are skipped to avoid false positives."""
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "input.pdf"
-            _create_pdf_with_text(src, "JS is here")
+            _create_pdf_with_text(src, "J is here")
 
             redactor = PDFRedactor()
-            # "JS" is only 2 chars — should be skipped by OCR verification
-            all_clean, failures = redactor.verify_redaction_ocr(src, ["JS"])
-            assert all_clean, "Short strings (< 3 chars) should be skipped"
+            all_clean, failures = redactor.verify_redaction_ocr(src, ["J"])
+            assert all_clean, "Single characters should be skipped"
+
+    @needs_tesseract
+    def test_two_char_name_checked_as_written(self):
+        """'Jo' left visible is a failure; the word 'do' is not the surname 'Do'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            _create_pdf_with_text(src, "Jo is here. We do our best.")
+
+            redactor = PDFRedactor()
+            all_clean, _ = redactor.verify_redaction_ocr(src, ["Jo"])
+            assert not all_clean
+            all_clean, _ = redactor.verify_redaction_ocr(src, ["Do"])
+            assert all_clean
 
     @needs_tesseract
     def test_multiple_redacted_texts_all_verified(self):

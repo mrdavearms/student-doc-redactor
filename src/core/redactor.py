@@ -153,7 +153,47 @@ def fuzzy_word_match(ocr_clean: str, pii_lower: str) -> bool:
 _PII_SEP = r"[\s\-‐-―]"
 
 
-def _pii_visible_in_text(pii_text: str, haystack_lower: str) -> bool:
+def _fold_apostrophes(text: str) -> str:
+    """
+    Straight and curly apostrophes are the same character for matching.
+
+    Detection normalises the page text to straight quotes before matching, so
+    it reports "O'Brien" — but Word writes "O’Brien" (U+2019) into the PDF, and
+    that is what search_for, the OCR word list and the verifiers see. Without
+    folding, every O'Brien, O'Connor and D'Souza in a Word-authored report was
+    reported as redacted while the surname stayed readable, and then
+    quarantined by the OCR verifier (which reads the glyph back as ASCII).
+    """
+    return text.replace('\u2019', "'").replace('\u2018', "'")
+
+
+def _pad_redaction_rect(rect: fitz.Rect) -> fitz.Rect:
+    """
+    Pad a text search rect sideways, and pull it IN vertically.
+
+    search_for returns the font's full line box, which at single spacing
+    already overlaps the boxes of the lines above and below. Padding it by a
+    point in every direction made apply_redactions delete letters from those
+    neighbouring lines ("Her reading is at level 22." became "Her rea" /
+    "at level 22."). Shrinking the box by up to 2pt top and bottom still covers
+    the name's own glyphs — they fill most of the box — but no longer reaches
+    into the next line.
+    """
+    dy = min(2.0, rect.height * 0.2)
+    return fitz.Rect(rect.x0 - 1, rect.y0 + dy, rect.x1 + 1, rect.y1 - dy)
+
+
+def _is_case_sensitive_pii(pii_text: str) -> bool:
+    """
+    Two-letter PII ("Do", "Li", "Jo") must match exactly as written, so the
+    surname Do is never confused with the verb "do". Mirrors
+    pii_detector.match_flags — detection, redaction and verification must all
+    agree on this or a correctly redacted file quarantines itself.
+    """
+    return len(pii_text.strip()) <= 2
+
+
+def _pii_visible_in_text(pii_text: str, haystack: str) -> bool:
     """
     Whole-word visibility check used by both verification paths.
 
@@ -166,9 +206,17 @@ def _pii_visible_in_text(pii_text: str, haystack_lower: str) -> bool:
 
     Args:
         pii_text: The redacted PII string (any case).
-        haystack_lower: The text to search, ALREADY lowercased by the caller.
+        haystack: The text to search, in its ORIGINAL case. Matching is
+            case-insensitive except for two-letter PII (see
+            _is_case_sensitive_pii), which is why the caller must not
+            lowercase it first.
     """
-    tokens = [re.escape(t) for t in re.split(_PII_SEP + r"+", pii_text.lower()) if t]
+    pii = _fold_apostrophes(pii_text.strip())
+    haystack = _fold_apostrophes(haystack)
+    if not _is_case_sensitive_pii(pii):
+        pii = pii.lower()
+        haystack = haystack.lower()
+    tokens = [re.escape(t) for t in re.split(_PII_SEP + r"+", pii) if t]
     if not tokens:
         return False
     pattern = (
@@ -176,7 +224,7 @@ def _pii_visible_in_text(pii_text: str, haystack_lower: str) -> bool:
         + (_PII_SEP + r"*").join(tokens)
         + r"(?:['’]s)?(?![A-Za-z0-9])"
     )
-    return re.search(pattern, haystack_lower) is not None
+    return re.search(pattern, haystack) is not None
 
 
 class PDFRedactor:
@@ -209,24 +257,42 @@ class PDFRedactor:
                 for page in doc:
                     self._redact_zones(page)
 
-            # Group redactions by page for efficiency
-            redactions_by_page = {}
+            # Every selected text is redacted on EVERY page, not only the page
+            # it was detected on. Detection is per page, and the NER engine
+            # can tag "P. Raman" on page 2 while missing "Ms Priya Raman" on
+            # page 1 — but verification (rightly) checks the whole document,
+            # so a per-page redaction quarantined the file as UNVERIFIED with
+            # the name still readable on page 1. Once the user has said a
+            # string is PII, it is PII wherever it appears. bbox-anchored items
+            # (precise coordinates) are still applied on their own page.
+            pages_with_items = set()
+            bbox_items_by_page: Dict[int, List[RedactionItem]] = {}
+            search_texts: List[str] = []
+            seen_texts = set()
             for item in redaction_items:
-                if item.page_num not in redactions_by_page:
-                    redactions_by_page[item.page_num] = []
-                redactions_by_page[item.page_num].append(item)
+                pages_with_items.add(item.page_num)
+                if item.bbox:
+                    bbox_items_by_page.setdefault(item.page_num, []).append(item)
+                text = item.text.strip()
+                if text and text.lower() not in seen_texts:
+                    seen_texts.add(text.lower())
+                    search_texts.append(text)
 
-            # Apply redactions page by page
             ocr_redacted_count = 0
             image_redacted_count = 0
-            all_redacted_texts = set()
+            all_redacted_texts = set(item.text for item in redaction_items)
             ocr_handled_pages = set()
-            for page_num, items in redactions_by_page.items():
-                page = doc[page_num - 1]  # Convert to 0-indexed
+            for page in (doc if redaction_items else []):
+                page_num = page.number + 1
 
                 if self._is_image_only_page(page):
+                    # Image-only pages with no detections are covered by the
+                    # Stage 2 embedded-image scan below, with the same full
+                    # item list — no need to rasterise them here.
+                    if page_num not in pages_with_items:
+                        continue
                     # Image-only page: render → OCR → draw black rects on image → replace page
-                    ocr_hits = self._redact_ocr_page(page, items)
+                    ocr_hits = self._redact_ocr_page(page, redaction_items)
                     ocr_redacted_count += ocr_hits
                     # This page's whole content was just rendered and OCR'd at
                     # 300 DPI — Stage 2 would only re-OCR the same pixels.
@@ -234,19 +300,16 @@ class PDFRedactor:
                     # No apply_redactions needed — _redact_ocr_page replaces the page image directly
                 else:
                     # Text-layer page: standard redaction
-                    for item in items:
-                        if item.bbox:
-                            # We have precise coordinates - use them
-                            self._redact_bbox(page, item.bbox)
-                        else:
-                            # Search for text and redact all instances
-                            self._redact_text_search(page, item.text)
+                    for item in bbox_items_by_page.get(page_num, []):
+                        # We have precise coordinates - use them
+                        self._redact_bbox(page, item.bbox)
+                    for text in search_texts:
+                        # Search for text and redact all instances
+                        self._redact_text_search(page, text)
 
-                    # Apply all redactions on this page
+                    # Apply all redactions on this page (a no-op when the
+                    # searches found nothing here)
                     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-
-                # Collect all redacted texts for cross-page cleanup
-                all_redacted_texts.update(item.text for item in items)
 
             # ── Stage 2: Embedded-image OCR scan ──
             # Runs on EVERY page with the full document-level item list, so an
@@ -318,9 +381,7 @@ class PDFRedactor:
             bbox: Bounding box coordinates (x0, y0, x1, y1)
         """
         # Create redaction annotation
-        rect = fitz.Rect(bbox)
-        # Add a bit of padding to ensure complete coverage
-        rect = rect + (-1, -1, 1, 1)
+        rect = _pad_redaction_rect(fitz.Rect(bbox))
         page.add_redact_annot(rect, fill=(0, 0, 0))  # Black fill
 
     def _redact_text_search(self, page: fitz.Page, text: str):
@@ -329,12 +390,22 @@ class PDFRedactor:
 
         For texts ≤ 6 characters, each match rect is verified against the page
         word list to avoid partial-word erasure (e.g. 'Ann' inside 'Annual').
-        Texts shorter than 3 characters are skipped entirely.
+        Two-letter texts must also match the page word's case exactly
+        (search_for itself is case-insensitive). Single characters are
+        skipped entirely.
         """
-        if len(text) < 3:
+        text = text.strip()
+        if len(text) < 2:
             return
 
-        text_instances = page.search_for(text, flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        # search_for is literal about apostrophes, so look for the name with
+        # straight AND curly ones — see _fold_apostrophes.
+        folded = _fold_apostrophes(text)
+        text_instances = []
+        for candidate in dict.fromkeys([text, folded, folded.replace("'", '\u2019')]):
+            text_instances.extend(
+                page.search_for(candidate, flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            )
         if not text_instances:
             return
 
@@ -343,10 +414,10 @@ class PDFRedactor:
             word_rects = [(fitz.Rect(w[:4]), w[4]) for w in page.get_text("words")]
             for rect in text_instances:
                 if self._is_whole_word_match(rect, text, word_rects):
-                    page.add_redact_annot(rect + (-1, -1, 1, 1), fill=(0, 0, 0))
+                    page.add_redact_annot(_pad_redaction_rect(rect), fill=(0, 0, 0))
         else:
             for rect in text_instances:
-                page.add_redact_annot(rect + (-1, -1, 1, 1), fill=(0, 0, 0))
+                page.add_redact_annot(_pad_redaction_rect(rect), fill=(0, 0, 0))
 
     def _is_whole_word_match(
         self,
@@ -356,18 +427,26 @@ class PDFRedactor:
     ) -> bool:
         """
         Return True if match_rect substantially overlaps a word whose text
-        equals `text` (case-insensitive), optionally followed by a possessive
-        suffix ('s / 's) or non-alphanumeric characters (punctuation like ",").
+        equals `text` (case-insensitive, except two-letter texts which must
+        match as written — see _is_case_sensitive_pii), optionally wrapped in
+        punctuation — quotes, brackets, a trailing comma — or followed by a
+        possessive suffix ('s / 's). PyMuPDF's word list keeps the quotes:
+        Joseph ("Joe") Bloggs yields the word ("Joe"), and a plain
+        startswith check never matched it, so the nickname stayed readable and
+        the document was quarantined.
         """
-        needle = text.strip().lower()
+        needle = _fold_apostrophes(text.strip())
+        exact_case = _is_case_sensitive_pii(needle)
+        if not exact_case:
+            needle = needle.lower()
+        word_pattern = re.compile(
+            r"[^a-zA-Z0-9]*" + re.escape(needle) + r"(?:'s)?[^a-zA-Z0-9]*"
+        )
         for word_rect, word_text in word_rects:
-            word_clean = word_text.strip().lower()
-            if not word_clean.startswith(needle):
-                continue
-            remainder = word_clean[len(needle):]
-            # Exact match, possessive suffix (optionally followed by punctuation),
-            # or purely non-alphanumeric tail (e.g. trailing comma/period).
-            if re.fullmatch(r"(?:['\u2019]s)?[^a-zA-Z0-9]*", remainder):
+            word_clean = _fold_apostrophes(word_text.strip())
+            if not exact_case:
+                word_clean = word_clean.lower()
+            if word_pattern.fullmatch(word_clean):
                 intersection = match_rect & word_rect
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
                     return True
@@ -426,9 +505,14 @@ class PDFRedactor:
                 doc.update_stream(xref, b"")
             page.insert_image(page.rect, stream=img_bytes.read(), overlay=True)
         else:
-            # Text-layer path — PyMuPDF redaction annotations
-            header_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, header_y)
-            footer_rect = fitz.Rect(rect.x0, footer_y, rect.x1, rect.y1)
+            # Text-layer path — PyMuPDF redaction annotations.
+            # page.rect is the page as displayed, but annotation rects are in
+            # UNROTATED coordinates. On a /Rotate 90 page (what photocopiers
+            # emit for landscape scans with a text layer) the unconverted zones
+            # left the letterhead alone and blanked two vertical stripes of
+            # body text instead. derotation_matrix maps displayed → unrotated.
+            header_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, header_y) * page.derotation_matrix
+            footer_rect = fitz.Rect(rect.x0, footer_y, rect.x1, rect.y1) * page.derotation_matrix
 
             page.add_redact_annot(header_rect, fill=(0, 0, 0))
             page.add_redact_annot(footer_rect, fill=(0, 0, 0))
@@ -474,16 +558,19 @@ class PDFRedactor:
 
         for item in items:
             pii_text = item.text.strip()
-            if len(pii_text) < 3:
+            if len(pii_text) < 2:
                 continue
 
-            pii_lower = pii_text.lower()
+            # Two-letter PII keeps its case ("Do" the surname, not "do"), so
+            # the OCR word is compared as written too — see _is_case_sensitive_pii.
+            exact_case = _is_case_sensitive_pii(pii_text)
+            pii_lower = _fold_apostrophes(pii_text if exact_case else pii_text.lower())
             pii_words = pii_lower.split()
 
             if len(pii_words) == 1:
                 # Single-word PII: match individual OCR words
                 for ocr_word, pixel_bbox in ocr_words:
-                    ocr_lower = ocr_word.lower()
+                    ocr_lower = _fold_apostrophes(ocr_word if exact_case else ocr_word.lower())
                     # Preserve curly apostrophes in cleaned form
                     ocr_clean = re.sub(r"[^\w'\u2019]", '', ocr_lower)
                     if (
@@ -507,7 +594,7 @@ class PDFRedactor:
                     match = True
                     for wi, pii_w in enumerate(pii_words):
                         ocr_w = ocr_words[start_idx + wi][0]
-                        ocr_clean = re.sub(r"[^\w']", '', ocr_w.lower())
+                        ocr_clean = re.sub(r"[^\w']", '', _fold_apostrophes(ocr_w.lower()))
                         if (
                             ocr_clean != pii_w
                             and ocr_clean.rstrip(".,;:!?") != pii_w
@@ -925,7 +1012,7 @@ class PDFRedactor:
 
             # Check if the text still appears (whole-word — substring checks
             # false-flagged short names inside longer words, e.g. Ann/Annual)
-            if _pii_visible_in_text(original_text, all_text.lower()):
+            if _pii_visible_in_text(original_text, all_text):
                 return False, f"Text still found in document: {original_text}"
             else:
                 return True, "Text successfully redacted"
@@ -1012,11 +1099,11 @@ class PDFRedactor:
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
 
                 # OCR the rendered image
-                ocr_text = pytesseract.image_to_string(img).lower()
+                ocr_text = pytesseract.image_to_string(img)
 
                 # Check each redacted string (whole-word — see _pii_visible_in_text)
                 for text in redacted_texts:
-                    if len(text) >= 3 and _pii_visible_in_text(text, ocr_text):
+                    if len(text.strip()) >= 2 and _pii_visible_in_text(text, ocr_text):
                         failures.append(
                             f"Page {page_idx + 1}: '{text}' still visible after redaction"
                         )

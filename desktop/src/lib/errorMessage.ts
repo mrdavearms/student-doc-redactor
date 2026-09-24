@@ -14,7 +14,7 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/no cached detection data/i, "The detection step needs to run again. Please go back one step and try again."],
   [/newer scan has already started/i, "Another scan started after this one, so these results couldn't be used. Please try again."],
   [/cannot open pdf/i, "One of the PDFs couldn't be read. It may be corrupted or password-protected."],
-  [/manual pii text must be at least 3 characters/i, "That's too short to redact reliably — please enter at least 3 characters."],
+  [/manual pii text must be at least \d characters/i, "That's too short to redact reliably — please enter at least 2 characters."],
   [/does not exist in this document/i, "That document doesn't have that many pages. Check the page number and try again."],
   [/page \d+ out of range/i, "Couldn't load that page from the PDF."],
   [/no text was provided/i, "Paste some text before continuing."],

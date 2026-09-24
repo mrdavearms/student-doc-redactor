@@ -34,12 +34,20 @@ export default function ConversionStatus() {
     api.checkDependencies().then(setDeps).catch((e) => setError(friendlyError(e)));
   }, [setError]);
 
+  // Leaving this screen (the sidebar's "change pathway" link stays live
+  // during detection) must cancel the detection, or its late result would
+  // still be written to the store and navigate the user away from wherever
+  // they went — same contract as TextScan.
+  useEffect(() => {
+    return abortDetection;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Process the folder (or the single document) on mount, if not already done
   useEffect(() => {
     // Reprocess when the input changed since these results were produced.
     if (!deps) return;
     if (conversionResults && conversionFolderPath === sourceKey) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing, out of this task's scope
     setProcessing(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
