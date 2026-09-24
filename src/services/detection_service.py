@@ -79,8 +79,15 @@ class DetectionService:
 
                 pii_matches = []
                 for page_num, page_data in text_data['pages'].items():
+                    # Text OCR'd from images embedded in a native page is
+                    # scanned after the page's own text, so a name that only
+                    # exists inside a pasted screenshot is still offered.
+                    text = page_data['text']
+                    image_text = page_data.get('image_text', '')
+                    if image_text:
+                        text = text.rstrip() + '\n' + image_text
                     matches = self._orchestrator.detect_pii_in_text(
-                        page_data['text'], page_num
+                        text, page_num
                     )
                     pii_matches.extend(matches)
             except Exception as e:

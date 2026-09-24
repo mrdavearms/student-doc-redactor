@@ -33,6 +33,10 @@ class TextExtractor:
         if tessdata_path:
             os.environ.setdefault("TESSDATA_PREFIX", tessdata_path)
         self.tesseract_available = self._check_tesseract()
+        # OCR text per image xref for the document being extracted. A
+        # Word-converted PDF references one logo image from every page; without
+        # this it is OCR'd once per page instead of once per document.
+        self._image_ocr_cache: Dict[int, str] = {}
 
     def _check_tesseract(self) -> bool:
         """Check if Tesseract is installed and accessible"""
@@ -58,6 +62,7 @@ class TextExtractor:
                         'method': 'native' or 'ocr',
                         'confidence': float (for OCR),
                         'blocks': List[Dict]  # Text blocks with coordinates
+                        'image_text': str  # OCR of images embedded in a native page
                     }
                 },
                 'total_pages': int,
@@ -69,6 +74,7 @@ class TextExtractor:
             'total_pages': 0,
             'ocr_pages': []
         }
+        self._image_ocr_cache = {}
 
         try:
             with fitz.open(str(pdf_path)) as doc:
@@ -115,7 +121,13 @@ class TextExtractor:
                 'text': text,
                 'method': 'native',
                 'confidence': 1.0,
-                'blocks': self._format_blocks(blocks, page_num)
+                'blocks': self._format_blocks(blocks, page_num),
+                # A screenshot pasted into a report carries names, phone
+                # numbers and emails the text layer never sees. Kept SEPARATE
+                # from 'text': detection reads both, but the de-identified
+                # output is rebuilt from the page's own text and must not
+                # pick up position-less OCR noise via the cached-text fallback.
+                'image_text': self._ocr_embedded_images(page),
             }
 
         # Fallback to OCR
@@ -157,6 +169,42 @@ class TextExtractor:
             pass  # Page has no widgets or widget API unavailable
         return "\n".join(values)
 
+    def _ocr_embedded_images(self, page: fitz.Page) -> str:
+        """
+        OCR every image embedded in a text-layer page, newline-joined.
+
+        Same source pixels the redactor's Stage 2 (_redact_embedded_images)
+        OCRs when blacking an item out, so what detection offers is what
+        redaction can find. Cached per xref for the document. Images that
+        cannot be decoded, and OCR failures, contribute nothing — the page's
+        own text is unaffected.
+        """
+        if not self.tesseract_available:
+            return ""
+        try:
+            images = page.get_images(full=True)
+        except Exception:
+            return ""
+        if not images:
+            return ""
+        doc = page.parent
+        found = []
+        for img_info in images:
+            xref = img_info[0]
+            if xref not in self._image_ocr_cache:
+                text = ""
+                try:
+                    img_dict = doc.extract_image(xref)
+                    if img_dict and img_dict.get('image'):
+                        pil_img = Image.open(io.BytesIO(img_dict['image'])).convert("RGB")
+                        text, _ = self._ocr_image(pil_img)
+                except Exception:
+                    text = ""
+                self._image_ocr_cache[xref] = text.strip()
+            if self._image_ocr_cache[xref]:
+                found.append(self._image_ocr_cache[xref])
+        return "\n".join(found)
+
     def _ocr_page(self, page: fitz.Page) -> Tuple[str, float]:
         """
         Perform OCR on a page
@@ -171,7 +219,14 @@ class TextExtractor:
             # Convert page to image
             pix = page.get_pixmap(dpi=300)  # High DPI for better OCR
             img = Image.open(io.BytesIO(pix.tobytes()))
+            return self._ocr_image(img)
+        except Exception as e:
+            print(f"OCR error: {str(e)}")
+            return "", 0.0
 
+    def _ocr_image(self, img: Image.Image) -> Tuple[str, float]:
+        """OCR a PIL image, preserving line structure. Returns (text, confidence)."""
+        try:
             # Run OCR
             ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
 
