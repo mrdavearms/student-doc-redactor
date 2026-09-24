@@ -66,12 +66,14 @@ FALLBACK_LABEL = '[redacted]'
 
 # Owner priority. When a given name is shared by several people, the bare first
 # name resolves to the highest-priority claimant — a lone first name in a school
-# report overwhelmingly means the subject student.
+# report overwhelmingly means the subject student. A discovered person outranks
+# an organisation: "Smith Family Practice" plus "Dr Jane Smith" must leave the
+# bare "Smith" as the doctor, not turn it into [Organisation].
 _PRIORITY_STUDENT = 0
 _PRIORITY_PARENT = 1
 _PRIORITY_FAMILY = 2
-_PRIORITY_ORG = 3
-_PRIORITY_PERSON = 4
+_PRIORITY_PERSON = 3
+_PRIORITY_ORG = 4
 
 # Words that must not become standalone organisation variations. Mirrors the
 # generic-word filter in PIIDetector._detect_organisation_names.

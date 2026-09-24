@@ -580,6 +580,13 @@ class TestIdentityEdgeCasesFromTheAudit:
         pmap.register_person("Tom Williams")
         assert pmap.label_for("Williams", "Person name (NER)") == SHARED_SURNAME_LABEL
 
+    def test_detected_persons_surname_beats_an_organisation_sharing_it(self):
+        pmap = PseudonymMap(student_name="Billy Bob",
+                            organisation_names=["Smith Family Practice"])
+        doctor = pmap.register_person("Dr Jane Smith")
+        assert pmap.label_for("Smith", "Person name (NER)") == doctor
+        assert pmap.label_for("Smith Family Practice", "Organisation name") == "[Organisation]"
+
     def test_another_persons_real_name_beats_the_students_nickname(self):
         pmap = PseudonymMap(student_name="William Bob")
         other = pmap.register_person("Liam Chen")
