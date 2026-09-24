@@ -29,6 +29,29 @@ import fitz  # PyMuPDF
 _TEMP_ROOT: Path | None = None
 
 
+def _temp_root() -> Path:
+    """This backend process's private temp directory, created on first use."""
+    global _TEMP_ROOT
+    if _TEMP_ROOT is None:
+        _TEMP_ROOT = Path(tempfile.mkdtemp(prefix="redaction-tool-"))
+        atexit.register(shutil.rmtree, _TEMP_ROOT, True)
+    return _TEMP_ROOT
+
+
+def _profile_dir() -> Path:
+    """
+    A LibreOffice user profile private to this process.
+
+    Without -env:UserInstallation, soffice hands a headless job to any
+    LibreOffice window the user already has open and exits 0 with whatever
+    that window did. A good document still converts that way (verified on
+    LibreOffice 26.8), but a damaged one exits 0 with no PDF and NO error
+    text, so the user saw "Conversion failed:" and nothing after it. With its
+    own profile the job runs in its own process and reports its own error.
+    """
+    return _temp_root() / "lo-profile"
+
+
 def _conversion_dir() -> Path:
     """
     An empty directory for this conversion run's PDFs, outside the user's
@@ -38,12 +61,7 @@ def _conversion_dir() -> Path:
     is what the old in-folder behaviour did anyway by overwriting the same
     filenames.
     """
-    global _TEMP_ROOT
-    if _TEMP_ROOT is None:
-        _TEMP_ROOT = Path(tempfile.mkdtemp(prefix="redaction-tool-"))
-        atexit.register(shutil.rmtree, _TEMP_ROOT, True)
-
-    converted = _TEMP_ROOT / "converted"
+    converted = _temp_root() / "converted"
     shutil.rmtree(converted, ignore_errors=True)
     converted.mkdir(parents=True, exist_ok=True)
     return converted
@@ -112,6 +130,7 @@ class DocumentConverter:
             result = subprocess.run(
                 [
                     self.soffice_path,
+                    f'-env:UserInstallation={_profile_dir().as_uri()}',
                     '--headless',
                     '--convert-to', 'pdf',
                     '--outdir', str(output_dir),
@@ -128,7 +147,10 @@ class DocumentConverter:
             if result.returncode == 0 and output_file.exists():
                 return True, "Conversion successful", output_file
             else:
-                error_msg = result.stderr if result.stderr else result.stdout
+                error_msg = (result.stderr or result.stdout or '').strip()
+                if not error_msg:
+                    error_msg = ("LibreOffice produced no PDF and gave no reason. "
+                                 "The file may be damaged or not a Word document.")
                 return False, f"Conversion failed: {error_msg}", None
 
         except subprocess.TimeoutExpired:
