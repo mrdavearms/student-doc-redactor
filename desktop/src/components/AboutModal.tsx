@@ -219,9 +219,9 @@ function TabHowToUse({ onShowWalkthrough }: { onShowWalkthrough: () => void }) {
         <h3 className="text-sm font-medium text-slate-700 mb-3">Getting Started</h3>
         <div className="space-y-3">
           {[
-            { icon: <FolderOpen size={14} />, step: '1', text: 'Select a folder containing student documents (PDFs and Word files) and enter the student\'s name.' },
+            { icon: <FolderOpen size={14} />, step: '1', text: 'Choose what to work on — one document, a whole folder of PDFs and Word files, or text you paste in — and enter the student\'s name.' },
             { icon: <Eye size={14} />, step: '2', text: 'Enter parent, family, and organisation names — the more you provide, the more thorough the detection.' },
-            { icon: <ShieldCheck size={14} />, step: '3', text: 'Review detected PII, accept or reject each item, then create your files in a new folder.' },
+            { icon: <ShieldCheck size={14} />, step: '3', text: 'Review what was found, untick anything that should stay, then create your redacted or de-identified copies.' },
           ].map((item) => (
             <div key={item.step} className="flex gap-3 items-start">
               <div className="w-6 h-6 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold shrink-0 mt-0.5">
