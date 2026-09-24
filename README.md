@@ -25,16 +25,18 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
-## What's New in v1.9.2
+## What's New in v1.9.4
 
-**A maintenance release — no new features, but several things that were quietly going wrong are now fixed.** This covers both v1.9.2 and v1.9.1. Two of them may affect work you have already done.
+**This covers v1.9.3 and v1.9.4.** One new ability, one fix that matters if you use a Mac, and a long list of accuracy improvements from a full audit of the detection and redaction code.
 
-- **Some documents could be skipped without the app saying so — Mac only.** If a file's extension was in capitals (`REPORT.PDF` rather than `report.pdf` — how many school photocopiers name their output), the Mac version didn't see it when you pointed at a **folder**. An all-capitals folder at least said "No files available for processing"; a **mixed** folder quietly processed the lower-case files and said nothing about the rest. If you have redacted a folder on a Mac containing anything scanned, compare the file count in `redacted` against the folder you started from — if it's short, run that folder again on this version. Single documents and Windows were never affected.
-- **Word documents left an unredacted copy beside your originals.** Converting a Word file to PDF wrote that copy into a hidden `.temp_converted` folder next to your documents, and nothing deleted it. The folder is hidden on a Mac but visible on Windows, and school folders usually sit inside OneDrive — so unredacted copies were being synced to the cloud. Conversions now happen in your computer's temporary area, and any old `.temp_converted` folder is deleted the next time you process that folder.
-- **"Report this problem" could include a student's name.** The email strips file paths, but stopped at the first space — so with `Billy Bob Support Report.pdf`, the surname survived. It now removes the whole path.
-- **A document that failed its final safety check could keep a name saying it was redacted** (Windows), and **two documents could end up sharing one quarantine file**. Anything that fails verification is now always set aside as `.UNVERIFIED`, and every file keeps its own.
-- **A big folder of Word documents no longer reports "the redaction engine isn't responding"** while it is working normally, and **no black command window appears** beside the app on Windows.
-- **Starting over now clears the app's memory of the run**, so the last student's text isn't held while the app stays open.
+- **Text inside pictures is now found.** A screenshot of an email, or a pasted image with a name and phone number in it, used to be invisible to the checker on an ordinary page — nothing was offered for it, so nothing was removed. The tool now reads the text inside every picture and offers what it finds for redaction, just like text on the page. (In de-identify mode, pictures are still left out of the text file, as before — the app tells you when that happens.)
+- **Mac: OCR now works without Homebrew.** Versions up to v1.9.2 shipped a Tesseract that only ran on a Mac with a matching Homebrew install. On any other Mac the first-run check said *"Tesseract OCR: Not available"* and **every** redaction was set aside as `.UNVERIFIED` — "0 of 2 documents redacted". If you saw that on a Mac, this version fixes it. Nothing else needs installing.
+- **One unreadable file no longer stops the whole folder.** A damaged PDF used to halt the scan for every document in the folder. The others are now scanned, and the review screen tells you which file was skipped and why.
+- **A name is removed on every page, not only the page it was spotted on.** The final check always looked at the whole document, so a name found on page 2 but missed by the detector on page 1 was a guaranteed `.UNVERIFIED` with no way through. Once you approve a name, it goes wherever it appears.
+- **More names are caught.** Two-letter names ("Jo", and surnames like Li, Wu, Ng, Do) are now removed — they used to be skipped everywhere. "Mr John Bob", "Smith, John", "O'Brien" as Word writes it, initials like "J.S." and hyphenated names are all matched. Parent and family names you enter get the same treatment as the student's.
+- **Fewer wrong guesses.** "Parent Teacher Interview" is not a parent, "Discrimination Act 1992" is not an address, "Osborne" is not a date-of-birth label, and a misread word on a scanned page is now a warning to check rather than a reason to set the whole file aside.
+- **De-identify mode sorts out who is who more reliably.** A doctor and a practice sharing a surname ("Dr Jane Smith", "Smith Family Practice") no longer turns the bare "Smith" into `[Organisation]`. A first name seen before the full name, a possessive ("Sarah's"), and "Marcus Van" as the start of "Marcus Van Der Berg" all resolve to the right person.
+- **Small things that were annoying.** The app no longer opens as a blank white window — it says *Starting up…* while the language model loads. A `Report.docx` and a `Report.pdf` in the same folder get their own summary cards. The **Previous** button on the review screen no longer bounces back and clears what you typed into *Add a missed item*. A damaged Word file now gets a proper message instead of "Conversion failed:" with nothing after it. On a Mac, the window can be dragged by its top-left corner, copy and paste work in every text box, and the sidebar footer stays visible on a small screen.
 
 See the [Releases page](https://github.com/mrdavearms/student-doc-redactor/releases) for what changed in earlier versions.
 
@@ -255,7 +257,7 @@ This prevents accidental disclosure through file names in shared folders or emai
 
 ## How Redaction Works
 
-The tool uses **three different redaction strategies** depending on the type of content in each PDF page. This happens automatically — you don't need to choose.
+The tool uses **several redaction strategies** depending on the type of content in each PDF page. This happens automatically — you don't need to choose.
 
 ### Strategy 1 — Text Layer Redaction (standard PDFs)
 
@@ -266,7 +268,7 @@ Most PDFs have a searchable text layer. For these pages:
 3. It applies the redaction — **permanently destroying the underlying text**
 4. The redacted area becomes a solid black rectangle
 
-This uses PyMuPDF's `apply_redactions()` with `images=PDF_REDACT_IMAGE_NONE` — meaning images on text-layer pages are never touched, only the text.
+This uses PyMuPDF's `apply_redactions()` with `images=PDF_REDACT_IMAGE_NONE` — meaning the text-layer step leaves the page's images alone. Pictures are dealt with separately, in Strategy 2b below, so a full-page scan is never wiped out by a text redaction.
 
 ### Strategy 2 — OCR Image Redaction (scanned pages)
 
@@ -282,6 +284,17 @@ Scanned documents (where each page is a photograph or scan) have **no text layer
 5. The original page content is replaced with the redacted image
 
 > **Plain English:** The tool photographs the scanned page, reads the text in the photo using OCR, blacks out the PII words on the photo, then replaces the original page with the blacked-out version.
+
+### Strategy 2b — Pictures inside ordinary pages
+
+A report often has a picture on a page that also has normal text: a screenshot of an email, a pasted photo of a form, a school logo. The text inside those pictures is not in the text layer, so Strategy 1 cannot see it.
+
+1. During detection, every picture embedded in a text-layer page is read with OCR, and anything found is offered for approval alongside the page's own text
+2. During redaction, each picture is read again, approved items are blacked out on the picture itself, and the picture is put back in place
+
+The same picture on every page (a logo in a letterhead) is read once per document, not once per page.
+
+> **Plain English:** If someone pasted an email into the report as a picture, the names and phone numbers in that picture are found and blacked out too.
 
 ### Strategy 3 — Form Widget Deletion (interactive PDFs)
 
@@ -306,6 +319,7 @@ The tool checks **each page independently**:
 |-----------|-----------------|------------------|
 | Has text layer | `page.get_text("words")` returns words | Text-layer redaction (Strategy 1) |
 | Image-only (scan) | No text, but images present | OCR image redaction (Strategy 2) |
+| Text layer plus pictures | `page.get_images()` on a text-layer page | Text inside each picture is OCR'd and blacked out (Strategy 2b) |
 | Has form widgets | `page.widgets()` returns annotations | Widget deletion (Strategy 3, runs after 1 or 2) |
 | Has embedded images | `page.get_images()` returns image refs | Signature detection (Strategy 4, runs on all pages) |
 
@@ -316,7 +330,7 @@ A single PDF can have mixed pages — some with text, some scanned. Each page ge
 - Professional names (psychologists, teachers, doctors — unless they match the student name)
 - Assessment dates (unless explicitly labelled as a date of birth)
 - Technical language, scores, and diagnostic terms
-- Non-signature images (logos, charts, photos that don't match the signature heuristic)
+- Pictures themselves (logos, charts, photos) — only the text found inside them, and signatures, are blacked out; a photo of a face is not detected
 
 ### Confidence Scores
 
@@ -934,7 +948,7 @@ All 183 desktop tests should pass in a few seconds.
 | AI / NER | Microsoft Presidio + spaCy `en_core_web_lg` |
 | OCR | Tesseract + pytesseract |
 | Word conversion | LibreOffice headless |
-| Tests | pytest (750 tests) + Vitest (183 tests) |
+| Tests | pytest (844 tests) + Vitest (222 tests) |
 | Language | Python 3.13+ / TypeScript |
 
 ---
