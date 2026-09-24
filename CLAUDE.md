@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (829 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (844 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 213 tests across 14 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 222 tests across 17 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -194,6 +194,10 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/components/UpdateCard.tsx` | Prominent update panel on the landing screen (the banner is used on every other screen) |
 | `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **A path root swallows the rest of the line** — file paths in this app contain student names, and a token-bounded (`\S+`) match stopped at the first space and left the surname behind |
 | `desktop/src/lib/peopleRoles.ts` | `effectiveRoleMap` — the role map a run actually uses; see rule #54b |
+| `desktop/src/lib/documentSummary.ts` | Per-document selected-item counts for the completion cards, keyed by PATH — see rule #78 |
+| `desktop/src/lib/reviewNavigation.ts` | `previousDocWithMatches` — null when no earlier document has anything to review, so the button is hidden rather than bouncing (rule #79) |
+| `desktop/src/lib/failedDocuments.ts` | `allDocumentsFailed` / `failedDocumentsMessage` — the all-failed guard in `useDetection` (rule #77) |
+| `desktop/src/components/FailedDocumentsNotice.tsx` | Red notice listing documents detection could not read; rendered on `document_review` AND `no_pii_found` |
 | `desktop/src/lib/pasteResult.ts` | Module-level holder for the real-name half of a paste clean result (`holdSensitive`/`peekSensitive`/`clearSensitive`) — never the store, never React state; see rule #63 |
 | `desktop/src/types.ts` | `Screen` type, `WorkflowMode`, `SCREENS` array, API response interfaces |
 
@@ -302,6 +306,8 @@ Two more things in the same area: `_is_whole_word_match` accepts punctuation on 
 ### 12. Every embedded image is OCR-scanned for PII (Stage 2)
 
 After per-page redaction, `_redact_embedded_images()` runs on **every page of the document** with the full document-level redaction item list (not just pages that had detections). Pages already processed by `_redact_ocr_page()` are skipped (their pixels were just OCR'd at 300 DPI), OCR results are cached per image xref for the run, and `_check_tesseract()` is memoised on the instance — without those three mitigations a 50-page scanned report costs ~65s. It extracts each embedded image via `doc.extract_image(xref)`, OCRs it with pytesseract, blacks out PII matches in the image pixels using PIL, and replaces the original via `page.replace_image(xref, stream=png_bytes)`. This catches PII in email screenshots, scanned documents, and even small logos. No image is too small to scan — there is no size threshold.
+
+**Since v1.9.4 detection OCRs the same images** (rule #76), so a name that exists only inside a pasted screenshot is offered on the review screen. Stage 2 only ever blacked out SELECTED items, so before that nothing in a picture on a text-layer page was removed unless the same string also appeared in the text layer.
 
 ### 13. OCR word-matching logic is shared via `_match_and_redact_ocr_words()`
 
@@ -489,7 +495,7 @@ For the same reason the de-identify audit log records **labels, not values** —
 
 Reports routinely name classmates and siblings. The naive merge rule ("this name shares a variation with someone known, so it's them") folds classmate "Billy Chen" into student "Billy Bob" because both yield the variation "Billy". That is not a privacy failure but a **meaning** failure: the AI reading the output would attribute one child's behaviour to another.
 
-`PseudonymMap.register_person()` merges only when the full names match or one full name appears in the other's `generate_name_variations()` output (so "S. Williams" is "Sarah Williams"). Shared tokens then resolve separately: a surname claimed by every claimant → `[Family name]`; a given name → the highest-priority claimant (Student > Parent > Family member > Person). Both are recorded in the key file's ambiguity notes.
+`PseudonymMap.register_person()` merges only when the full names match or one full name appears in the other's `generate_name_variations()` output (so "S. Williams" is "Sarah Williams"). Shared tokens then resolve separately: a surname claimed by every claimant → `[Family name]`; a given name → the highest-priority claimant (Student > Parent > Family member > Person > Organisation). A discovered person outranks an organisation on purpose: "Smith Family Practice" plus "Dr Jane Smith" must leave the bare "Smith" as the doctor, not `[Organisation]` — it was the other way round until September 2026. Both are recorded in the key file's ambiguity notes.
 
 ### 45. De-identify verification adds a fuzzy pass on OCR text — as a WARNING
 
@@ -810,6 +816,30 @@ The row padding (`py-2`), connector margin (`my-0`), list gap (`space-y-0.5`) an
 
 `electron/menu.cjs` replaces Electron's default menu, whose View → Reload (Cmd+R / Ctrl+R) wiped the whole wizard and whose Help menu linked to electronjs.org. On macOS it keeps an app menu (About, Hide, Quit), **Edit** (Undo, Redo, Cut, Copy, Paste, Select All) and Window (Minimise, Zoom). The Edit menu looks optional and is not: on a Mac the clipboard shortcuts are delivered through menu items, so removing it silently breaks Cmd+C / Cmd+V in every text field, including the paste pathway's textarea. Windows handles those shortcuts in the text field itself, so the packaged Windows app has no menu at all (`Menu.setApplicationMenu(null)`). Toggle Developer Tools appears only when `!app.isPackaged`. `desktop/tests/menu.test.ts` asserts all of this.
 
+### 76. Images on text-layer pages are OCR'd for DETECTION, into a SEPARATE field
+
+A screenshot of an email pasted into a report carries names, phone numbers and email addresses the text layer never sees. Until v1.9.4 the extractor only OCR'd image-ONLY pages, so nothing inside a picture on an ordinary page was offered, and Stage 2 (rule #12) never removed it. `TextExtractor._ocr_embedded_images()` now OCRs every embedded image on a native page — the same source pixels Stage 2 reads, so what detection offers is what redaction can find — cached per xref for the document (`_image_ocr_cache`, reset in `extract_text_from_pdf`; a Word-converted PDF references one logo from every page).
+
+The text goes into `page_data['image_text']`, **not appended to `page_data['text']`**, and only `DetectionService.detect_all` reads it. Two reasons. The de-identified output is rebuilt from line geometry (rule #49) and falls back to the cached `text` on any formatting failure; position-less OCR noise from a photo must never reach that file through the fallback. And `/api/text/detect`, the paste pathway, never has the field — so consumers must `.get('image_text', '')`. De-identify already warns "N image(s) were not included in the text output" via `_count_embedded_images`; that stays true and needs no new wording. Verification is unaffected either way: a string absent from the output cannot fail "still visible", and there is no zero-replacement failure.
+
+Cost, measured on Apple Silicon: 30 pages with a logo on every page and one screenshot per file went from 0.1s to 1.8s (3.1s without the cache); a page-sized photo is ~2s. Windows laptops are slower. Tests: `tests/test_image_ocr_detection.py` (mocked `text_extractor.pytesseract.image_to_data`, plus one real-Tesseract end-to-end that detects, redacts and OCR-verifies a pasted screenshot).
+
+### 77. One unreadable document must not abort detection, and must never be silent
+
+`DetectionService.detect_all` used to raise on the first document that failed to extract, so one damaged PDF stopped every other document in the folder. It now catches per document and records `(path, reason)` in `DetectionResults.failed_documents`; `documents` holds ONLY the scanned ones, so the Streamlit path (`st.session_state.documents = detection_results.documents`) stays consistent and gets a `st.warning` per failure. `/api/pii/detect` passes the list through as `failed_documents: [{path, filename, reason}]` (schema default `[]`, so the paste endpoint needs no change).
+
+The renderer shows it in `FailedDocumentsNotice` on BOTH `document_review` and `no_pii_found` — the second because a run where every readable document is clean lands there, and "your folder appears clean" above a silently dropped file is the exact lie this rule exists to prevent. When NOTHING was scanned, `useDetection` sets an error and returns `'failed'` instead of navigating (`allDocumentsFailed`), so the wizard stays on the conversion screen. Failed documents are never sent to redact: `FinalConfirmation` builds the request from `detectionResults.documents`. The extraction error string maps to a friendly message in `errorMessage.ts` because the raw one contains the file path, which contains the student's name.
+
+### 78. `document_name` is not unique; key completion cards on `source_path`
+
+`Report.docx` converts to `<temp>/001/Report.pdf` (rule #66), so it and a native `Report.pdf` in the same folder share a `document_name`, and `Completion.tsx` keyed its cards, category counts and before/after previews on the filename — one card, one preview, for two documents. `DocumentResult.source_path` (dataclass → `DocumentResultResponse` → `types.ts`) carries the input path the request named, and everything on the completion screen keys on it (`lib/documentSummary.ts`). `DeidentifyDocumentResult` has no such field; `DeidentifyCompletion` only lists names in text and does not key cards.
+
+### 79. LibreOffice runs with a PRIVATE profile, and the failure message is never empty
+
+Without `-env:UserInstallation`, `soffice --headless` hands the job to any LibreOffice window the user has open and exits with whatever that window did. Investigated on LibreOffice 26.8 (24 Sep 2026): a good document still converts that way — the feared "exit 0, no PDF, reported as success" does NOT happen, because `convert_to_pdf` already checks `output_file.exists()`. What does happen: a damaged file exits 0 with no PDF and **no error text at all**, so the user saw "Conversion failed:" and nothing after it. `_profile_dir()` under the existing `_temp_root()` gives the job its own process, which reports its own error (rc 1, "source file could not be loaded"); the `as_uri()` form is what soffice wants on both platforms. An empty message still falls back to a sentence. `tests/test_document_converter.py` mocks `document_converter.subprocess.run` and asserts both. The profile is created once per backend process, so the first conversion of a session is the only one that pays for it.
+
+Also from the same session, too small for their own rule: `previousDocWithMatches` (`lib/reviewNavigation.ts`) returns null when no earlier document has matches and the review screen hides Previous — the old "one step back" fallback was immediately bounced forward by the auto-skip effect, remounting and wiping the manual-item form. And `App.tsx` renders the layout with a "Starting up…" placeholder rather than `null` until `/api/dependencies/check` answers; a blank window for the seconds the language model takes to load read as a crash.
+
 ---
 
 ## Session State Keys (Streamlit)
@@ -916,7 +946,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 771 tests total
+tests/                                # 844 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
@@ -947,7 +977,10 @@ tests/                                # 771 tests total
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing
-├── test_backend_redact.py            # 10 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape
+├── test_backend_redact.py            # 11 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape, source_path per document
+├── test_detection_failures.py        # 4 tests: one unreadable document is reported, not raised; API failed_documents contract; paste list empty
+├── test_image_ocr_detection.py       # 9 tests: image_text on native pages (mocked OCR, per-document xref cache), detection reads it, real-Tesseract end-to-end
+├── test_document_converter.py        # 3 tests: -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough
 ├── test_api_auth.py                  # 15 tests: API token middleware, CORS on 401, health instance_match identity
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
