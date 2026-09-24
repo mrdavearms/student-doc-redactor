@@ -9,6 +9,7 @@ import { friendlyError } from '../lib/errorMessage';
 import HelpTip from '../components/HelpTip';
 import { friendlyCategory, isPreselected } from '../lib/categories';
 import { splitContext } from '../lib/context';
+import { previousDocWithMatches } from '../lib/reviewNavigation';
 
 export default function DocumentReview() {
   const isDeidentify = useStore.getState().workflowMode === 'deidentify';
@@ -65,6 +66,9 @@ export default function DocumentReview() {
   const totalDocs = detectionResults.documents.length;
   const doc = detectionResults.documents[currentDocIndex];
   const matches = doc.matches;
+  // null when no earlier document has anything to review — the button is
+  // hidden rather than bouncing off the auto-skip (see lib/reviewNavigation).
+  const previousDoc = previousDocWithMatches(detectionResults.documents, currentDocIndex);
 
   const selectedCount = matches.filter(
     (_, idx) => userSelections[`${doc.path}_${idx}`]
@@ -296,17 +300,9 @@ export default function DocumentReview() {
       {/* Navigation */}
       <div className="flex justify-between pt-2">
         <div className="flex gap-2">
-          {currentDocIndex > 0 && (
+          {previousDoc !== null && (
             <button
-              onClick={() => {
-                for (let i = currentDocIndex - 1; i >= 0; i--) {
-                  if (detectionResults!.documents[i].matches.length > 0) {
-                    setCurrentDocIndex(i);
-                    return;
-                  }
-                }
-                setCurrentDocIndex(Math.max(0, currentDocIndex - 1));
-              }}
+              onClick={() => setCurrentDocIndex(previousDoc)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors btn-press"
             >
               <ArrowLeft size={16} /> Previous
