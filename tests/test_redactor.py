@@ -6,7 +6,7 @@ import fitz  # PyMuPDF
 from unittest.mock import patch
 from pathlib import Path
 import tempfile
-from redactor import PDFRedactor, RedactionItem
+from redactor import PDFRedactor, RedactionItem, _pii_visible_in_text
 
 
 def _make_page_with_text(text: str):
@@ -446,3 +446,56 @@ class TestRedactionRectPadding:
         assert "has made progress in maths." in text
         assert "enjoys reading with" in text
         assert "Her reading is at level 22." in text
+
+
+class TestCommonWordNames:
+    """A name that is also an ordinary word ("Young", "Long", "Patience")
+    matches in any case except all lowercase (case_rules, rule 7a)."""
+
+    def test_lowercase_word_is_left_alone(self):
+        page, doc = _make_page_with_text("Mr Young met young people. YOUNG. Young's, young's")
+        PDFRedactor()._redact_text_search(page, "Young")
+        # "Young", "YOUNG" and "Young's," are the name; the two lowercase are words.
+        assert len(list(page.annots())) == 3
+        doc.close()
+
+    def test_rule_applies_to_long_words_too(self):
+        """Words over six letters skip the whole-word check for ordinary
+        names; a common-word name must not, or "patience" is blacked out."""
+        page, doc = _make_page_with_text("Patience showed patience.")
+        PDFRedactor()._redact_text_search(page, "Patience")
+        assert len(list(page.annots())) == 1
+        doc.close()
+
+    def test_verifier_ignores_the_lowercase_word(self):
+        assert not _pii_visible_in_text("Young", "young people and younger ones")
+        assert _pii_visible_in_text("Young", "Mr Young")
+        assert _pii_visible_in_text("Young", "STUDENT: YOUNG")
+        assert _pii_visible_in_text("Young", "Young's book")
+        assert not _pii_visible_in_text("Young", "young's book")
+
+    def test_any_case_ignores_the_rule(self):
+        assert _pii_visible_in_text("Young", "young people", any_case=True)
+        assert _pii_visible_in_text("Li", "li's mum", any_case=True)
+
+    def test_redact_then_verify_leaves_words_and_passes(self, tmp_path):
+        src = tmp_path / "report.pdf"
+        out = tmp_path / "report_redacted.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 100), "Mr Young says young people need long breaks.", fontsize=12)
+        page.insert_text((72, 130), "Mrs Long agreed. LONG-TERM goals; a long-term aim.", fontsize=12)
+        doc.save(str(src))
+        doc.close()
+
+        r = PDFRedactor()
+        ok, _ = r.redact_pdf(src, out, [RedactionItem(page_num=1, text="Young"),
+                                        RedactionItem(page_num=1, text="Long")])
+        assert ok
+        with fitz.open(str(out)) as d:
+            text = d[0].get_text()
+        assert "young people" in text and "long breaks" in text and "long-term aim" in text
+        assert "Young" not in text and "Long" not in text and "LONG" not in text
+        for name in ("Young", "Long"):
+            is_clean, msg = r.verify_redaction(out, name)
+            assert is_clean, msg

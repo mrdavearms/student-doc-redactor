@@ -605,13 +605,12 @@ class PseudonymMap:
         if not re.fullmatch(r"[A-Za-z][A-Za-z '’-]*", cleaned):
             return None
 
-        # Lowercased on both sides on purpose: a label must not contain a
-        # name in ANY case, so the two-letter case-sensitive rule that
-        # protects "do" and "he" in running text does not apply here.
-        haystack = cleaned.lower()
+        # any_case on purpose: a label must not contain a name in ANY case,
+        # so the case rules that protect "do", "he" and "young" in running
+        # text (case_rules) do not apply here.
         for owner in self._owners:
             for variation in owner.variations:
-                if len(variation) >= 2 and _pii_visible_in_text(variation, haystack):
+                if len(variation) >= 2 and _pii_visible_in_text(variation, cleaned, any_case=True):
                     return None
         return cleaned[0].upper() + cleaned[1:]
 

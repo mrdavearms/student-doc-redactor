@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from PIL import Image, ImageDraw
 import pytesseract
 
-from case_rules import EXACT, case_mode
+from case_rules import EXACT, NOT_LOWERCASE, case_allows, case_mode
 
 
 def is_same_file(a: Path, b: Path) -> bool:
@@ -195,7 +195,7 @@ def _is_case_sensitive_pii(pii_text: str) -> bool:
     return case_mode(pii_text) == EXACT
 
 
-def _pii_visible_in_text(pii_text: str, haystack: str) -> bool:
+def _pii_visible_in_text(pii_text: str, haystack: str, any_case: bool = False) -> bool:
     """
     Whole-word visibility check used by both verification paths.
 
@@ -208,16 +208,17 @@ def _pii_visible_in_text(pii_text: str, haystack: str) -> bool:
 
     Args:
         pii_text: The redacted PII string (any case).
-        haystack: The text to search, in its ORIGINAL case. Matching is
-            case-insensitive except for two-letter PII (see
-            _is_case_sensitive_pii), which is why the caller must not
-            lowercase it first.
+        haystack: The text to search, in its ORIGINAL case. Matching follows
+            case_rules: case-insensitive, except that two-letter PII must
+            match as written and a name that is also an ordinary word
+            ("Young") does not match in all lowercase. That is why the caller
+            must not lowercase it first.
+        any_case: Ignore the case rule entirely. Only for checking that a
+            label contains no name in ANY case (sanitise_custom_role).
     """
     pii = _fold_apostrophes(pii_text.strip())
     haystack = _fold_apostrophes(haystack)
-    if not _is_case_sensitive_pii(pii):
-        pii = pii.lower()
-        haystack = haystack.lower()
+    exact = _is_case_sensitive_pii(pii) and not any_case
     tokens = [re.escape(t) for t in re.split(_PII_SEP + r"+", pii) if t]
     if not tokens:
         return False
@@ -226,7 +227,10 @@ def _pii_visible_in_text(pii_text: str, haystack: str) -> bool:
         + (_PII_SEP + r"*").join(tokens)
         + r"(?:['’]s)?(?![A-Za-z0-9])"
     )
-    return re.search(pattern, haystack) is not None
+    for hit in re.finditer(pattern, haystack, 0 if exact else re.IGNORECASE):
+        if any_case or case_allows(pii, hit.group()):
+            return True
+    return False
 
 
 class PDFRedactor:
@@ -393,8 +397,10 @@ class PDFRedactor:
         For texts ≤ 6 characters, each match rect is verified against the page
         word list to avoid partial-word erasure (e.g. 'Ann' inside 'Annual').
         Two-letter texts must also match the page word's case exactly
-        (search_for itself is case-insensitive). Single characters are
-        skipped entirely.
+        (search_for itself is case-insensitive). A name that is also an
+        ordinary word gets the same word check at ANY length, since that
+        check is where its lowercase uses are declined (case_rules).
+        Single characters are skipped entirely.
         """
         text = text.strip()
         if len(text) < 2:
@@ -411,7 +417,7 @@ class PDFRedactor:
         if not text_instances:
             return
 
-        if len(text) <= 6:
+        if len(text) <= 6 or case_mode(text) == NOT_LOWERCASE:
             # Short text: verify each rect aligns with a complete word to avoid partial erasure
             word_rects = [(fitz.Rect(w[:4]), w[4]) for w in page.get_text("words")]
             for rect in text_instances:
@@ -430,7 +436,8 @@ class PDFRedactor:
         """
         Return True if match_rect substantially overlaps a word containing
         `text` as a whole word (case-insensitive, except two-letter texts which
-        must match as written — see _is_case_sensitive_pii), optionally
+        must match as written — see _is_case_sensitive_pii — and a name that
+        is also an ordinary word, which must not be all lowercase), optionally
         followed by a possessive suffix ('s / 's). Anything that is not a
         letter or digit is a word break, exactly as in _pii_visible_in_text.
 
@@ -443,16 +450,14 @@ class PDFRedactor:
         """
         needle = _fold_apostrophes(text.strip())
         exact_case = _is_case_sensitive_pii(needle)
-        if not exact_case:
-            needle = needle.lower()
         word_pattern = re.compile(
-            r"(?<![a-zA-Z0-9])" + re.escape(needle) + r"(?:'s)?(?![a-zA-Z0-9])"
+            r"(?<![a-zA-Z0-9])" + re.escape(needle) + r"(?:'s)?(?![a-zA-Z0-9])",
+            0 if exact_case else re.IGNORECASE,
         )
         for word_rect, word_text in word_rects:
             word_clean = _fold_apostrophes(word_text.strip())
-            if not exact_case:
-                word_clean = word_clean.lower()
-            if word_pattern.search(word_clean):
+            if any(case_allows(needle, hit.group())
+                   for hit in word_pattern.finditer(word_clean)):
                 intersection = match_rect & word_rect
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
                     return True
@@ -576,6 +581,12 @@ class PDFRedactor:
             if len(pii_words) == 1:
                 # Single-word PII: match individual OCR words
                 for ocr_word, pixel_bbox in ocr_words:
+                    # A lowercase "young" is the word, not the surname Young
+                    # (case_rules). Checked before every branch below, the
+                    # fuzzy one included: "young" is one letter from "Young"
+                    # once lowercased, and would otherwise match anyway.
+                    if not case_allows(pii_text, _fold_apostrophes(ocr_word)):
+                        continue
                     ocr_lower = _fold_apostrophes(ocr_word if exact_case else ocr_word.lower())
                     # Preserve curly apostrophes in cleaned form
                     ocr_clean = re.sub(r"[^\w'\u2019]", '', ocr_lower)

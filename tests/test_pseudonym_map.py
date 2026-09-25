@@ -497,6 +497,13 @@ class TestCustomRoleSanitisation:
                             organisation_names=["Riverside Primary School"])
         assert pmap.sanitise_custom_role("Riverside staff") is None
 
+    def test_common_word_surname_is_rejected_in_any_case(self):
+        """The case rule that keeps "young people" readable in the output must
+        not let "young's mum" into a label (rule 7a)."""
+        pmap = PseudonymMap(student_name="William Young")
+        assert pmap.sanitise_custom_role("Young's mum") is None
+        assert pmap.sanitise_custom_role("young's mum") is None
+
     def test_whole_word_check_does_not_reject_innocent_text(self):
         """'Ann' inside 'Annual' is not a leak — same rule as verification."""
         pmap = PseudonymMap(student_name="Ann Smith")

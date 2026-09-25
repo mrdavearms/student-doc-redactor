@@ -880,3 +880,32 @@ class TestEmbeddedImageScanCoverage:
             assert r._check_tesseract() is True
             assert r._check_tesseract() is True
         assert m.call_count == 1
+
+
+class TestCommonWordOcr:
+    """The OCR matcher applies the common-word case rule before every branch,
+    the fuzzy one included (case_rules, rule 7a)."""
+
+    @staticmethod
+    def _count(pii, words):
+        draw = MagicMock()
+        ocr_words = [(w, (10 * i, 0, 10 * i + 8, 10)) for i, w in enumerate(words)]
+        return PDFRedactor()._match_and_redact_ocr_words(
+            draw, ocr_words, [RedactionItem(page_num=1, text=pii)])
+
+    def test_lowercase_word_is_not_blacked_out(self):
+        assert self._count("Young", ["young", "people"]) == 0
+        assert self._count("Young", ["Mr", "Young"]) == 1
+        assert self._count("Young", ["YOUNG"]) == 1
+        assert self._count("Young", ["Young's,"]) == 1
+
+    def test_fuzzy_branch_declines_lowercase_near_misses(self):
+        """"grade" is one letter from "grace"; before the rule, a parent called
+        Grace had every "grade" on a scan blacked out."""
+        assert self._count("Grace", ["grade"]) == 0
+        assert self._count("Grace", ["yovng"]) == 0
+        # A capitalised misread of the name is still caught.
+        assert self._count("Grace", ["Graee"]) == 1
+
+    def test_uncommon_name_still_matches_lowercase(self):
+        assert self._count("Nguyen", ["nguyen"]) == 1

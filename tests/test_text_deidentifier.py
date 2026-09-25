@@ -286,3 +286,27 @@ class TestFormLabelsAreNotPeople:
         )
         assert "Billy Bob" not in out
         assert count == 1
+
+
+class TestCommonWordNames:
+    """A name that is also an ordinary word is replaced in any case except
+    all lowercase, and the verifier agrees (case_rules, rule 7a)."""
+
+    def test_lowercase_word_is_kept(self):
+        pmap = PseudonymMap(student_name="William Young")
+        out, count = deidentify_text(
+            "Mr Young said young people like YOUNG and Young's books; young's too.",
+            [match("Young")], pmap)
+        assert "young people" in out and "young's too" in out
+        assert "Young" not in out and "YOUNG" not in out
+        assert count == 3
+
+    def test_verification_does_not_flag_the_kept_word(self):
+        pmap = PseudonymMap(student_name="William Young")
+        out, _ = deidentify_text("Mr Young met young people.", [match("Young")], pmap)
+        assert verify_deidentified(out, ["Young"], pmap.all_labels()) == []
+
+    def test_full_name_still_matches_any_case(self):
+        pmap = PseudonymMap(student_name="William Young")
+        out, count = deidentify_text("william young", [match("William Young")], pmap)
+        assert count == 1

@@ -11,6 +11,7 @@ slip through readable.
 import re
 from typing import Dict, List, Tuple
 
+from case_rules import NOT_LOWERCASE, case_mode
 from redactor import _PII_SEP, _is_case_sensitive_pii, _pii_visible_in_text, fuzzy_word_match
 
 
@@ -35,6 +36,12 @@ def _pattern_for(pii_text: str) -> str:
     # compiled IGNORECASE: "(?-i:Do)" replaces the surname Do, not every "do".
     if _is_case_sensitive_pii(pii_text):
         return '(?-i:' + _any_apostrophe(re.escape(pii_text.strip())) + ')'
+    # A name that is also an ordinary word matches in any case except all
+    # lowercase: "Young" and "YOUNG" are the name, "young" is the word. The
+    # lookahead refuses the exact lowercase spelling; the rest matches as usual.
+    if case_mode(pii_text) == NOT_LOWERCASE:
+        word = re.escape(pii_text.strip().lower())
+        return '(?!(?-i:' + word + '))' + word
     tokens = [_any_apostrophe(re.escape(t))
               for t in re.split(_PII_SEP + r"+", pii_text.lower()) if t]
     if not tokens:

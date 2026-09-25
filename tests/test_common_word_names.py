@@ -93,3 +93,197 @@ class TestDetection:
         orch = PIIOrchestrator("Minh Nguyen")
         found = _texts(orch.detect_pii_in_text("contact nguyen family", 1))
         assert 'nguyen' in found
+
+
+# ---------------------------------------------------------------------------
+# End to end: the check that protects the whole design (plan step 5)
+# ---------------------------------------------------------------------------
+#
+# Every stage must agree that "young" is not the surname Young. If detection,
+# the redactor, the OCR redactor, a verifier or de-identification disagreed,
+# a correctly processed document would report a name "still visible" and
+# quarantine itself. Every row is ticked, as "Accept all" does.
+
+import io
+from pathlib import Path
+
+import fitz
+import pytest
+from PIL import Image, ImageDraw, ImageFont
+
+REPO = Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+STUDENT = "William Young"
+PARENTS = ["Grace Long"]
+
+REPORT = [
+    "STUDENT: WILLIAM YOUNG      PARENT: GRACE LONG",
+    "LONG-TERM GOALS",
+    "William Young is a young learner who will need long breaks.",
+    "Mrs Long gave us a grace period; Mr Young agreed.",
+    "Young people often find long tasks hard. Grace will call.",
+    "William's long-term aim is to read with younger students.",
+]
+SCAN = [
+    "Paediatric review for William Young",
+    "His mother Grace Long attended",
+    "He is a young boy with a long history",
+]
+SCREENSHOT = [
+    "From: Grace Long",
+    "William will be late, a long appointment",
+]
+WORDS = ["young", "long", "grace", "will"]
+
+
+def _tesseract_available():
+    try:
+        import pytesseract
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
+def _png(lines, width, size, pad):
+    font = ImageFont.load_default(size=size)
+    step = int(size * 1.7)
+    img = Image.new("RGB", (width, pad * 2 + step * len(lines)), "white")
+    draw = ImageDraw.Draw(img)
+    for i, line in enumerate(lines):
+        draw.text((pad, pad + i * step), line, fill="black", font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _write(page, lines):
+    y = 72
+    for line in lines:
+        page.insert_text((60, y), line, fontsize=11)
+        y += 20
+    return y
+
+
+def _corpus(folder):
+    """A text-layer report, the same with a scanned page, and the same with
+    a pasted email screenshot."""
+    paths = []
+    for name in ("report", "scanned", "screenshot"):
+        doc = fitz.open()
+        page = doc.new_page()
+        y = _write(page, REPORT)
+        if name == "screenshot":
+            page.insert_image(fitz.Rect(60, y + 10, 460, y + 110),
+                              stream=_png(SCREENSHOT, 1200, 44, 30))
+        if name == "scanned":
+            scan = doc.new_page()
+            scan.insert_image(fitz.Rect(0, 0, scan.rect.width, scan.rect.width * 0.4),
+                              stream=_png(SCAN, 1700, 52, 120))
+        path = folder / f"{name}.pdf"
+        doc.save(str(path))
+        doc.close()
+        paths.append(path)
+    return paths
+
+
+def _lowercase_counts(text):
+    import re
+    return {w: len(re.findall(r"(?<![A-Za-z])" + w + r"(?![A-Za-z])", text)) for w in WORDS}
+
+
+@pytest.fixture(scope="module")
+def detected(tmp_path_factory):
+    from src.services.detection_service import DetectionService
+    folder = tmp_path_factory.mktemp("common_words")
+    docs = _corpus(folder)
+    results = DetectionService(STUDENT, parent_names=PARENTS).detect_all(docs)
+    assert results.failed_documents == []
+    detected_pii, selections = {}, {}
+    for doc in results.documents:
+        pii = results.pii_by_document[doc]
+        detected_pii[doc] = {"matches": pii.matches, "text_data": pii.text_data}
+        for i in range(len(pii.matches)):
+            selections[f"{doc}_{i}"] = True
+    return folder, results.documents, detected_pii, selections
+
+
+@pytest.mark.skipif(not _tesseract_available(), reason="Tesseract not installed")
+class TestNoQuarantineEitherPathway:
+
+    def test_detection_offers_no_lowercase_word(self, detected):
+        _, docs, detected_pii, _ = detected
+        for doc in docs:
+            texts = [m.text for m in detected_pii[doc]["matches"]]
+            assert not [t for t in texts if t.lower() in WORDS and t.islower()], doc.name
+
+    def test_redact_pathway(self, detected):
+        from src.services.redaction_service import RedactionRequest, RedactionService
+        folder, docs, detected_pii, selections = detected
+        results = RedactionService().execute(RedactionRequest(
+            folder_path=folder, student_name=STUDENT, documents=list(docs),
+            detected_pii=detected_pii, user_selections=selections,
+            parent_names=PARENTS, custom_output_path=folder / "redacted"))
+
+        for r in results.document_results:
+            assert r.success, (r.document_name, r.verification_failures, r.error_message)
+            assert r.verification_failures == []
+            with fitz.open(str(r.output_path)) as doc:
+                text = doc[0].get_text()
+            # Every lowercase word on the text layer survives...
+            assert _lowercase_counts(text) == _lowercase_counts("\n".join(REPORT)), r.document_name
+            # ...and no written form of the names does.
+            for name in ("William", "Young", "YOUNG", "Grace", "GRACE", "Long", "LONG"):
+                assert name not in text, (r.document_name, name)
+
+    def test_deidentify_pathway(self, detected):
+        from src.services.deidentification_service import (
+            DeidentificationService, DeidentifyRequest,
+        )
+        folder, docs, detected_pii, selections = detected
+        results = DeidentificationService().execute(DeidentifyRequest(
+            folder_path=folder, student_name=STUDENT, documents=list(docs),
+            detected_pii=detected_pii, user_selections=selections,
+            parent_names=PARENTS, custom_output_path=folder / "deidentified"))
+
+        for r in results.document_results:
+            assert r.success, (r.document_name, r.verification_failures, r.error_message)
+            assert r.verification_failures == []
+            text = Path(r.output_path).read_text()
+            counts = _lowercase_counts(text)
+            expected = _lowercase_counts("\n".join(REPORT))
+            # The scanned page adds its own lowercase words to the output.
+            assert all(counts[w] >= expected[w] for w in WORDS), (r.document_name, counts)
+            for name in ("William", "Young", "YOUNG", "Grace", "GRACE", "Long", "LONG"):
+                assert name not in text, (r.document_name, name)
+
+
+class TestPastePathway:
+    """Pasted text: detection, then both cleaning modes, through the API."""
+
+    TEXT = "\n".join(REPORT)
+
+    @pytest.mark.parametrize("mode", ["redact", "deidentify"])
+    def test_clean_keeps_the_words_and_reports_no_leftovers(self, mode):
+        from fastapi.testclient import TestClient
+        from backend.main import PASTE_KEY, app
+        client = TestClient(app)
+        people = {"student_name": STUDENT, "parent_names": PARENTS,
+                  "family_names": [], "organisation_names": []}
+        r = client.post("/api/text/detect", json={"text": self.TEXT, **people})
+        assert r.status_code == 200
+        matches = r.json()["documents"][0]["matches"]
+        assert not [m["text"] for m in matches if m["text"].lower() in WORDS and m["text"].islower()]
+
+        r = client.post("/api/text/clean", json={
+            "mode": mode, **people,
+            "selected_keys": [f"{PASTE_KEY}_{i}" for i in range(len(matches))],
+            "person_roles": {}, "person_custom_labels": {}, "ignored_people": []})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["leftovers"] == []
+        assert _lowercase_counts(body["text"]) == _lowercase_counts(self.TEXT)
+        for name in ("William", "Young", "YOUNG", "Grace", "GRACE", "Long", "LONG"):
+            assert name not in body["text"], name
