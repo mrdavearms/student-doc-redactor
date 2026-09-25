@@ -242,6 +242,22 @@ It also handles:
 - **Parenthetical name patterns**: "Joe (parent: Sarah Bloggs)" catches both the student and parent name
 - **Short names preserved**: Even 2-character names like "Jo" are matched if they exactly match the student name you entered
 
+#### Names that are also everyday words
+
+Some names are ordinary English words too: Will, Young, Grace, Long, Hope, Brown, King, Mark. For a student called William Young, the report will also say "he will need support" and "young people".
+
+These names are only matched when they are **not written entirely in lowercase**:
+
+| In the document | Removed? |
+|---|---|
+| "Mr Young", "YOUNG", "Young's" | Yes, this is the name |
+| "young people", "at a young age" | No, this is the word |
+| "Young people often…" (start of a sentence) | Offered, because it has a capital letter. Untick it on the review screen if it is not the name |
+
+On the review screen these rows are marked **common word — matched only when capitalised**, so you know why a lowercase "young" in the report was left alone. Full names ("William Young") and file names are still matched however they are written.
+
+On **scanned pages** there is one catch. If a poor scan reads the name "Young" as "young", it is treated as the word and left readable. When this could apply, the completion screen reminds you to check the scanned pages.
+
 ### Filename Redaction
 
 If the student's name appears in the **filename** of a document (e.g. `Joe_Bloggs_Assessment.pdf`), the output file's name will have the PII replaced with `[REDACTED]`:

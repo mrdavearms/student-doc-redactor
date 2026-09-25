@@ -15,7 +15,7 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (844 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (890 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
 - **Test (desktop)**: `cd desktop && npm test` (vitest, 222 tests across 17 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
@@ -145,6 +145,8 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `src/core/pii_detector.py` | Regex engine + `PIIMatch` dataclass definition |
 | `src/core/presidio_recognizers.py` | 6 custom Australian Presidio recognizers |
 | `src/core/nickname_map.py` | Curated ~100-entry Australian nickname dictionary with reverse lookup |
+| `src/core/case_rules.py` | **The one case rule** for matching a PII string — `case_mode`, `case_allows` (rules 7, 7a) |
+| `src/core/common_words.py` | ~10,000 ordinary English words for rule 7a — a `.py` module because only `*.py` under `src/` ships |
 | `src/core/redactor.py` | **Dual-path redaction** (text-layer + OCR image), widget deletion, metadata stripping |
 | `src/core/pseudonym_map.py` | De-identify mode: privacy-safe labels, roles, person-identity merge rules |
 | `src/core/role_suggester.py` | Proposes a person's role from surrounding text, with quotable evidence |
@@ -252,9 +254,34 @@ Added in `a699268`. Values in practice: `'regex'`, `'presidio'`, and `'manual'` 
 
 Until September 2026 every name part under three characters was dropped — by the variation filter, the redactor (`_redact_text_search` returned early), the OCR matcher, both verifiers and the de-identify verifier, all consistently. So a student called "Jo Nguyen" had "Jo" readable in every output, and "Mei Li" had "Li" readable (including "Mr Li" and "Li's"). Li, Wu, Ng, Xu, Vo, Vu, Do, Le, Ho, Lu, Hu, Su, Yu, He, Ma and An are all common in Australian schools; the redactor and verifier skipped them together, so the run reported success.
 
-`MIN_NAME_LENGTH = 2` in `pii_detector.py` now governs the variation filter, and `match_flags(text)` / `redactor._is_case_sensitive_pii(text)` make any PII string of two characters or fewer match **exactly as written**: the surname "Do" never blacks out the verb "do", nor "He" the pronoun. Detection, `_redact_text_search` (+ `_is_whole_word_match`), the OCR matcher, `_pii_visible_in_text` (which now takes the ORIGINAL-case haystack and lowercases internally), `text_deidentifier._pattern_for` (an inline `(?-i:…)` group) and `/api/pii/manual` all agree on this rule. Change it in one place and the file quarantines itself. The one deliberate exception is `PseudonymMap.sanitise_custom_role`, which lowercases both sides: a label must not contain a name in any case. Trade-off accepted: a sentence-initial "Do not…" or "He is…" is offered as a match for a student surnamed Do or He, and the review screen lets the user untick it — a black box on a word beats a surname in every output.
+`MIN_NAME_LENGTH = 2` in `pii_detector.py` now governs the variation filter, and `match_flags(text)` / `redactor._is_case_sensitive_pii(text)` make any PII string of two characters or fewer match **exactly as written**: the surname "Do" never blacks out the verb "do", nor "He" the pronoun. Detection, `_redact_text_search` (+ `_is_whole_word_match`), the OCR matcher, `_pii_visible_in_text` (which now takes the ORIGINAL-case haystack and lowercases internally), `text_deidentifier._pattern_for` (an inline `(?-i:…)` group) and `/api/pii/manual` all agree on this rule. `match_flags` and `_is_case_sensitive_pii` are now thin wrappers over `case_rules.case_mode`, which also carries rule 7a. Change it in one place and the file quarantines itself. The one deliberate exception is `PseudonymMap.sanitise_custom_role`, which lowercases both sides: a label must not contain a name in any case. Trade-off accepted: a sentence-initial "Do not…" or "He is…" is offered as a match for a student surnamed Do or He, and the review screen lets the user untick it — a black box on a word beats a surname in every output.
 
 `generate_name_variations` also strips a leading title ("Mr John Bob" → "John Bob", "John"), understands "Smith, John", keeps lowercase particles in the surname ("van der Berg"), yields each half of a hyphenated name, adds "first last" for a three-token name ("Billy Robert Bob" → "Billy Bob"), and never emits a bare initial ("P." from "P. Raman"). User-entered parent and family names go through it too, so a parent referred to by first name is found without relying on NER.
+
+### 7a. Names that are also ordinary words match only when NOT written entirely in lowercase
+
+A student called William Young had every "young" offered for removal, ticked by default, and unticking those rows did nothing: rule 11a redacts a selected string on every page, so one ticked "Young" blacked out every "young". The review screen was not a mitigation for these names; it only looked like one.
+
+`case_rules.case_mode(text)` is now the single answer to "how does this string match case", and `match_flags` and `_is_case_sensitive_pii` both delegate to it. Three modes: `EXACT` (two characters or fewer, rule 7), `NOT_LOWERCASE` (one plain word whose lowercase form is in `common_words.COMMON_WORDS`), `IGNORE` (everything else, including every multi-word string: "Will Young" matches "will young"). `case_allows(pii, found)` says whether a hit found ignoring case counts. "Young", "YOUNG" and "Young's" do; "young" and "young's" do not.
+
+Every stage asks it, and a stage that did not would quarantine correct files (rule 7's warning):
+- **Detection**: `PIIOrchestrator.detect_pii_in_text` drops all-lowercase hits for these words from EVERY engine, BEFORE `_deduplicate`. Dedup keys on lowercase text, so a "young" row could otherwise displace the "Young" row on the same line.
+- **Text-layer redaction**: `_is_whole_word_match` declines a lowercase hit, and `_redact_text_search` sends a common-word name through that word check at ANY length. The usual rule skips the check above six letters, which would black out "patience" for a student called Patience.
+- **OCR redaction**: `_match_and_redact_ocr_words` declines a lowercase OCR word before every branch, **the fuzzy one included**. Once lowercased, "young" is one letter from "Young", so the fuzzy branch would otherwise match it anyway. This also stops "grade" being blacked out as a misread of "Grace".
+- **Both redaction verifiers and the de-identify verifier**, through `_pii_visible_in_text`, which now uses `re.IGNORECASE` on the original-case haystack and checks each hit.
+- **De-identify replacement**: `_pattern_for` emits `(?!(?-i:young))young` inside the IGNORECASE alternation.
+
+Deliberate exceptions:
+- **Filenames** stay case-insensitive (`strip_pii_from_filename`). File names are routinely all lowercase and hold no prose.
+- **`sanitise_custom_role`** calls `_pii_visible_in_text(..., any_case=True)`: a label must not contain a name in ANY case, so "young's mum" is still refused.
+- **Stage 5 cleanup** (widgets, links, annotations, bookmarks) stays a case-insensitive substring test. A form field saying "will attend" is deleted when "Will" is selected. That is over-removal only, never verified, so it cannot quarantine; left alone by decision.
+- **Common-word nicknames stay excluded.** "Will", "Bill", "Pat", "Sue", "Ted", "Ray", "Art", "Bob", "Max" and "Rob" are dropped from nickname variations by `_CONTEXTUAL_NAME_EXCLUDE`, so "Will" for William is not caught by the nickname path. Bringing them back was considered and declined: a capitalised "Art" (the subject) or a sentence-initial "Will" would be removed everywhere.
+
+Accepted trade-offs, as rule 7 accepted "Do not…": a capitalised ordinary word at the start of a sentence ("Young people…") or in a capitals heading ("LONG-TERM GOALS") is still offered, and blacked out if ticked. The review screen badges every such row "common word — matched only when capitalised" (the `common_word` flag on every match response). **On a scanned page, a poor scan that reads "Young" as "young" leaves it readable, and the OCR verifier agrees, so the run succeeds.** Both pathways say so: `case_rules.SCANNED_PAGE_NOTE` is appended to the scanned-page warning whenever a selected name is a common word. In redact mode that warning appears even with no item on the scanned page, since a lowercase misread is exactly what detection skips. The note names no word, because the de-identify audit log must not contain a real name.
+
+**The word list** is the first 10,000 lowercase entries of three or more letters in `en_core_web_lg`'s vector table, which is frequency-ordered and case-sensitive. So "grace" and "long" qualify and "john" and "david" do not. Twenty hand-picked name-words are added (`_ADDITIONS`). The module docstring has the regeneration code. A few pure names make the cut ("lee", "smith"): the only effect is that the name written all lowercase is not matched, which prose never does. `tests/test_common_word_names.py::test_which_common_australian_names_are_caught` pins which of ~150 common Australian names the list catches, so a change to the list fails there, visibly. It is a `.py` module, not a `.txt`, because `desktop/package.json` ships only `*.py` from `src/`: a text file would have been missing from every `.dmg` and `.exe`, and the rule would have silently switched itself off.
+
+`tests/test_common_word_names.py::TestNoQuarantineEitherPathway` is the guard: a text-layer report, a scanned page and a pasted screenshot through detection and both pathways, plus pasted text through both cleaning modes, with every row ticked and real Tesseract re-checking the redacted pages. Nothing may quarantine, every lowercase word must survive, and no written form of the names may. Change any stage's case handling and run it.
 
 ### 8. Presidio is an optional dependency (but required in bundled app)
 
@@ -356,6 +383,8 @@ page.insert_image(page.rect, stream=img_bytes, overlay=True)
 
 `redaction_service.py` checks if the student name appears in document filenames. If found, the output filename has PII replaced with `[REDACTED]`. This logic is in the service layer, not in `redactor.py`.
 
+Filename matching stays case-insensitive for names that are also ordinary words (rule 7a's stated exception): "young william report.pdf" still loses "young".
+
 ### 19. Organisation names generate word-level variations
 
 `PIIDetector._detect_organisation_names()` splits each org name into words and flags matches ≥3 chars. Common English words (`the`, `school`, `centre`, `clinic`, etc.) are excluded via `GENERIC_ORG_WORDS`. The code also runs a secondary filter against `_CONTEXTUAL_NAME_EXCLUDE` (the same list shared with name detection). Both lists must be checked if modifying exclusion logic. The full org name is matched first (longest match first, like student names). Category: `"Organisation name"`, confidence: `0.95`.
@@ -377,16 +406,15 @@ Ink ratio is computed by converting to grayscale and counting pixels below a dar
 
 Stage 4 runs on ALL pages, not just pages with detected PII — signatures often appear on pages with no other flagged content. The class-level threshold constants (`SIGNATURE_MIN_ASPECT`, `SIGNATURE_MAX_RECT_WIDTH`, etc.) can be tuned without changing the method logic.
 
-### 22. `_is_whole_word_match()` handles possessive+punctuation combinations
+### 22. `_is_whole_word_match()` uses the verifier's word breaks
 
-The short-word guard (for texts ≤6 chars) uses a regex to validate the suffix after a needle match:
+The short-word guard (texts ≤6 chars, and common-word names at any length, rule 7a) searches each PyMuPDF word for the needle with the same boundaries `_pii_visible_in_text` uses: anything that is not a letter or digit is a word break, and an optional `'s` may follow.
 
 ```python
-remainder = word_clean[len(needle):]
-if re.fullmatch(r"(?:['\u2019]s)?[^a-zA-Z0-9]*", remainder):
+r"(?<![a-zA-Z0-9])" + re.escape(needle) + r"(?:'s)?(?![a-zA-Z0-9])"
 ```
 
-This single regex handles: exact matches (empty remainder), possessives (`'s`), trailing punctuation (`,` `.` `)`), and combined forms like `'s,` or `'s.`. Previously, three separate conditions missed the combined possessive+punctuation case (e.g. "Joe's," was not redacted).
+That covers possessives, surrounding punctuation and quotes (`("Joe")`, `Joe's,`), and hyphenated words. PyMuPDF splits words on whitespace only, so a heading gives the single word "LONG-TERM". The old fullmatch on the whole word left the surname Long readable there while the verifier saw it, and the document quarantined itself (three of ten synthetic reports did, in shipped v1.9.4). "Belong" still does not match "Long".
 
 ### 23. Desktop: `<Walkthrough />` must NOT be inside Layout's animated children
 
@@ -946,24 +974,24 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 844 tests total
+tests/                                # 890 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
 ├── test_presidio_recognizers.py      # 23 tests: 6 custom AU Presidio recognizer unit tests
-├── test_redactor.py                  # 26 tests: text-layer redaction routing, possessive+punctuation, redact_pdf robustness
+├── test_redactor.py                  # 41 tests: text-layer redaction routing, possessive+punctuation, hyphenated words, common-word names, redact_pdf robustness
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
-├── test_ocr_redaction.py             # 37 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching
+├── test_ocr_redaction.py             # 41 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching, common-word case rule
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
 ├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
 ├── test_widget_redaction.py          # 7 tests: AcroForm widget deletion (incl. word-boundary match)
-├── test_filename_redaction.py        # 13 tests: PII in filenames → [REDACTED] replacement
+├── test_filename_redaction.py        # 15 tests: PII in filenames → [REDACTED] replacement, case-insensitive for common-word names
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
 ├── test_folder_scan.py               # 10 tests: case-insensitive folder scan, conversions stay out of the user's folder
 ├── test_quarantine.py                # 7 tests: failed-verification quarantine (os.replace), per-run name claiming, verify handle released
-├── test_pseudonym_map.py             # 92 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
-├── test_text_deidentifier.py         # 40 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip
+├── test_pseudonym_map.py             # 103 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
+├── test_text_deidentifier.py         # 43 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip, common-word names
 ├── test_text_pdf.py                  # 23 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
 ├── test_text_cleanup_service.py      # 8 tests: blackout/de-identify over a string, leftover checks, all_labels() strip-list
 ├── test_deidentification_service.py  # 48 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
@@ -984,7 +1012,9 @@ tests/                                # 844 tests total
 ├── test_api_auth.py                  # 15 tests: API token middleware, CORS on 401, health instance_match identity
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
-└── test_false_positives.py           # 5 tests: false-positive regression tests
+├── test_false_positives.py           # 5 tests: false-positive regression tests
+├── test_case_rules.py                # 11 tests: every detection site uses the shared case rule; case_mode / case_allows
+└── test_common_word_names.py         # 19 tests: rule 7a — word list pinning, detection, no-quarantine end to end (both pathways + paste), scanned-page note, review badge flag
 ```
 
 Tests use `sys.path.insert` to locate `src/core/` modules — this is required because the test runner runs from the repo root, not from within `src/`.
