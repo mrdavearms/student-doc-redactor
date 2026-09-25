@@ -121,6 +121,9 @@ class PIIMatchResponse(BaseModel):
     context: str
     source: str
     bbox: Optional[List[float]] = None
+    # A name that is also an ordinary word ("Young"): matched only when not
+    # all lowercase (case_rules). The review screen badges it.
+    common_word: bool = False
 
 
 class DocumentPIIResponse(BaseModel):

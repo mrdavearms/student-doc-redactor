@@ -64,6 +64,12 @@ SCANNED_PAGE_NOTE = (
 )
 
 
+def is_common_word_name(text: str) -> bool:
+    """Whether this PII string is a NOT_LOWERCASE name. Drives the review
+    screen's "common word" badge."""
+    return case_mode(text or '') == NOT_LOWERCASE
+
+
 def has_common_word_name(texts) -> bool:
     """Whether any of these PII strings is a NOT_LOWERCASE name."""
-    return any(case_mode(t or '') == NOT_LOWERCASE for t in texts)
+    return any(is_common_word_name(t) for t in texts)

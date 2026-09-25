@@ -368,3 +368,42 @@ class TestScannedPageLowercaseMisread:
         assert result.success
         assert result.ocr_warnings
         assert not any(SCANNED_PAGE_NOTE in w for w in result.ocr_warnings)
+
+
+class TestReviewBadgeFlag:
+    """The review screen's "common word" badge reads common_word from every
+    endpoint that returns matches (plan step 8)."""
+
+    PEOPLE = {"student_name": STUDENT, "parent_names": PARENTS,
+              "family_names": [], "organisation_names": []}
+
+    @staticmethod
+    def _client():
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        return TestClient(app)
+
+    def test_document_detection(self, tmp_path):
+        doc = fitz.open()
+        _write(doc.new_page(), ["Mr Young and Minh Nguyen met William Young."])
+        path = tmp_path / "flag.pdf"
+        doc.save(str(path))
+        doc.close()
+        r = self._client().post("/api/pii/detect", json={"pdf_paths": [str(path)], **self.PEOPLE})
+        assert r.status_code == 200
+        flags = {m["text"]: m["common_word"] for m in r.json()["documents"][0]["matches"]}
+        assert flags["Young"] is True
+        assert flags["William Young"] is False
+
+    def test_pasted_text_and_a_manual_item(self):
+        from backend.main import PASTE_KEY
+        client = self._client()
+        r = client.post("/api/text/detect", json={"text": "Mr Young met Grace Long.", **self.PEOPLE})
+        assert r.status_code == 200
+        flags = {m["text"]: m["common_word"] for m in r.json()["documents"][0]["matches"]}
+        assert flags["Young"] is True and flags["Grace Long"] is False
+
+        add = client.post("/api/pii/manual", json={
+            "doc_path": PASTE_KEY, "text": "Grace", "page_num": 1, "category": "Manual"})
+        assert add.status_code == 200
+        assert add.json()["match"]["common_word"] is True

@@ -52,6 +52,11 @@ export default function Completion() {
   const hasVerificationFailures = r.verification_failures.length > 0;
   const hasFailures = hasVerificationFailures || erroredDocs.length > 0;
   const hasOcrWarnings = r.ocr_warnings.length > 0;
+  // A selected name that is also an everyday word is only matched when not
+  // all lowercase, so a scan that read it in lowercase kept it (case_rules).
+  const selectedCommonWord = !!detectionResults?.documents.some((d) =>
+    d.matches.some((m, i) => m.common_word && userSelections[`${d.path}_${i}`])
+  );
 
   return (
     <div className="space-y-6">
@@ -153,6 +158,12 @@ export default function Completion() {
               {w.filename}: {w.count} item(s) on image-only pages
             </p>
           ))}
+          {selectedCommonWord && (
+            <p className="text-xs text-amber-600 pt-2">
+              A name that is also an everyday word is only removed where the scan shows it
+              with a capital letter. Check the scanned pages for one the scan read in lowercase.
+            </p>
+          )}
         </motion.div>
       )}
 

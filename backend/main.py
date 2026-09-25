@@ -31,6 +31,7 @@ from src.services.deidentification_service import (
 )
 from src.core.pseudonym_map import ASSIGNABLE_ROLES, ROLE_LABELS
 from src.core.pii_detector import PIIMatch
+from src.core.case_rules import is_common_word_name
 from src.services.text_cleanup_service import BLOCK, blackout, deidentify_paste
 from src.core.text_deidentifier import strip_labels
 from src.core.pii_orchestrator import find_person_entities
@@ -368,6 +369,7 @@ def detect_pii(req: DetectPIIRequest):
                 context=match.context,
                 source=match.source,
                 bbox=list(match.bbox) if match.bbox else None,
+                common_word=is_common_word_name(match.text),
             ))
             # Store the raw match data for the redaction step
             match_dicts.append({
@@ -497,6 +499,7 @@ def detect_text(req: DetectTextRequest):
                 confidence_label=m.confidence_label, page_num=m.page_num,
                 line_num=m.line_num, context=m.context, source=m.source,
                 bbox=list(m.bbox) if m.bbox else None,
+                common_word=is_common_word_name(m.text),
             ) for m in matches],
             ocr_pages=[],
         )],
@@ -585,6 +588,7 @@ def add_manual_pii(req: AddManualPIIRequest):
             context=match.context,
             source=match.source,
             bbox=None,
+            common_word=is_common_word_name(match.text),
         ),
         index=index,
     )

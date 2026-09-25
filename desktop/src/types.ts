@@ -88,6 +88,8 @@ export interface PIIMatch {
   context: string;
   source: string;
   bbox: number[] | null;
+  /** A name that is also an ordinary word: matched only when not all lowercase. */
+  common_word?: boolean;
 }
 
 export interface DocumentPII {

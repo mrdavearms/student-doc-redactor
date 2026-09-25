@@ -238,6 +238,7 @@ export default function DocumentReview() {
                             left out by default — tick to remove
                           </span>
                         )}
+                        {match.common_word && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-600">common word — matched only when capitalised</span>}
                       </div>
                       <p className="text-sm text-slate-600 mt-1 leading-relaxed break-words">
                         {splitContext(match.context, match.text).map((seg, i) =>
