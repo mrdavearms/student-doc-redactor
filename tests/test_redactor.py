@@ -285,6 +285,37 @@ class TestWholeWordVerification:
         assert not is_clean
 
 
+class TestHyphenatedWords:
+    """PyMuPDF splits words on whitespace only, so "LONG-TERM" is one word.
+    The verifier treats the hyphen as a word break and sees the surname Long;
+    the redactor must agree, or the file quarantines itself."""
+
+    def test_name_inside_a_hyphenated_word_is_redacted_and_verifies(self, tmp_path):
+        src = tmp_path / "report.pdf"
+        out = tmp_path / "report_redacted.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 100), "LONG-TERM GOALS", fontsize=12)
+        page.insert_text((72, 130), "Mrs Long attended.", fontsize=12)
+        doc.save(str(src))
+        doc.close()
+
+        r = PDFRedactor()
+        ok, _ = r.redact_pdf(src, out, [RedactionItem(page_num=1, text="Long")])
+        assert ok
+        is_clean, msg = r.verify_redaction(out, "Long")
+        assert is_clean, msg
+        with fitz.open(str(out)) as d:
+            text = d[0].get_text()
+        assert "TERM GOALS" in text
+
+    def test_name_inside_a_longer_hyphenated_word_is_not_matched(self):
+        page, doc = _make_page_with_text("A self-belonging task.")
+        PDFRedactor()._redact_text_search(page, "Long")
+        assert len(list(page.annots())) == 0
+        doc.close()
+
+
 class TestDocumentWideRedaction:
     """A selected text is redacted on every page, not only where it was detected.
 

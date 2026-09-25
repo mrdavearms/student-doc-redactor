@@ -428,27 +428,31 @@ class PDFRedactor:
         word_rects: list,
     ) -> bool:
         """
-        Return True if match_rect substantially overlaps a word whose text
-        equals `text` (case-insensitive, except two-letter texts which must
-        match as written — see _is_case_sensitive_pii), optionally wrapped in
-        punctuation — quotes, brackets, a trailing comma — or followed by a
-        possessive suffix ('s / 's). PyMuPDF's word list keeps the quotes:
-        Joseph ("Joe") Bloggs yields the word ("Joe"), and a plain
-        startswith check never matched it, so the nickname stayed readable and
-        the document was quarantined.
+        Return True if match_rect substantially overlaps a word containing
+        `text` as a whole word (case-insensitive, except two-letter texts which
+        must match as written — see _is_case_sensitive_pii), optionally
+        followed by a possessive suffix ('s / 's). Anything that is not a
+        letter or digit is a word break, exactly as in _pii_visible_in_text.
+
+        PyMuPDF splits words on whitespace only, so its words keep quotes,
+        brackets and hyphens: Joseph ("Joe") Bloggs yields the word ("Joe"),
+        and a heading yields "LONG-TERM". Requiring the whole PyMuPDF word to
+        be the name left "Joe" readable in the first, and in the second left
+        the surname Long readable where the verifier (rightly) sees it, so the
+        document quarantined itself.
         """
         needle = _fold_apostrophes(text.strip())
         exact_case = _is_case_sensitive_pii(needle)
         if not exact_case:
             needle = needle.lower()
         word_pattern = re.compile(
-            r"[^a-zA-Z0-9]*" + re.escape(needle) + r"(?:'s)?[^a-zA-Z0-9]*"
+            r"(?<![a-zA-Z0-9])" + re.escape(needle) + r"(?:'s)?(?![a-zA-Z0-9])"
         )
         for word_rect, word_text in word_rects:
             word_clean = _fold_apostrophes(word_text.strip())
             if not exact_case:
                 word_clean = word_clean.lower()
-            if word_pattern.fullmatch(word_clean):
+            if word_pattern.search(word_clean):
                 intersection = match_rect & word_rect
                 if intersection.is_valid and intersection.get_area() >= 0.7 * match_rect.get_area():
                     return True
