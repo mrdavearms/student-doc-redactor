@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import fitz  # PyMuPDF
 
 from src.core.logger import RedactionLogger, LogEntry
+from src.core.case_rules import SCANNED_PAGE_NOTE, has_common_word_name
 from src.core.pseudonym_map import (
     ASSIGNABLE_ROLES,
     PseudonymMap,
@@ -663,10 +664,13 @@ class DeidentificationService:
         result.items_replaced = total_replacements
 
         if ocr_pages:
-            result.ocr_warnings.append(
+            warning = (
                 f"{len(ocr_pages)} page(s) were read by OCR (scanned). "
                 f"Check the text is complete and correct."
             )
+            if has_common_word_name(m.text for m in selected_matches):
+                warning += " " + SCANNED_PAGE_NOTE
+            result.ocr_warnings.append(warning)
             if drop_header_footer and ocr_pages:
                 result.ocr_warnings.append(
                     f"Header/footer removal could not be applied to "

@@ -49,3 +49,21 @@ def case_allows(pii_text: str, found: str) -> bool:
     a comma, quotes — none of which changes whether it is all lowercase.
     """
     return not (case_mode(pii_text) == NOT_LOWERCASE and found.islower())
+
+
+# Appended to the scanned-page warning in both pathways when a selected name
+# is a common word. A poor scan can read "Young" as "young"; that word is then
+# left alone by the OCR redactor and, consistently, not reported by the OCR
+# verifier. Accepted rather than special-cased, so it is said out loud. No
+# example names, not even made-up ones: a student may be called Grace, and the
+# de-identify audit log must not contain a real name.
+SCANNED_PAGE_NOTE = (
+    "A name that is also an everyday word is only removed where the scan "
+    "shows it with a capital letter. Check the scanned pages for one the scan "
+    "read in lowercase."
+)
+
+
+def has_common_word_name(texts) -> bool:
+    """Whether any of these PII strings is a NOT_LOWERCASE name."""
+    return any(case_mode(t or '') == NOT_LOWERCASE for t in texts)

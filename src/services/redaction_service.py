@@ -18,6 +18,7 @@ from src.core.redactor import (
     strip_pii_from_filename,
 )
 from src.core.logger import RedactionLogger, LogEntry
+from src.core.case_rules import SCANNED_PAGE_NOTE, has_common_word_name
 
 
 @dataclass
@@ -293,17 +294,27 @@ class RedactionService:
             source_path=doc,
         )
 
+        # Also warn with no item on a scanned page: a lowercase misread of a
+        # common-word name is exactly what detection skips (case_rules).
+        common_word = bool(ocr_pages) and has_common_word_name(
+            m.text for m in selected_matches)
+
         # Note OCR pages — these are redacted via image-level redaction
         # (PIL ImageDraw) rather than text-layer redaction, so flag for
         # awareness but do NOT skip them from redaction.
         ocr_item_count = sum(
             1 for m in selected_matches if m.page_num in ocr_pages
         )
-        if ocr_item_count > 0:
-            warning_msg = (
-                f"Contains {ocr_item_count} item(s) on image-only (scanned) pages "
-                f"redacted via OCR — manual review recommended"
-            )
+        if ocr_item_count > 0 or common_word:
+            if ocr_item_count > 0:
+                warning_msg = (
+                    f"Contains {ocr_item_count} item(s) on image-only (scanned) pages "
+                    f"redacted via OCR — manual review recommended"
+                )
+            else:
+                warning_msg = "Contains image-only (scanned) pages — manual review recommended"
+            if common_word:
+                warning_msg += ". " + SCANNED_PAGE_NOTE
             result.ocr_warnings.append(warning_msg)
 
         if output_filename_override:

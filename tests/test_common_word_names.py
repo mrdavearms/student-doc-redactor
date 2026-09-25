@@ -287,3 +287,84 @@ class TestPastePathway:
         assert _lowercase_counts(body["text"]) == _lowercase_counts(self.TEXT)
         for name in ("William", "Young", "YOUNG", "Grace", "GRACE", "Long", "LONG"):
             assert name not in body["text"], name
+
+
+@pytest.mark.skipif(not _tesseract_available(), reason="Tesseract not installed")
+class TestScannedPageLowercaseMisread:
+    """Plan step 7, option one: the accepted leak, and the warning that says so.
+
+    A poor scan can read the surname Young as "young". The OCR redactor leaves
+    that word alone and the OCR verifier agrees, so the run succeeds with the
+    word readable. The scanned-page warning must then carry SCANNED_PAGE_NOTE.
+    The scan here literally shows "young", standing in for the misread.
+    """
+
+    @pytest.fixture(scope="class")
+    def misread(self, tmp_path_factory):
+        from src.services.detection_service import DetectionService
+        folder = tmp_path_factory.mktemp("misread")
+        doc = fitz.open()
+        _write(doc.new_page(), ["Report for William Young.", "Mr Young attended."])
+        scan = doc.new_page()
+        scan.insert_image(fitz.Rect(0, 0, scan.rect.width, scan.rect.width * 0.3),
+                          stream=_png(["Seen today with mr young present"], 1700, 52, 120))
+        path = folder / "misread.pdf"
+        doc.save(str(path))
+        doc.close()
+        results = DetectionService(STUDENT, parent_names=PARENTS).detect_all([path])
+        pii = results.pii_by_document[path]
+        assert 2 in pii.text_data["ocr_pages"]
+        detected_pii = {path: {"matches": pii.matches, "text_data": pii.text_data}}
+        selections = {f"{path}_{i}": True for i in range(len(pii.matches))}
+        return folder, path, detected_pii, selections
+
+    def test_redact_succeeds_and_warns(self, misread):
+        from case_rules import SCANNED_PAGE_NOTE
+        from src.services.redaction_service import RedactionRequest, RedactionService
+        folder, path, detected_pii, selections = misread
+        result = RedactionService().execute(RedactionRequest(
+            folder_path=folder, student_name=STUDENT, documents=[path],
+            detected_pii=detected_pii, user_selections=selections,
+            parent_names=PARENTS, custom_output_path=folder / "redacted",
+        )).document_results[0]
+        assert result.success, result.verification_failures
+        assert any(SCANNED_PAGE_NOTE in w for w in result.ocr_warnings), result.ocr_warnings
+
+    def test_deidentify_succeeds_and_warns(self, misread):
+        from case_rules import SCANNED_PAGE_NOTE
+        from src.services.deidentification_service import (
+            DeidentificationService, DeidentifyRequest,
+        )
+        folder, path, detected_pii, selections = misread
+        result = DeidentificationService().execute(DeidentifyRequest(
+            folder_path=folder, student_name=STUDENT, documents=[path],
+            detected_pii=detected_pii, user_selections=selections,
+            parent_names=PARENTS, custom_output_path=folder / "deidentified",
+        )).document_results[0]
+        assert result.success, result.verification_failures
+        text = Path(result.output_path).read_text()
+        assert "young" in text  # the leak this option accepts
+        assert any(SCANNED_PAGE_NOTE in w for w in result.ocr_warnings), result.ocr_warnings
+
+    def test_no_note_without_a_common_word_name(self, tmp_path):
+        from case_rules import SCANNED_PAGE_NOTE
+        from src.services.detection_service import DetectionService
+        from src.services.redaction_service import RedactionRequest, RedactionService
+        doc = fitz.open()
+        _write(doc.new_page(), ["Report for Minh Nguyen."])
+        scan = doc.new_page()
+        scan.insert_image(fitz.Rect(0, 0, scan.rect.width, scan.rect.width * 0.3),
+                          stream=_png(["Seen today with Minh Nguyen"], 1700, 52, 120))
+        path = tmp_path / "plain.pdf"
+        doc.save(str(path))
+        doc.close()
+        pii = DetectionService("Minh Nguyen").detect_all([path]).pii_by_document[path]
+        result = RedactionService().execute(RedactionRequest(
+            folder_path=tmp_path, student_name="Minh Nguyen", documents=[path],
+            detected_pii={path: {"matches": pii.matches, "text_data": pii.text_data}},
+            user_selections={f"{path}_{i}": True for i in range(len(pii.matches))},
+            custom_output_path=tmp_path / "redacted",
+        )).document_results[0]
+        assert result.success
+        assert result.ocr_warnings
+        assert not any(SCANNED_PAGE_NOTE in w for w in result.ocr_warnings)
