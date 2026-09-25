@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from PIL import Image, ImageDraw
 import pytesseract
 
+from case_rules import EXACT, case_mode
+
 
 def is_same_file(a: Path, b: Path) -> bool:
     """
@@ -186,11 +188,11 @@ def _pad_redaction_rect(rect: fitz.Rect) -> fitz.Rect:
 def _is_case_sensitive_pii(pii_text: str) -> bool:
     """
     Two-letter PII ("Do", "Li", "Jo") must match exactly as written, so the
-    surname Do is never confused with the verb "do". Mirrors
-    pii_detector.match_flags — detection, redaction and verification must all
+    surname Do is never confused with the verb "do". The rule lives in
+    case_rules.case_mode — detection, redaction and verification must all
     agree on this or a correctly redacted file quarantines itself.
     """
-    return len(pii_text.strip()) <= 2
+    return case_mode(pii_text) == EXACT
 
 
 def _pii_visible_in_text(pii_text: str, haystack: str) -> bool:

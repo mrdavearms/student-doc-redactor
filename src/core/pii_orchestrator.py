@@ -13,6 +13,7 @@ import threading
 from typing import List, Optional
 from pii_detector import (PIIDetector, PIIMatch, generate_name_variations,
                           MIN_NAME_LENGTH, match_flags)
+from case_rules import case_allows
 
 
 # The spaCy model behind Presidio takes ~0.6s to wire up per call. Load it
@@ -259,6 +260,12 @@ class PIIOrchestrator:
                                     source='presidio'
                                 ))
             all_matches.extend(ner_matches)
+
+        # A name that is also an ordinary word ("Young") written entirely in
+        # lowercase is the word, whichever engine found it. Dropped BEFORE
+        # deduplication: dedup keys on lowercase text, so a "young" row could
+        # otherwise displace the "Young" row on the same line.
+        all_matches = [m for m in all_matches if case_allows(m.text, m.text)]
 
         # Deduplicate and return
         return self._deduplicate(all_matches)

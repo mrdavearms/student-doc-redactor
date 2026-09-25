@@ -55,3 +55,57 @@ class TestEveryDetectionSiteUsesTheSharedRule:
         recogniser = presidio_recognizers.StudentNameRecognizer(["Billy Bob", "Billy"])
         assert recogniser.analyze("billy bob went home", ["STUDENT_NAME"]) == []
         assert len(recogniser.analyze("Billy Bob went home", ["STUDENT_NAME"])) == 2
+
+
+import case_rules
+from case_rules import EXACT, IGNORE, NOT_LOWERCASE, case_allows, case_mode
+
+
+class TestCaseMode:
+    """The predicate itself. The word list is patched so these tests do not
+    depend on what the shipped list happens to contain."""
+
+    @staticmethod
+    def _words(monkeypatch):
+        monkeypatch.setattr(case_rules, 'COMMON_WORDS', frozenset({'young', 'will', 'long'}))
+
+    def test_two_letters_are_exact(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_mode('Do') == EXACT
+        assert case_mode(' Li ') == EXACT
+
+    def test_single_common_word(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_mode('Young') == NOT_LOWERCASE
+        assert case_mode('YOUNG') == NOT_LOWERCASE
+        assert case_mode('young') == NOT_LOWERCASE
+
+    def test_single_uncommon_word(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_mode('Nguyen') == IGNORE
+
+    def test_multi_token_is_never_a_common_word(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_mode('Will Young') == IGNORE
+        assert case_mode('W. Young') == IGNORE
+
+    def test_hyphenated_and_possessive_forms_are_not_single_words(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_mode('Young-Long') == IGNORE
+        assert case_mode("Young's") == IGNORE
+
+    def test_case_allows_rejects_only_all_lowercase(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_allows('Young', 'Young')
+        assert case_allows('Young', 'YOUNG')
+        assert case_allows('Young', "Young's,")
+        assert not case_allows('Young', 'young')
+        assert not case_allows('Young', "young's")
+        # The rule belongs to the PII string, however the user typed it.
+        assert not case_allows('young', 'young')
+        assert case_allows('young', 'Young')
+
+    def test_case_allows_leaves_other_modes_alone(self, monkeypatch):
+        self._words(monkeypatch)
+        assert case_allows('Nguyen', 'nguyen')
+        assert case_allows('Will Young', 'will young')

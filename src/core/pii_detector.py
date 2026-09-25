@@ -8,6 +8,7 @@ import unicodedata
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 from nickname_map import NICKNAME_MAP, REVERSE_NICKNAME_MAP
+from case_rules import EXACT, case_mode
 
 
 def _normalise_text(text: str) -> str:
@@ -105,12 +106,15 @@ _CONTEXTUAL_NAME_EXCLUDE = {
 # matched CASE-SENSITIVELY: "Do" the surname, never "do" the verb; "He" the
 # surname, never "he" the pronoun. Longer names stay case-insensitive.
 MIN_NAME_LENGTH = 2
-CASE_SENSITIVE_MAX_LEN = 2
 
 
 def match_flags(text: str) -> int:
-    """`re` flags for matching one PII string — see MIN_NAME_LENGTH."""
-    return 0 if len(text.strip()) <= CASE_SENSITIVE_MAX_LEN else re.IGNORECASE
+    """
+    `re` flags for matching one PII string. The rule itself lives in
+    case_rules.case_mode; a NOT_LOWERCASE word is matched ignoring case here
+    and its all-lowercase hits are dropped by the orchestrator (case_allows).
+    """
+    return 0 if case_mode(text) == EXACT else re.IGNORECASE
 
 
 # Boundaries for matching a name variation. Plain \b fails when the variation
