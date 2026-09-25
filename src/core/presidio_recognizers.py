@@ -7,6 +7,8 @@ from typing import List, Optional
 from presidio_analyzer import PatternRecognizer, Pattern, EntityRecognizer, RecognizerResult, AnalysisExplanation
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
+from pii_detector import match_flags
+
 
 class AustralianPhoneRecognizer(PatternRecognizer):
     """Detects Australian phone numbers."""
@@ -220,10 +222,13 @@ class StudentNameRecognizer(EntityRecognizer):
         text_lower = text.lower()
 
         for variation in self.name_variations:
+            # Two-letter variations are left to the regex detector, which
+            # already matches them (case-sensitively); this recogniser only
+            # duplicated its work. The case rule itself is the shared one.
             if len(variation) < 3:
                 continue
             pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(variation) + r"(?![A-Za-z0-9])",
-                                 re.IGNORECASE)
+                                 match_flags(variation))
             for match in pattern.finditer(text):
                 results.append(
                     RecognizerResult(

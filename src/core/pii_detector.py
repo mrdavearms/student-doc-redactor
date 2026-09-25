@@ -503,9 +503,10 @@ class PIIDetector:
                     context=context
                 ))
 
-        # Nickname variations at lower confidence
+        # Nickname variations at lower confidence. Same case rule as every
+        # other name (match_flags): "Ed" for Edward is not "ED" or "ed".
         for nick in getattr(self, '_nickname_variations', []):
-            pattern = re.compile(_NAME_LEFT + re.escape(nick) + _NAME_RIGHT, re.IGNORECASE)
+            pattern = re.compile(_NAME_LEFT + re.escape(nick) + _NAME_RIGHT, match_flags(nick))
             for m in pattern.finditer(line):
                 matches.append(PIIMatch(
                     text=m.group(), category="Student name (nickname)", confidence=0.75,
@@ -856,7 +857,7 @@ class PIIDetector:
 
         for org_name in self.organisation_names:
             # Full org name match
-            pattern = re.compile(r'\b' + re.escape(org_name) + r'\b', re.IGNORECASE)
+            pattern = re.compile(r'\b' + re.escape(org_name) + r'\b', match_flags(org_name))
             for match in pattern.finditer(line):
                 context = self._get_context(line, match.start(), match.end())
                 matches.append(PIIMatch(
@@ -878,7 +879,7 @@ class PIIDetector:
                     continue
                 if clean_word.lower() in _ORG_GENERIC_WORDS:
                     continue
-                word_pattern = re.compile(r'\b' + re.escape(clean_word) + r'\b', re.IGNORECASE)
+                word_pattern = re.compile(r'\b' + re.escape(clean_word) + r'\b', match_flags(clean_word))
                 for match in word_pattern.finditer(line):
                     context = self._get_context(line, match.start(), match.end())
                     matches.append(PIIMatch(
