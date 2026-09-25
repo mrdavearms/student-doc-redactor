@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "core"))
 
 from src.core.redactor import strip_pii_from_filename
 
@@ -84,3 +85,17 @@ class TestStripPiiFromFilename:
         )
         assert "Greenwood" not in result
         assert "Assessment" in result
+
+
+class TestCommonWordNamesInFilenames:
+    """Filenames stay case-insensitive for names that are also ordinary words
+    (rule 7a's stated exception). File names are routinely all lowercase and
+    hold no prose, so there is nothing to protect by keeping "young"."""
+
+    YOUNG = ["William Young", "William", "Young", "W. Young"]
+
+    def test_lowercase_common_word_surname_is_still_stripped(self):
+        assert strip_pii_from_filename("young william report", self.YOUNG) == "report"
+
+    def test_capitalised_form_is_stripped_too(self):
+        assert strip_pii_from_filename("Young, William - IEP", self.YOUNG) == "IEP"
