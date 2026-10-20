@@ -17,7 +17,7 @@ Two frontends exist:
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (890 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 222 tests across 17 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, and `electron/macUpdate.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 231 tests across 18 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, `electron/macUpdate.cjs`, and `electron/startupRescue.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -170,6 +170,8 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/electron/menu.cjs` | Application menu template per platform — see rule #75 |
 | `desktop/electron/macUpdate.cjs` | Pure logic for the macOS self-updater — asset choice, download URL, "can we self-update?" checks, and the swap-script text. Unit-tested |
 | `desktop/electron/macUpdateInstaller.cjs` | I/O half of the macOS self-updater — download + SHA-512 check, mount the dmg, stage the new `.app` beside the old one |
+| `desktop/electron/startupRescue.cjs` | What to show when the engine fails to start — offers a newer release, and tells a port clash from a broken engine (rule #80) |
+| `constraints-desktop.txt` | Exact versions of every package in the bundled Python — rule #81 |
 | `desktop/electron/preload.cjs` | Electron preload — exposes `selectFolder`, `openExternal` to renderer |
 | `desktop/src/App.tsx` | React entry point, screen router |
 | `desktop/src/store.ts` | Zustand store — single source of truth for UI state |
@@ -870,6 +872,26 @@ Also from the same session, too small for their own rule: `previousDocWithMatche
 
 ---
 
+### 80. An engine that fails to start must still be able to find the fix
+
+`setupAutoUpdater()` only runs after `waitForBackend` succeeds. So a release whose Python engine cannot start (a missing or incompatible package) would quit on every launch and never hear about the release that fixes it: its users are stranded until they re-download by hand. `reportStartupFailure()` in `main.cjs` therefore checks GitHub (detect only, `autoDownload` forced off, 15s timeout) before quitting, and when a newer version exists offers "Download the new version", which opens the releases page. The wording and decision live in `electron/startupRescue.cjs` (tested).
+
+The same file's `earlyExitMessage()` fixes the message for that case. Every exit before ready used to report rule #55's "another copy is running… restart your computer", which sends a broken-engine user the wrong way. It now says the engine is damaged only when stderr holds a Python traceback AND no `error while attempting to bind` (uvicorn's port-clash wording, which prints no traceback). Anything else keeps the port message, so rule #55 is unchanged.
+
+Verified 20 Oct 2026 with a packaged copy labelled 1.9.3 whose `fastapi` was removed: it found 1.9.4 on GitHub and offered it, with no download started.
+
+### 81. The bundled Python is pinned, and both bundle scripts prove the engine starts
+
+`requirements-desktop.txt` only sets minimums, so every release build installed whatever was newest on PyPI that day. By October 2026 that would have been PyMuPDF 2.0, Pillow 13 and Starlette 1.x, all untested, shipped to every user through the auto-updater. Both bundle scripts now install with `-c constraints-desktop.txt`, which pins all 64 packages to the set the 890 tests pass on. To move a version: change it there, install the same set into `venv/`, run the full suite, then do a packaged `--dir` build and launch it.
+
+Check a change to the pins resolves on BOTH platforms before tagging, from the Mac:
+```
+uv pip compile requirements-desktop.txt -c constraints-desktop.txt --python-version 3.13 --python-platform x86_64-pc-windows-msvc --only-binary :all:
+```
+(and again with `aarch64-apple-darwin`). Do not use `pip install --dry-run --platform win_amd64` for this: pip still evaluates platform markers against the Mac, so it demands uvloop on Windows and reports a conflict that does not exist.
+
+Both scripts end the Python step with an engine self-check: `import backend.main` plus `spacy.load('en_core_web_lg')`, after the Mac script's stdlib pruning. The Windows script also checks `$LASTEXITCODE` after pip and the model download. `$ErrorActionPreference = "Stop"` does not apply to native programs, so a failed pip install used to carry on and package an incomplete engine.
+
 ## Session State Keys (Streamlit)
 
 All keys initialised in `session_state.init_session_state()`:
@@ -1173,7 +1195,7 @@ The Mac flow, and why each step is the way it is:
 - **OCR redaction quality**: Depends entirely on scan quality. Low-DPI or blurry scans may cause missed words.
 - **`docs/legacy/`**: Contains 6 legacy markdown files moved from root during cleanup. Outdated — README.md is the authoritative user documentation.
 - **`docs/plans/`**: Contains implementation plans from each development phase. Reference only.
-- **Dependency advisories**: `npm audit` is at **0 vulnerabilities** as of 11 August 2026. The last one — `electron` GHSA-9f4c-93c8-jc8g — was closed by moving the runtime 40.10.6 → **43.3.0** per `docs/plans/2026-08-08-electron-major-upgrade.md`, which is now done and records what was verified. The advisory was never exploitable here (no iframes/webview, local-file loading only, `contextIsolation` on, popups and off-app navigation already denied); the real driver was that Electron 40 is off the supported line and receives no Chromium fixes. **Still do NOT run `npm audit fix --force`** — it makes runtime-major decisions as a side effect with no test pass.
+- **Dependency advisories**: On 20 October 2026 the count had drifted from 0 to 26 against an unchanged lockfile. Electron 43.3.0 → **43.8.1** (four shipped advisories, fixed in the same major) and a plain `npm audit fix` (which also lifted electron-updater's js-yaml to 4.3.2 and electron-builder to 26.17.0; the signature was re-checked) left **12, all build- or test-time**: electron-builder's download helpers, whose only offered "fix" is a downgrade to 26.5.0, and vitest/tinypool, which needs vitest 5. Neither ships. Before that, `npm audit` was at **0 vulnerabilities** as of 11 August 2026. The last one — `electron` GHSA-9f4c-93c8-jc8g — was closed by moving the runtime 40.10.6 → **43.3.0** per `docs/plans/2026-08-08-electron-major-upgrade.md`, which is now done and records what was verified. The advisory was never exploitable here (no iframes/webview, local-file loading only, `contextIsolation` on, popups and off-app navigation already denied); the real driver was that Electron 40 is off the supported line and receives no Chromium fixes. **Still do NOT run `npm audit fix --force`** — it makes runtime-major decisions as a side effect with no test pass.
 
   Triage rule for this repo, because most advisories here are noise: `dependencies` in `desktop/package.json` ship, and so does **electron** (a devDependency only by convention — electron-builder bundles the runtime). Everything reached solely through `electron-builder`, `@electron/get`, vite or tailwind is **build-time only and never enters the `.dmg`/`.exe`**. The August sweep was 14 Dependabot alerts of which 12 were build-time; check the dependency path before treating a number as urgent.
 
