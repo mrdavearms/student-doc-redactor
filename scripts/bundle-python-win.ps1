@@ -41,11 +41,29 @@ if (Test-Path $PythonDest) {
 $PythonBin = Join-Path $PythonDest "python.exe"
 
 Write-Host "==> Installing pip dependencies into bundled Python..."
+# $ErrorActionPreference does not apply to native programs: without these
+# exit-code checks a failed pip install carried on and packaged an engine
+# with missing pieces.
 & $PythonBin -m pip install --upgrade pip --quiet
-& $PythonBin -m pip install -r (Join-Path $RepoRoot "requirements-desktop.txt") --quiet
+if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit $LASTEXITCODE)" }
+& $PythonBin -m pip install -r (Join-Path $RepoRoot "requirements-desktop.txt") -c (Join-Path $RepoRoot "constraints-desktop.txt") --quiet
+if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit $LASTEXITCODE)" }
 
 Write-Host "==> Downloading spaCy model (en_core_web_lg)..."
 & $PythonBin -m spacy download en_core_web_lg --quiet
+if ($LASTEXITCODE -ne 0) { throw "spaCy model download failed (exit $LASTEXITCODE)" }
+
+# Self-check: import the module the app launches and load the language model.
+# An engine that cannot start quits the app before the auto-updater runs, so
+# it must never reach a release.
+Write-Host "==> Checking the bundled engine starts..."
+Push-Location $RepoRoot
+$env:PYTHONPATH = Join-Path $RepoRoot "src\core"
+& $PythonBin -c "import backend.main, spacy; spacy.load('en_core_web_lg'); print('    Engine imports OK')"
+$EngineCheck = $LASTEXITCODE
+Remove-Item Env:PYTHONPATH
+Pop-Location
+if ($EngineCheck -ne 0) { throw "Bundled engine failed to import (exit $EngineCheck)" }
 
 # ── Bundle Tesseract ──────────────────────────────────────────────────
 Write-Host "==> Bundling Tesseract..."
