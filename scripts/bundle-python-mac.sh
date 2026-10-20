@@ -68,7 +68,7 @@ echo "==> Bootstrapping pip into clean site-packages..."
 
 echo "==> Installing pip dependencies into bundled Python..."
 "$PYTHON_BIN" -m pip install --upgrade pip --quiet
-"$PYTHON_BIN" -m pip install -r "$REPO_ROOT/requirements-desktop.txt" --quiet
+"$PYTHON_BIN" -m pip install -r "$REPO_ROOT/requirements-desktop.txt" -c "$REPO_ROOT/constraints-desktop.txt" --quiet
 
 echo "==> Downloading spaCy model (en_core_web_lg)..."
 "$PYTHON_BIN" -m spacy download en_core_web_lg --quiet
@@ -101,6 +101,14 @@ for item in tcl9.0 tk9.0 itcl4.3.5 tcl9 thread3.0.4 libtcl9.0.dylib libtcl9tk9.0
     echo "    Removed lib: $item"
   fi
 done
+
+# ── Self-check: the bundled Python must be able to start the engine ─────
+# Imports the same module the app launches and loads the language model,
+# AFTER the pruning above. An engine that cannot start quits the app before
+# the auto-updater runs, so it must never reach a release.
+echo "==> Checking the bundled engine starts..."
+(cd "$REPO_ROOT" && PYTHONPATH="$REPO_ROOT/src/core" "$PYTHON_BIN" -c \
+  "import backend.main, spacy; spacy.load('en_core_web_lg'); print('    Engine imports OK')")
 
 # ── Bundle Tesseract ──────────────────────────────────────────────────
 echo "==> Bundling Tesseract..."
