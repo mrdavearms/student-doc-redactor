@@ -14,6 +14,11 @@ const fs = require('fs');
 const { isAllowedNavigation } = require('./navigation.cjs');
 const { buildMenuTemplate } = require('./menu.cjs');
 const {
+  startupFailureDialog,
+  earlyExitMessage,
+  RESCUE_CHECK_TIMEOUT_MS,
+} = require('./startupRescue.cjs');
+const {
   downloadUrlFor,
   pickMacAsset,
   selfUpdateBlockedReason,
@@ -53,11 +58,9 @@ let macUpdateInFlight = false;
 let backendReady = false;
 // Why our own backend died during startup, if it did.
 let backendFailure = null;
-
-const PORT_IN_USE_MESSAGE =
-  'Another copy of the redaction engine is already running on this computer.\n\n' +
-  'Close any other copy of this app and try again. If you have just force-quit ' +
-  'the app, restarting your computer will clear it.';
+// The end of what the backend printed to stderr, so an early exit can be told
+// apart: port held by another copy, or an engine that is missing a package.
+let backendStderrTail = '';
 
 /** Wait for the backend to respond on its port (30-second wall-clock timeout). */
 function waitForBackend(port, timeoutMs = 30000) {
@@ -142,6 +145,38 @@ function showErrorWindow(title, message) {
   app.quit();
 }
 
+/**
+ * The engine did not start. setupAutoUpdater() never runs in that case, so a
+ * release with a broken engine would strand its users on it: check for a newer
+ * release here before quitting, and offer its download page if there is one.
+ */
+async function reportStartupFailure(message) {
+  let checkResult = null;
+  if (!isDev) {
+    // Detect only. On Windows autoDownload defaults to true and would start a
+    // half-gigabyte download into an app that is about to quit.
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    checkResult = await Promise.race([
+      autoUpdater.checkForUpdates().catch(() => null),
+      new Promise((resolve) => setTimeout(() => resolve(null), RESCUE_CHECK_TIMEOUT_MS)),
+    ]);
+  }
+
+  const outcome = startupFailureDialog({
+    failureMessage: message,
+    currentVersion: app.getVersion(),
+    checkResult,
+  });
+  if (outcome.kind === 'update') {
+    const { response } = await dialog.showMessageBox(outcome.options);
+    if (response === 0) await shell.openExternal(outcome.url);
+    app.quit();
+    return;
+  }
+  showErrorWindow(outcome.title, outcome.message);
+}
+
 /** Start the Python FastAPI backend. */
 function startBackend() {
   const resourcesPath = isDev
@@ -203,6 +238,7 @@ function startBackend() {
 
   backendProcess.stderr.on('data', (data) => {
     console.error(`[backend] ${data.toString().trim()}`);
+    if (!backendReady) backendStderrTail = (backendStderrTail + data.toString()).slice(-8192);
   });
 
   backendProcess.on('exit', (code, signal) => {
@@ -213,9 +249,10 @@ function startBackend() {
     if (!backendReady) {
       // Died before we ever served a request. Overwhelmingly this is the port
       // already being held by an orphan or a second copy — uvicorn exits 1 on
-      // "address already in use". Hand it to waitForBackend rather than racing
-      // it with a second, vaguer dialog.
-      backendFailure = PORT_IN_USE_MESSAGE;
+      // "address already in use". A broken engine (missing package) also lands
+      // here; earlyExitMessage tells the two apart from stderr. Hand it to
+      // waitForBackend rather than racing it with a second, vaguer dialog.
+      backendFailure = earlyExitMessage(backendStderrTail);
       return;
     }
 
@@ -688,7 +725,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     } catch (e) {
       console.error('Failed to start backend:', e);
-      showErrorWindow('Failed to Start', e.message);
+      await reportStartupFailure(e.message);
     }
   });
 }
