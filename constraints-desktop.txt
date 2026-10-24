@@ -40,7 +40,7 @@ murmurhash==1.0.15
 numpy==2.4.3
 packaging==26.0
 phonenumbers==9.0.26
-pillow==12.3.0
+pillow==13.0.0
 preshed==3.0.12
 presidio_analyzer==2.2.362
 pydantic==2.12.5
