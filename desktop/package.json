@@ -1,7 +1,7 @@
 {
   "name": "redaction-tool",
   "private": true,
-  "version": "1.9.4",
+  "version": "1.9.5",
   "description": "PII Detection & Redaction Tool for Student Documents",
   "author": "Antigravity",
   "type": "module",
@@ -37,7 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^9.2.1",
-    "electron": "^43.8.1",
+    "electron": "^43.8.3",
     "electron-builder": "^26.8.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
