@@ -882,7 +882,7 @@ Verified 20 Oct 2026 with a packaged copy labelled 1.9.3 whose `fastapi` was rem
 
 ### 81. The bundled Python is pinned, and both bundle scripts prove the engine starts
 
-`requirements-desktop.txt` only sets minimums, so every release build installed whatever was newest on PyPI that day. By October 2026 that would have been PyMuPDF 2.0, Pillow 13 and Starlette 1.x, all untested, shipped to every user through the auto-updater. Both bundle scripts now install with `-c constraints-desktop.txt`, which pins all 64 packages to the set the 890 tests pass on. To move a version: change it there, install the same set into `venv/`, run the full suite, then do a packaged `--dir` build and launch it.
+`requirements-desktop.txt` only sets minimums, so every release build installed whatever was newest on PyPI that day. By October 2026 that would have been PyMuPDF 2.0, Pillow 13 and Starlette 1.x, all untested, shipped to every user through the auto-updater. Both bundle scripts now install with `-c constraints-desktop.txt`, which pins all 64 packages to the set the 890 tests pass on. To move a version: change it there, install the same set into `venv/`, run the full suite, then do a packaged `--dir` build and launch it. Pillow 13 and Starlette 1.3.1 were moved to deliberately on 24 October 2026. FastAPI is held at **0.141.1**: 0.142.0 made `opentelemetry-api` a required dependency, and 0.143–0.162 were a fortnight of breaking releases; 0.141.1 + Starlette 1.3.1 is a pair FastAPI's own test suite ran.
 
 Check a change to the pins resolves on BOTH platforms before tagging, from the Mac:
 ```
