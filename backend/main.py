@@ -98,7 +98,14 @@ app = FastAPI(title="Redaction Tool API", version="2.0.0")
 @app.middleware("http")
 async def require_api_token(request: Request, call_next):
     expected = os.environ.get("REDACTION_API_TOKEN", "")
-    if expected and request.method != "OPTIONS" and request.url.path.rstrip("/") != "/api/health":
+    # Only a genuine CORS preflight (it carries both Origin and
+    # Access-Control-Request-Method) skips the token; a bare OPTIONS does not.
+    is_preflight = (
+        request.method == "OPTIONS"
+        and "origin" in request.headers
+        and "access-control-request-method" in request.headers
+    )
+    if expected and not is_preflight and request.url.path.rstrip("/") != "/api/health":
         provided = request.headers.get("x-api-token", "")
         # Compare as bytes: compare_digest raises TypeError on non-ASCII str,
         # which would turn a bad header into a 500 + traceback.
@@ -149,6 +156,41 @@ _detection_cache: Dict[str, Dict] = {}
 _detection_lock = threading.Lock()
 _detection_generation = 0
 
+# Resolved paths /api/preview may render: the documents in the detection cache
+# and the output / quarantine files /api/redact produced. Without it the
+# endpoint rendered any PDF on disk for whoever held the token.
+_previewable: set = set()
+
+
+# Resolved paths /api/pii/detect may read: the documents returned by the most
+# recent /api/folder/process or /api/file/process (Word-converted PDFs in the
+# temp root included). Replaced on each process call, cleared on discard.
+# Without it, detect -> _publish_detection would put ANY existing path into
+# _previewable and return its text as match context.
+_processable: set = set()
+
+
+def _resolved(path):
+    try:
+        return str(Path(path).resolve())
+    except (OSError, ValueError):
+        return None
+
+
+def _register_processable(results) -> None:
+    _processable.clear()
+    for p in [*results.pdf_files, *results.converted_files]:
+        r = _resolved(p)
+        if r:
+            _processable.add(r)
+
+
+def _allow_preview(path) -> None:
+    try:
+        _previewable.add(str(Path(path).resolve()))
+    except (OSError, ValueError):
+        pass
+
 
 def _begin_detection() -> int:
     """Claim the next detection generation. Call this immediately before the
@@ -172,6 +214,9 @@ def _publish_detection(generation: int, entries: Dict[str, Dict]) -> bool:
             return False
         _detection_cache.clear()
         _detection_cache.update(entries)
+        _previewable.clear()
+        for key in entries:
+            _allow_preview(key)
         return True
 
 # Reserved detection-cache key for the paste pathway. Chosen because "<" and ">"
@@ -282,6 +327,7 @@ def process_folder(req: ProcessFolderRequest):
     try:
         service = ConversionService()
         results = service.process_folder(folder)
+        _register_processable(results)
     except HTTPException:
         raise
     except Exception as e:
@@ -304,12 +350,13 @@ def process_folder(req: ProcessFolderRequest):
 def process_file(req: ProcessFileRequest):
     """Single-document mode: prepare one file instead of scanning a folder."""
     file_path = Path(req.file_path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=400, detail=f"File not found: {req.file_path}")
+    if not file_path.is_absolute() or not file_path.is_file():
+        raise HTTPException(status_code=400, detail="File not found.")
 
     try:
         service = ConversionService()
         results = service.process_file(file_path)
+        _register_processable(results)
     except HTTPException:
         raise
     except Exception as e:
@@ -338,8 +385,10 @@ def detect_pii(req: DetectPIIRequest):
         raise HTTPException(status_code=400, detail="Invalid document path.")
 
     for p in pdf_paths:
+        if not p.is_absolute() or _resolved(p) not in _processable:
+            raise HTTPException(status_code=403, detail="Document has not been prepared.")
         if not p.exists():
-            raise HTTPException(status_code=400, detail=f"File not found: {p}")
+            raise HTTPException(status_code=400, detail="File not found.")
 
     generation = _begin_detection()
 
@@ -631,6 +680,8 @@ def discard_detection():
     _begin_detection()
     discarded = len(_detection_cache)
     _detection_cache.clear()
+    _previewable.clear()
+    _processable.clear()
     # The converted PDFs of Word files are unredacted copies; starting over
     # means they are no longer needed (rule 66).
     clear_conversions()
@@ -718,6 +769,12 @@ def redact_documents(req: RedactRequest):
             request,
             should_cancel=lambda: _redaction_control["cancel_requested"],
         )
+
+        for r in results.document_results:
+            if r.output_path:
+                _allow_preview(r.output_path)
+            if r.quarantine_path:
+                _allow_preview(r.quarantine_path)
 
         return RedactionResultsResponse(
             redacted_folder=str(results.redacted_folder),
@@ -1058,8 +1115,10 @@ def preview_page(req: PreviewRequest):
     import fitz
 
     pdf_path = Path(req.pdf_path)
+    if not pdf_path.is_absolute() or _resolved(pdf_path) not in _previewable:
+        raise HTTPException(status_code=403, detail="Preview not available for that file.")
     if not pdf_path.exists():
-        raise HTTPException(status_code=400, detail=f"File not found: {req.pdf_path}")
+        raise HTTPException(status_code=400, detail="File not found.")
 
     try:
         doc = fitz.open(str(pdf_path))
@@ -1094,8 +1153,9 @@ def preview_page(req: PreviewRequest):
 @app.post("/api/folder/open")
 def open_folder(req: OpenFolderRequest):
     folder = Path(req.folder_path)
-    if not folder.exists():
-        raise HTTPException(status_code=400, detail=f"Folder not found: {req.folder_path}")
+    # Directories only: opening a file would launch it with its OS handler.
+    if not folder.is_absolute() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail="Folder not found.")
 
     system = platform.system()
     if system == "Darwin":
@@ -1122,6 +1182,8 @@ def validate_folder(req: ProcessFolderRequest):
 def validate_file(req: ProcessFileRequest):
     """Check a single document path, and whether it is a type we can handle."""
     file_path = Path(req.file_path)
+    if not file_path.is_absolute():
+        raise HTTPException(status_code=400, detail="File not found.")
     exists = file_path.exists()
     is_file = file_path.is_file() if exists else False
     supported = file_path.suffix.lower() in (".pdf", ".doc", ".docx")

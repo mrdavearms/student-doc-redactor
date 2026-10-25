@@ -62,11 +62,12 @@ def test_preview_endpoint_closes_doc_and_validates_range():
     """The /api/preview endpoint must close its document on both the happy
     path and the out-of-range path, and still return the documented results."""
     from fastapi.testclient import TestClient
-    from backend.main import app
+    from backend.main import app, _allow_preview
 
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "doc.pdf"
         _make_pdf(src, "Preview me")
+        _allow_preview(src)  # preview only serves detected documents / outputs
 
         opened = []
         real_open = fitz.open

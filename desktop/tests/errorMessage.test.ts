@@ -18,6 +18,21 @@ describe('friendlyError', () => {
       .toMatch(/couldn't be opened/i);
   });
 
+  it('maps "Document has not been prepared" to a prepare-again message', () => {
+    expect(friendlyError(new Error('Document has not been prepared.')))
+      .toMatch(/prepared again/i);
+  });
+
+  it('maps "Preview not available" to a preview-refused message', () => {
+    expect(friendlyError(new Error('Preview not available for that file.')))
+      .toMatch(/can't be previewed/i);
+  });
+
+  it('maps the path-free "Folder not found." and "File not found." details', () => {
+    expect(friendlyError(new Error('Folder not found.'))).toMatch(/folder couldn't be found/i);
+    expect(friendlyError(new Error('File not found.'))).toMatch(/couldn't be opened/i);
+  });
+
   it('maps "File processing failed" to a friendly retry message', () => {
     expect(friendlyError(new Error('File processing failed: disk error')))
       .toMatch(/preparing that document/i);

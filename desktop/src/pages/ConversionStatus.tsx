@@ -73,8 +73,19 @@ export default function ConversionStatus() {
     await runDetection({
       fingerprint: { pdfs: allPdfs },
       message: 'Extracting text and detecting PII...',
-      run: (names, signal) =>
-        api.detectPII({ pdf_paths: allPdfs, ...names }, { signal }),
+      run: async (names, signal) => {
+        try {
+          return await api.detectPII({ pdf_paths: allPdfs, ...names }, { signal });
+        } catch (e) {
+          // The engine no longer knows these documents (it restarted since
+          // they were prepared): drop the stale results so the effect above
+          // prepares them again.
+          if (/has not been prepared/i.test(String((e as Error)?.message))) {
+            setConversionResults(null);
+          }
+          throw e;
+        }
+      },
     });
   };
 

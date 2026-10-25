@@ -9,6 +9,8 @@ const PATTERNS: Array<[RegExp, string]> = [
   // error full of file paths, and it means the checker never ran, not that it
   // found anything.
   [/OCR verification error[\s\S]*(dyld|librar|\.dylib|\.dll|tesseract is not installed)/i, CHECKER_COULD_NOT_RUN],
+  [/preview not available/i, "That page can't be previewed here. Open the file from its folder instead."],
+  [/has not been prepared/i, "Those documents need to be prepared again. Please wait a moment, then press Continue."],
   [/folder not found/i, "That folder couldn't be found. Check the path and try again."],
   [/file not found/i, "That file couldn't be opened. It may have been moved, renamed, or deleted."],
   [/no cached detection data/i, "The detection step needs to run again. Please go back one step and try again."],

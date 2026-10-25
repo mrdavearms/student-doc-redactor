@@ -65,7 +65,7 @@ interface AppState {
 
   // Step 2: Conversion
   conversionResults: ConversionResults | null;
-  setConversionResults: (results: ConversionResults) => void;
+  setConversionResults: (results: ConversionResults | null) => void;
 
   // Which input produced conversionResults (the folder, or the single file) —
   // lets ConversionStatus detect a change and reprocess, without destroying
