@@ -4,6 +4,7 @@ Converts Word documents to PDF using LibreOffice in headless mode.
 """
 
 import atexit
+import os
 import platform
 import shutil
 import subprocess
@@ -33,7 +34,16 @@ def _temp_root() -> Path:
     """This backend process's private temp directory, created on first use."""
     global _TEMP_ROOT
     if _TEMP_ROOT is None:
-        _TEMP_ROOT = Path(tempfile.mkdtemp(prefix="redaction-tool-"))
+        # Electron creates (and, after this process exits, deletes) the folder
+        # and passes it in. The atexit below stays: it covers a manual uvicorn
+        # run, and removing an already-removed folder is harmless. The
+        # fallback has its own prefix so Electron's launch sweep never removes
+        # the folder of a manual uvicorn or pytest run that is still going.
+        given = os.environ.get("REDACTION_TEMP_ROOT")
+        if given and os.path.isabs(given) and os.path.isdir(given):
+            _TEMP_ROOT = Path(given)
+        else:
+            _TEMP_ROOT = Path(tempfile.mkdtemp(prefix="redaction-tool-py-"))
         atexit.register(shutil.rmtree, _TEMP_ROOT, True)
     return _TEMP_ROOT
 
@@ -65,6 +75,16 @@ def _conversion_dir() -> Path:
     shutil.rmtree(converted, ignore_errors=True)
     converted.mkdir(parents=True, exist_ok=True)
     return converted
+
+
+def clear_conversions() -> None:
+    """
+    Delete this process's converted (unredacted) PDFs now, e.g. when the user
+    starts over. Does nothing if no conversion has ever run: it must not create
+    a temp root just to empty it.
+    """
+    if _TEMP_ROOT is not None:
+        shutil.rmtree(_TEMP_ROOT / "converted", ignore_errors=True)
 
 
 def _remove_legacy_temp_dir(folder: Path) -> None:

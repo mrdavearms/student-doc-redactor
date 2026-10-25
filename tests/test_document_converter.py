@@ -6,7 +6,7 @@ LibreOffice window the user has open. A good document still converts, but a
 damaged one then exits 0 with no PDF and no error text at all (reproduced on
 LibreOffice 26.8), so the user saw "Conversion failed:" and nothing after it.
 """
-import sys, os
+import sys, os, shutil
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'core'))
 
 from pathlib import Path
@@ -71,3 +71,26 @@ class TestFailureMessages:
             ok, message, _ = _converter().convert_to_pdf(docx, tmp_path / "out")
         assert not ok
         assert message == "Conversion failed: Error: source file could not be loaded"
+
+
+class TestTempRootFromElectron:
+
+    def test_temp_root_uses_env_when_set(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(document_converter, '_TEMP_ROOT', None)
+        monkeypatch.setenv('REDACTION_TEMP_ROOT', str(tmp_path))
+        with patch('document_converter.atexit.register') as reg:
+            assert document_converter._temp_root() == tmp_path
+        reg.assert_called_once()
+
+    def test_temp_root_ignores_relative_env(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(document_converter, '_TEMP_ROOT', None)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / 'rel').mkdir()
+        monkeypatch.setenv('REDACTION_TEMP_ROOT', 'rel')
+        with patch('document_converter.atexit.register'):
+            root = document_converter._temp_root()
+        try:
+            assert root.is_absolute() and root != tmp_path / 'rel'
+            assert root.name.startswith('redaction-tool-py-')
+        finally:
+            shutil.rmtree(root, True)

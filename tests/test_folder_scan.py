@@ -159,3 +159,26 @@ class TestWordFilesThatShareAStem:
         results = ConversionService().process_folder(tmp_path)
         assert results.total_files == 1
         assert results.flagged_count == 0
+
+
+class TestStartOverDeletesConvertedCopies:
+    def test_discard_clears_converted_pdfs(self):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        from src.core import document_converter as dc
+
+        converted = dc._conversion_dir()
+        leftover = converted / "001" / "Billy Bob plan.pdf"
+        leftover.parent.mkdir(parents=True)
+        leftover.write_bytes(b"%PDF unredacted copy")
+
+        r = TestClient(app).post("/api/detection/discard")
+        assert r.status_code == 200
+        assert not leftover.exists()
+
+    def test_clear_conversions_does_not_create_a_temp_root(self, monkeypatch):
+        from src.core import document_converter as dc
+
+        monkeypatch.setattr(dc, "_TEMP_ROOT", None)
+        dc.clear_conversions()
+        assert dc._TEMP_ROOT is None

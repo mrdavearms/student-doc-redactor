@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.services.conversion_service import ConversionService
+from src.core.document_converter import clear_conversions
 from src.services.detection_service import DetectionService
 from src.services.redaction_service import RedactionService, RedactionRequest
 from src.services.deidentification_service import (
@@ -618,6 +619,9 @@ def discard_detection():
     _begin_detection()
     discarded = len(_detection_cache)
     _detection_cache.clear()
+    # The converted PDFs of Word files are unredacted copies; starting over
+    # means they are no longer needed (rule 66).
+    clear_conversions()
     return {"discarded": discarded}
 
 

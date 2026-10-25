@@ -13,6 +13,8 @@ const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { isAllowedNavigation } = require('./navigation.cjs');
 const { buildMenuTemplate } = require('./menu.cjs');
+const { createRoot, removeRoot, sweepStale } = require('./tempRoot.cjs');
+const os = require('os');
 const {
   startupFailureDialog,
   earlyExitMessage,
@@ -45,6 +47,10 @@ const isDev = !app.isPackaged;
 const DAILY_UPDATE_CHECK_MS = 24 * 60 * 60 * 1000;
 
 let backendProcess = null;
+// Folder the backend writes unredacted Word conversions into. Electron owns it
+// (tempRoot.cjs) because the backend's own atexit cleanup does not run when it
+// is killed. One per start; the backend is never restarted with the same one.
+let conversionRoot = null;
 let mainWindow = null;
 let updateCheckInterval = null;
 // Set once a macOS update has been downloaded and staged beside the installed
@@ -201,6 +207,10 @@ function startBackend() {
       : path.join(resourcesPath, 'bundled-python', 'bin', 'python3');
   }
 
+  sweepStale(os.tmpdir(), '');
+  conversionRoot = createRoot(os.tmpdir());
+  const rootForThisBackend = conversionRoot;
+
   console.log(`Starting backend: ${pythonPath} -m uvicorn backend.main:app --port ${BACKEND_PORT}`);
 
   backendProcess = spawn(pythonPath, [
@@ -222,6 +232,7 @@ function startBackend() {
       RESOURCES_PATH: resourcesPath,
       TESSDATA_PREFIX: path.join(resourcesPath, 'bundled-tesseract', 'tessdata'),
       REDACTION_API_TOKEN: API_TOKEN,
+      REDACTION_TEMP_ROOT: rootForThisBackend,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
     // Windows only: python.exe is a console-subsystem binary, and a GUI
@@ -243,6 +254,7 @@ function startBackend() {
 
   backendProcess.on('exit', (code, signal) => {
     console.log(`Backend exited with code ${code}, signal ${signal}`);
+    removeRoot(rootForThisBackend);
     if (app.isQuitting) return;
     backendProcess = null;
 
@@ -267,6 +279,7 @@ function startBackend() {
   backendProcess.on('error', (err) => {
     // The process could not be spawned at all (bad path, permissions, etc.).
     console.error('Failed to spawn backend:', err);
+    removeRoot(rootForThisBackend);
     if (app.isQuitting) return;
     backendProcess = null;
 
@@ -757,7 +770,12 @@ app.on('before-quit', (event) => {
   backendShutdown = new Promise((resolve) => {
     const timer = setTimeout(() => {
       try { proc.kill('SIGKILL'); } catch { /* already gone */ }
-      resolve();
+      // Do not delete the folder yet: the killed process may still hold open
+      // files in it (Windows refuses with EBUSY). Wait, bounded, for its exit;
+      // the removal after the wait below then runs. If the exit never arrives,
+      // quit anyway: the next launch's sweep removes the folder.
+      const giveUp = setTimeout(resolve, 2000);
+      proc.once('exit', () => { clearTimeout(giveUp); resolve(); });
     }, 6000);
     proc.once('exit', () => { clearTimeout(timer); resolve(); });
     try {
@@ -767,5 +785,8 @@ app.on('before-quit', (event) => {
       resolve();
     }
   });
-  backendShutdown.then(() => app.quit());
+  backendShutdown.then(() => {
+    if (conversionRoot) removeRoot(conversionRoot);
+    app.quit();
+  });
 });

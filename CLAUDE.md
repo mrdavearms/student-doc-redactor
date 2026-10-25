@@ -707,7 +707,14 @@ accident the `DO-NOT-UPLOAD` key filename exists to prevent (rule #42).
 
 `document_converter._conversion_dir()` returns a directory under the OS temp
 area, private to the backend process, cleared at the start of each conversion
-run (matching the old overwrite-in-place semantics) and removed via `atexit`.
+run (matching the old overwrite-in-place semantics). **Electron owns the folder**
+(`desktop/electron/tempRoot.cjs`): `main.cjs` creates it, passes it as
+`REDACTION_TEMP_ROOT`, and deletes it after the backend exits on every path
+(normal exit, crash, spawn error; after the 6s SIGKILL in `before-quit` it waits, bounded to 2s, for the killed process's `exit` before deleting, since Windows refuses with EBUSY while handles are open). A folder left by a forced kill, or by a LibreOffice child that outlives Python, is removed at the next launch by the launch sweep, which removes leftover `redaction-tool-*` directories (real
+directories owned by the user, never symlinks) but never `redaction-tool-py-*`,
+the prefix of Python's own fallback folder for a manual uvicorn or pytest run. Python's `atexit` never runs when the backend is killed
+(Node's kill() on Windows, SIGKILL on macOS), which is why it cannot be the only cleaner; its `atexit` stays for manual uvicorn runs, and without the
+env var (or with a relative/missing path) it falls back to `mkdtemp`.
 Each Word file converts into its own numbered sub-folder (`001/`, `002/`…):
 LibreOffice names the output after the source stem, so `Report.doc` and
 `Report.docx` in one folder both wrote `converted/Report.pdf` and the second
@@ -798,6 +805,11 @@ re-detects rather than skipping on a fingerprint whose cache has gone (rule
 It is fire-and-forget from the renderer: starting over must work whether or not
 the backend answers. It claims a detection generation first, for the same
 reason `/api/text/discard` does.
+
+It also calls `document_converter.clear_conversions()`, which deletes the temp
+`converted/` folder (the unredacted PDF copies of Word files, rule #66) without
+creating a temp root if none exists. Without that, starting over left the last
+student's converted copies on disk until the app quit.
 
 ### 72. The Mac Tesseract bundle must be relocated, and the script checks it
 
