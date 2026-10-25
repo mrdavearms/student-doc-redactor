@@ -1,3 +1,4 @@
+import { keyPanelWording } from '../lib/keyPanelWording';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -114,14 +115,16 @@ export default function DeidentifyCompletion() {
             A file named <span className="font-semibold">{basename(r.key_file_path)}</span> was
             saved with your original documents. It turns the labels back into real names, so
             never upload it or paste it into an AI tool.{' '}
-            {r.output_folder_holds_originals ? (
+            {keyPanelWording(r.output_folder_holds_originals, hasFailures) === 'holds-originals' ? (
               <>
                 <span className="font-semibold">
-                  You chose to save the text files into that same folder
+                  Your output folder also holds your original documents
                 </span>
-                , so it also holds your original documents and this key. Don&apos;t
-                share the folder itself — send the individual text files.
+                {' '}and this key. Don&apos;t share the folder itself — send the
+                individual text files.
               </>
+            ) : keyPanelWording(r.output_folder_holds_originals, hasFailures) === 'review-first' ? (
+              <>Do not upload anything listed above as needing review.</>
             ) : (
               <>It is deliberately kept out of the folder below, so everything
               you are about to share stays safe.</>

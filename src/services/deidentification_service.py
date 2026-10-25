@@ -35,6 +35,7 @@ from src.core.pii_orchestrator import find_person_entities
 from src.core.redactor import (
     FOOTER_ZONE_FRACTION,
     HEADER_ZONE_FRACTION,
+    folder_holds,
     is_same_file,
     strip_pii_from_filename,
 )
@@ -266,6 +267,11 @@ class DeidentificationService:
             operation="DE-IDENTIFICATION", verb="de-identified",
         )
 
+        # A folder is routinely named after the student, and the log sits in
+        # the open. Name-stripping misses classmates, accents and spacing
+        # variants, so the log carries no folder text at all.
+        logger.display_folder = "(folder name withheld)"
+
         # Registering every person up front keeps labels consistent across all
         # documents in the run — the same teacher must not be [Teacher 2] in one
         # file and [Teacher 5] in the next.
@@ -324,13 +330,18 @@ class DeidentificationService:
                     document_name=doc.name, output_path=None, success=False,
                     items_replaced=0, error_message=f"De-identification failed: {e}",
                 )
-                logger.add_flagged_file(doc.name, doc_result.error_message)
+                # The log is shareable, so it gets the name-stripped file name
+                # and no exception text (which can quote the path).
+                safe_name = f"{strip_pii_from_filename(doc.stem, name_variations)}.pdf"
+                logger.add_flagged_file(
+                    safe_name, f"De-identification failed ({type(e).__name__})"
+                )
             results.document_results.append(doc_result)
 
         # The key file goes next to the ORIGINALS, never into the output folder:
         # the originals are already sensitive, so it adds no new exposure there,
         # and it leaves every file in the output folder safe to upload.
-        results.output_folder_holds_originals = self._same_folder(
+        results.output_folder_holds_originals = folder_holds(
             output_folder, request.folder_path
         )
         results.key_file_path = self._write_key_file(
@@ -377,20 +388,6 @@ class DeidentificationService:
                 variations.append(org.strip())
                 variations.extend(w for w in org.split() if len(w) >= 3)
         return list(dict.fromkeys(variations))
-
-    @staticmethod
-    def _same_folder(a: Path, b: Path) -> bool:
-        """
-        Whether two paths are the same directory.
-
-        Uses os.path.samefile so it catches the case-insensitive-filesystem and
-        symlink variants a string compare misses — the same reasoning as
-        is_same_file() in redactor.py.
-        """
-        try:
-            return a.exists() and b.exists() and os.path.samefile(str(a), str(b))
-        except OSError:
-            return False
 
     @staticmethod
     def _sanitise_output_filename(name: str) -> Optional[str]:
@@ -744,7 +741,10 @@ class DeidentificationService:
                 # A locked or read-only target used to escape as an exception
                 # and abort the whole run — no key file, no audit log.
                 result.error_message = f"Could not write output file: {e}"
-                logger.add_flagged_file(safe_name, result.error_message)
+                # The log is shareable: the exception text can quote the path.
+                logger.add_flagged_file(
+                    safe_name, f"Could not write output file ({type(e).__name__})"
+                )
                 return result
             result.quarantine_path = quarantine
             result.verification_failures = [
@@ -761,7 +761,9 @@ class DeidentificationService:
             self._write_text(output_path, full_output, total_replacements)
         except Exception as e:
             result.error_message = f"Could not write output file: {e}"
-            logger.add_flagged_file(safe_name, result.error_message)
+            logger.add_flagged_file(
+                safe_name, f"Could not write output file ({type(e).__name__})"
+            )
             return result
 
         result.output_path = output_path
@@ -830,9 +832,8 @@ class DeidentificationService:
 
         if shares_output_folder:
             lines.extend([
-                "!! You chose to save the de-identified files into this same",
-                "!! folder, which also holds your ORIGINAL documents and this",
-                "!! key. Do not share the folder itself.",
+                "!! Your output folder also holds your ORIGINAL documents and",
+                "!! this key. Do not share the folder itself.",
                 "!! Send the individual .txt files instead.",
                 "",
             ])

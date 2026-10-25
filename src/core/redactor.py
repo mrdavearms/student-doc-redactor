@@ -35,6 +35,43 @@ def is_same_file(a: Path, b: Path) -> bool:
     return a.resolve() == b.resolve()
 
 
+def folder_holds(outer: Path, inner: Path) -> bool:
+    """
+    True when `inner` is `outer` or lies anywhere beneath it.
+
+    Compares `outer` with `inner` and each of its parents using
+    os.path.samefile, so symlinks and case-insensitive file systems are
+    handled. Fails CLOSED: an ancestor that cannot be compared is skipped, and
+    if `inner` itself cannot be compared the answer is True, so an error never
+    shows "safe". A missing `outer` holds nothing, so it is False.
+    """
+    if not outer.exists():
+        return False
+    # Absolute WITHOUT collapsing "..": the OS applies ".." after following
+    # symlinks, and a lexical collapse would judge the wrong ancestor chain.
+    inner = Path(inner)
+    if not inner.is_absolute():
+        inner = Path.cwd() / inner
+    try:
+        if os.path.samefile(str(outer), str(inner)):
+            return True
+    except OSError:
+        return True
+    # The ancestors are walked on the RESOLVED path: the lexical parents of
+    # "<out>/link/../src" include "<out>", which is not a real ancestor.
+    try:
+        resolved = inner.resolve(strict=False)
+    except (OSError, RuntimeError):
+        return True
+    for candidate in (resolved, *resolved.parents):
+        try:
+            if os.path.samefile(str(outer), str(candidate)):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 # Zone redaction fractions — fraction of page height to blank
 HEADER_ZONE_FRACTION = 0.12   # top 12%
 FOOTER_ZONE_FRACTION = 0.08   # bottom 8%

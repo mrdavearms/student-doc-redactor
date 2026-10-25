@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, AlertTriangle, XCircle, FolderOpen, FileText, RotateCcw,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, ShieldAlert,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
@@ -10,6 +10,7 @@ import { friendlyError, friendlyDocumentError, verificationCouldNotRun } from '.
 import HelpTip from '../components/HelpTip';
 import DocumentCard from '../components/DocumentCard';
 import PreviewSection from '../components/PreviewSection';
+import { showFolderHoldsOriginals } from '../lib/redactFolderWarning';
 import { selectedCountsByPath, type DocumentSummaryMeta } from '../lib/documentSummary';
 
 export default function Completion() {
@@ -224,6 +225,27 @@ export default function Completion() {
           </button>
         </div>
       </motion.section>
+
+      {showFolderHoldsOriginals(r.output_folder_holds_originals) && (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-red-50 border border-red-200 rounded-xl p-5"
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-red-700 mb-2">
+            <ShieldAlert size={16} />
+            Don&apos;t share this folder
+          </div>
+          <p className="text-xs text-red-600 leading-relaxed">
+            <span className="font-semibold">
+              Your output folder also holds your original documents
+            </span>
+            {' '}and <span className="font-semibold">redaction_log.txt</span>, which lists
+            every name that was removed. Don&apos;t share the folder itself — send the
+            individual PDFs.
+          </p>
+        </motion.section>
+      )}
 
       {/* Redaction log (collapsed by default) */}
       <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">

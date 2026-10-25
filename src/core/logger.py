@@ -5,7 +5,7 @@ Generates detailed audit logs of all redaction operations.
 
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 @dataclass
@@ -32,6 +32,9 @@ class RedactionLogger:
         # wrong in the other pathway are parameterised.
         self.operation = operation
         self.verb = verb
+        # When set, shown on the "Folder:" line instead of the real path.
+        # folder_path stays the real location, because save_log writes there.
+        self.display_folder: Optional[str] = None
         self.log_entries: List[LogEntry] = []
         self.flagged_files: List[tuple] = []
         self.total_documents = 0
@@ -64,10 +67,20 @@ class RedactionLogger:
         """
         lines = []
 
+        # The redact log lists every removed name word for word and sits beside
+        # the originals. De-identification's log holds labels only, so it does
+        # not get this line (rule 43).
+        if self.operation == "REDACTION":
+            lines.append(
+                "PRIVATE: this log contains the names that were removed. "
+                "Do not share it."
+            )
+            lines.append("")
+
         # Header
         lines.append(f"STUDENT DOC REDACTOR - {self.operation} LOG")
         lines.append("=" * 61)
-        lines.append(f"Folder: {self.folder_path}")
+        lines.append(f"Folder: {self.display_folder or self.folder_path}")
         lines.append(f"Student: {self.student_name}")
         lines.append(f"Processed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Total documents: {self.total_documents}")

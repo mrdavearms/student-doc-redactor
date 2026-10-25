@@ -244,6 +244,56 @@ class TestAuditLogCarriesNoNames:
             assert "[Student]" in log
             assert "[Parent]" in log
 
+    def test_deidentify_log_has_no_folder_or_file_names(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Billy Bob"
+            folder.mkdir()
+            doc = folder / "Billy Bob plan.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+
+            def boom(self, **kwargs):
+                raise RuntimeError(f"cannot read {kwargs['doc']}")
+
+            with patch.object(DeidentificationService, '_process_document', boom):
+                results = DeidentificationService().execute(
+                    _request(folder, doc, [_match("Billy Bob")], text)
+                )
+            assert results.document_results[0].success is False
+            log = results.log_content
+            assert "Billy" not in log
+            assert "Bob" not in log
+            assert "PRIVATE:" not in log
+            assert results.log_path.parent == folder
+            saved = results.log_path.read_text(encoding='utf-8')
+            assert "Billy" not in saved
+            assert "Folder: (folder name withheld)" in log
+            assert "Folder: (folder name withheld)" in saved
+
+    def test_write_failure_text_stays_out_of_the_log(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Billy Bob"
+            folder.mkdir()
+            doc = folder / "Billy Bob plan.pdf"
+            text = "Billy Bob is in Year 3."
+            _make_pdf(doc, [text])
+
+            def boom(path, body, replacements=0):
+                raise OSError(f"cannot write {path} for Billy Bob")
+
+            with patch.object(DeidentificationService, '_write_text', staticmethod(boom)):
+                results = DeidentificationService().execute(
+                    _request(folder, doc, [_match("Billy Bob")], text)
+                )
+            assert results.document_results[0].success is False
+            log = results.log_content
+            assert "Billy" not in log and "Bob" not in log
+            assert "OSError" in log
+            saved = results.log_path.read_text(encoding='utf-8')
+            assert "Billy" not in saved and "Bob" not in saved
+
     def test_log_saved_under_its_own_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             doc = Path(tmp) / "report.pdf"
@@ -900,3 +950,29 @@ class TestNicknamesInFilenames:
                 _request(tmp, doc, [_match("Joseph Bloggs")], text, student_name="Joseph Bloggs")
             )
             assert "Joe" not in results.document_results[0].output_path.name
+
+
+class TestOutputFolderContainsOriginals:
+    """An output folder that is a PARENT of the source folder holds the originals too."""
+
+    def _run(self, source, output=None):
+        doc = source / "report.pdf"
+        text = "Billy Bob is here."
+        _make_pdf(doc, [text])
+        kwargs = {'custom_output_path': output} if output else {}
+        return DeidentificationService().execute(
+            _request(source, doc, [_match("Billy Bob")], text, **kwargs)
+        )
+
+    def test_ancestor_output_folder_flags_originals(self, tmp_path):
+        source = tmp_path / "Reports" / "Billy"
+        source.mkdir(parents=True)
+        results = self._run(source, tmp_path / "Reports")
+        assert results.output_folder_holds_originals is True
+        key = results.key_file_path.read_text(encoding='utf-8')
+        assert "Do not share the folder itself" in key
+        assert "You chose" not in key
+
+    def test_child_output_folder_is_safe(self, tmp_path):
+        results = self._run(tmp_path)
+        assert results.output_folder_holds_originals is False

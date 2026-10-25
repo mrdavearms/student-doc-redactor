@@ -262,3 +262,50 @@ class TestSourcePathInResults:
         results = red.json()["document_results"]
         assert [r["document_name"] for r in results] == ["Report.pdf", "Report.pdf"]
         assert [r["source_path"] for r in results] == [str(a), str(b)]
+
+
+class TestOutputFolderHoldingOriginals:
+    """redaction_log.txt lists every removed name and sits beside the originals,
+    so an output folder that is or contains that folder must be flagged."""
+
+    def _run(self, tmp, out_path):
+        pdf = Path(tmp) / "report.pdf"
+        _make_pdf(pdf, "Student Joe Bloggs attended.")
+        det = client.post("/api/pii/detect", json={
+            "pdf_paths": [str(pdf)], "student_name": "Joe Bloggs",
+            "parent_names": [], "family_names": [], "organisation_names": [],
+        })
+        assert det.status_code == 200, det.text
+        body = {
+            "folder_path": tmp, "student_name": "Joe Bloggs",
+            "parent_names": [], "family_names": [], "organisation_names": [],
+            "redact_header_footer": False, "documents": [str(pdf)],
+            "detected_pii": {}, "selected_keys": [f"{pdf}_0"],
+            "folder_action": "overwrite",
+        }
+        if out_path is not None:
+            body["custom_output_path"] = str(out_path)
+        red = client.post("/api/redact", json=body)
+        assert red.status_code == 200, red.text
+        return red.json()
+
+    def test_redact_flags_output_folder_holding_originals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            same = self._run(tmp, Path(tmp))
+            assert same["output_folder_holds_originals"] is True
+        with tempfile.TemporaryDirectory() as tmp:
+            outer = Path(tmp) / "outer"
+            inner = outer / "inner"
+            inner.mkdir(parents=True)
+            parent = self._run(str(inner), outer)
+            assert parent["output_folder_holds_originals"] is True
+
+    def test_separate_output_folder_is_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assert self._run(tmp, None)["output_folder_holds_originals"] is False
+
+    def test_redact_log_carries_do_not_share_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = self._run(tmp, None)
+            first = body["log_content"].splitlines()[0]
+            assert "contains the names that were removed" in first

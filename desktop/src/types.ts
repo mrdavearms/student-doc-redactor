@@ -141,6 +141,7 @@ export interface RedactionResults {
   verification_failures: { filename: string; message: string }[];
   ocr_warnings: { filename: string; count: number }[];
   cancelled: boolean;
+  output_folder_holds_originals: boolean;
 }
 
 export interface DeidentifyDocumentResult {

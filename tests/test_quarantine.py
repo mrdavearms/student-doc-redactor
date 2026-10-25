@@ -263,3 +263,20 @@ def test_residue_failure_quarantines(tmp_path):
     assert result.quarantine_path is not None
     assert str(result.quarantine_path).endswith(".UNVERIFIED.pdf")
     assert result.output_path is None
+
+
+def test_output_and_quarantine_names_have_no_student_name(tmp_path):
+    """A source named after the student must not put the name on either the
+    output or the .UNVERIFIED.pdf name."""
+    doc = _make_pdf(tmp_path / "Billy Bob Report.pdf", "Billy Bob attended.")
+    results = _failing_service().execute(RedactionRequest(
+        folder_path=tmp_path, student_name="Billy Bob", documents=[doc],
+        detected_pii={doc: {"matches": [_match()],
+                            "text_data": {"pages": {}, "ocr_pages": []}}},
+        user_selections={f"{doc}_0": True},
+    ))
+    r = results.document_results[0]
+    assert r.quarantine_path is not None
+    names = [r.quarantine_path.name] + [p.name for p in results.redacted_folder.iterdir()]
+    for n in names:
+        assert "Billy" not in n and "Bob" not in n, n

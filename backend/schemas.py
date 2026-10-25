@@ -218,6 +218,7 @@ class RedactionResultsResponse(BaseModel):
     verification_failures: List[Dict[str, str]]  # [{filename, message}]
     ocr_warnings: List[OcrWarning]
     cancelled: bool = False
+    output_folder_holds_originals: bool = False
 
 
 # ── De-identification ────────────────────────────────────────────────────

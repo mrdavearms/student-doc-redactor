@@ -284,3 +284,66 @@ class TestIsSameFile:
         not_yet = tmp_path / "redacted" / "report.pdf"
 
         assert is_same_file(not_yet, pdf) is False
+
+
+class TestFolderHolds:
+    def test_folder_holds_symlink_and_case(self, tmp_path):
+        from src.core.redactor import folder_holds
+        real = tmp_path / "Reports"
+        inner = real / "Billy"
+        inner.mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(real, target_is_directory=True)
+        assert folder_holds(link, inner) is True
+        assert folder_holds(inner, real) is False
+        assert folder_holds(inner, inner) is True
+        # Case-insensitive file systems only: detect at runtime.
+        if (tmp_path / "REPORTS").exists():
+            assert folder_holds(tmp_path / "REPORTS", inner) is True
+        assert folder_holds(tmp_path / "missing", inner) is False
+
+    def test_folder_holds_fails_closed_on_inner_error(self, tmp_path, monkeypatch):
+        import os
+        from src.core.redactor import folder_holds
+        outer = tmp_path / "out"
+        outer.mkdir()
+        def boom(a, b):
+            raise OSError("denied")
+        monkeypatch.setattr(os.path, "samefile", boom)
+        assert folder_holds(outer, tmp_path / "x") is True
+
+    def test_folder_holds_skips_unreadable_ancestor(self, tmp_path, monkeypatch):
+        import os
+        from src.core.redactor import folder_holds
+        outer = tmp_path / "Reports"
+        inner = outer / "Billy"
+        inner.mkdir(parents=True)
+        real = os.path.samefile
+        def flaky(a, b):
+            if b == str(tmp_path):
+                raise OSError("denied")
+            return real(a, b)
+        monkeypatch.setattr(os.path, "samefile", flaky)
+        assert folder_holds(outer, inner) is True
+        other = tmp_path / "other_exists"
+        other.mkdir()
+        assert folder_holds(other, inner) is False
+
+    def test_folder_holds_symlink_then_dotdot(self, tmp_path):
+        from src.core.redactor import folder_holds
+        out = tmp_path / "out"
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "dir").mkdir(parents=True)
+        (elsewhere / "src").mkdir()
+        out.mkdir()
+        (out / "link").symlink_to(elsewhere / "dir", target_is_directory=True)
+        # Really tmp/elsewhere/src: ".." is applied AFTER the link is followed.
+        inner = out / "link" / ".." / "src"
+        assert folder_holds(elsewhere, inner) is True
+        assert folder_holds(out, inner) is False
+
+    def test_folder_holds_relative_inner(self, tmp_path, monkeypatch):
+        from src.core.redactor import folder_holds
+        (tmp_path / "Reports" / "Billy").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path / "Reports" / "Billy")
+        assert folder_holds(tmp_path, Path(".")) is True

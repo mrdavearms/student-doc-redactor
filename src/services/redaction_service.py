@@ -14,6 +14,7 @@ from src.core.pii_detector import PIIDetector, PIIMatch
 from src.core.redactor import (
     PDFRedactor,
     RedactionItem,
+    folder_holds,
     is_same_file,
     strip_pii_from_filename,
 )
@@ -75,6 +76,9 @@ class RedactionResults:
     # reports the intended total, matching the audit log. None → fall back to
     # the processed count for callers that construct results directly.
     requested_document_count: Optional[int] = None
+    # True when the output folder is, or contains, the folder holding the
+    # originals and redaction_log.txt (which lists every removed name).
+    output_folder_holds_originals: bool = False
 
     @property
     def total_documents(self) -> int:
@@ -200,6 +204,10 @@ class RedactionService:
         # These come from the conversion step — password-protected and failed files
         # The caller should pass these separately if needed, but for now
         # we handle them through the request's detected_pii dict
+
+        results.output_folder_holds_originals = folder_holds(
+            redacted_folder, request.folder_path
+        )
 
         # 5. Finalise log
         logger.set_totals(

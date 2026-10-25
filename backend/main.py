@@ -730,6 +730,7 @@ def redact_documents(req: RedactRequest):
                 OcrWarning(filename=f, count=c) for f, c in results.ocr_warnings
             ],
             cancelled=results.cancelled,
+            output_folder_holds_originals=results.output_folder_holds_originals,
         )
     except HTTPException:
         raise
