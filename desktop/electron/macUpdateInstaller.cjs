@@ -24,6 +24,9 @@ const {
   STAGED_MARKER_NAME,
   buildSwapScript,
   stagedUpdateIsUsable,
+  stagingIsTrusted,
+  stagingPaths,
+  STAGED_APP_NAME,
 } = require('./macUpdate.cjs');
 
 const execFileAsync = promisify(execFile);
@@ -167,7 +170,7 @@ async function stageFromDmg(dmgPath, stagingDir, onProgress) {
       throw new Error('The downloaded disk image did not contain exactly one application');
     }
 
-    const stagedApp = path.join(stagingDir, apps[0]);
+    const stagedApp = path.join(stagingDir, STAGED_APP_NAME);
     // `ditto`, not `cp -R`: it is the only copy that reliably preserves the
     // symlinks and extended attributes inside a framework-bearing .app bundle.
     await execFileAsync('/usr/bin/ditto', [path.join(mountPoint, apps[0]), stagedApp]);
@@ -196,7 +199,9 @@ async function stageFromZip(zipPath, stagingDir, onProgress) {
   if (apps.length !== 1) {
     throw new Error('The downloaded archive did not contain exactly one application');
   }
-  return path.join(stagingDir, apps[0]);
+  const stagedApp = path.join(stagingDir, STAGED_APP_NAME);
+  await fsp.rename(path.join(stagingDir, apps[0]), stagedApp);
+  return stagedApp;
 }
 
 /** Read a single key out of a bundle's Info.plist. */
@@ -210,6 +215,21 @@ async function readPlistKey(appPath, key) {
 
 const readBundleVersion = (appPath) => readPlistKey(appPath, 'CFBundleShortVersionString');
 const readBundleId = (appPath) => readPlistKey(appPath, 'CFBundleIdentifier');
+
+/**
+ * Create the staging folder ourselves: a plain mkdir (it fails if anything is
+ * already there), then confirm with lstat that it is a real directory, not a
+ * symlink, and is owned by this user. Nobody else can have pre-made it.
+ */
+async function makeStagingDir(stagingDir) {
+  await fsp.mkdir(stagingDir, { mode: 0o700 });
+  await fsp.chmod(stagingDir, 0o700); // mkdir's mode is masked by the umask
+  const st = await fsp.lstat(stagingDir);
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (!st.isDirectory() || st.isSymbolicLink() || (uid !== null && st.uid !== uid)) {
+    throw new Error('The update folder could not be created safely');
+  }
+}
 
 /** Path of the marker recording what is currently staged. */
 function stagedMarkerPath(appPath) {
@@ -226,12 +246,27 @@ async function readStagedUpdate(appPath, expected) {
     const marker = JSON.parse(raw);
     if (!stagedUpdateIsUsable(marker, expected || {})) return null;
     // The marker is only a claim — confirm the bundle is actually still there.
-    await fsp.access(path.join(marker.stagedApp, 'Contents', 'Info.plist'));
-    await fsp.access(marker.scriptPath);
-    return marker;
+    // Check the places the installer will use, not the marker's claims.
+    const paths = stagingPaths(appPath);
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+    const trusted = stagingIsTrusted(
+      [await fsp.lstat(paths.stagingDir), await fsp.lstat(paths.stagedApp)], uid);
+    if (!trusted) return null;
+    await fsp.access(path.join(paths.stagedApp, 'Contents', 'Info.plist'));
+    await fsp.access(paths.scriptPath);
+    return { ...marker, ...paths };
   } catch {
     return null;
   }
+}
+
+/**
+ * Write the swap script fresh: remove whatever is at the path (a symlink there
+ * must not be followed), then create it exclusively.
+ */
+async function writeSwapScript(scriptPath, text) {
+  await fsp.unlink(scriptPath).catch((e) => { if (e.code !== 'ENOENT') throw e; });
+  await fsp.writeFile(scriptPath, text, { mode: 0o755, flag: 'wx' });
 }
 
 /**
@@ -265,7 +300,7 @@ async function prepareMacUpdate({
   // Start from clean: a half-finished staging folder from an earlier attempt
   // would leave a stale .app for the swap script to move into place.
   await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
-  await fsp.mkdir(stagingDir, { recursive: true });
+  await makeStagingDir(stagingDir);
 
   // A private 0700 directory, so the download path is neither predictable nor
   // pre-creatable by another process.
@@ -313,7 +348,7 @@ async function prepareMacUpdate({
     if (onProgress) onProgress(STAGE_PROGRESS.verified);
 
     const scriptPath = path.join(stagingDir, 'swap.sh');
-    await fsp.writeFile(scriptPath, buildSwapScript(), { mode: 0o755 });
+    await writeSwapScript(scriptPath, buildSwapScript());
 
     const staged = {
       version,
@@ -336,6 +371,7 @@ async function prepareMacUpdate({
 }
 
 module.exports = {
+  writeSwapScript,
   prepareMacUpdate,
   readStagedUpdate,
   cleanStagingDir,

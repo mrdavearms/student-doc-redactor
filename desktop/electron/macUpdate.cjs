@@ -28,6 +28,8 @@
  * macUpdateInstaller.cjs. See tests/macUpdate.test.ts.
  */
 
+const path = require('path');
+
 // These three MUST stay in step with `build.appId` and `build.publish` in
 // package.json. Detection reads the packaged app-update.yml (generated from
 // that config) while the download is built from these constants, so a repo
@@ -39,6 +41,8 @@ const BUNDLE_ID = 'au.com.antigravity.redaction-tool';
 
 /** Name of the hidden folder we stage the new app in, beside the current one. */
 const STAGING_DIR_NAME = '.redaction-tool-update';
+/** Fixed name of the staged bundle, so it never depends on the installed or dmg name. */
+const STAGED_APP_NAME = 'staged.app';
 /** Records what is staged, so a relaunch reuses it instead of re-downloading. */
 const STAGED_MARKER_NAME = 'staged.json';
 /** Written by the swap script when it fails; read and cleared at next launch. */
@@ -218,7 +222,110 @@ function stagedUpdateIsUsable(marker, { version, bundleId }) {
   return true;
 }
 
+/**
+ * Is `candidate` strictly newer than `current`? Numeric dotted compare, so
+ * 1.10.0 > 1.9.9; a pre-release tag sorts below its own release. Anything that
+ * is not a dotted version is "not newer", so a damaged marker is never adopted.
+ */
+function isNewerVersion(candidate, current) {
+  const parse = (v) => {
+    const m = /^(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(String(v == null ? '' : v).trim());
+    return m ? { nums: m[1].split('.').map(Number), pre: m[2] || null } : null;
+  };
+  const a = parse(candidate);
+  const b = parse(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < Math.max(a.nums.length, b.nums.length); i++) {
+    const x = a.nums[i] || 0;
+    const y = b.nums[i] || 0;
+    if (x !== y) return x > y;
+  }
+  if (a.pre === b.pre) return false;
+  if (a.pre === null) return true; // release beats its own pre-release
+  if (b.pre === null) return false;
+  const pa = a.pre.split('.');
+  const pb = b.pre.split('.');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if (pa[i] === undefined) return false;
+    if (pb[i] === undefined) return true;
+    if (pa[i] === pb[i]) continue;
+    const na = /^\d+$/.test(pa[i]);
+    const nb = /^\d+$/.test(pb[i]);
+    if (na && nb) return Number(pa[i]) > Number(pb[i]);
+    if (na !== nb) return nb; // numeric identifiers sort below text ones
+    return pa[i] > pb[i];
+  }
+  return false;
+}
+
+/**
+ * Every path the staged update uses, derived from where the app is installed.
+ * The install step uses these and never the paths written in staged.json, which
+ * is a file another process could have edited.
+ */
+function stagingPaths(appPath) {
+  const stagingDir = path.join(path.dirname(appPath), STAGING_DIR_NAME);
+  return {
+    stagingDir,
+    stagedApp: path.join(stagingDir, STAGED_APP_NAME),
+    backupPath: path.join(stagingDir, 'previous.app'),
+    scriptPath: path.join(stagingDir, 'swap.sh'),
+  };
+}
+
+/**
+ * Is the staging area safe to install from? `entries` are lstat results (or
+ * null when missing) for the staging folder and the staged bundle. Each must
+ * be a real directory (not a symlink), owned by `uid`, and not writable by
+ * group or others, so no other local account could have swapped the contents.
+ */
+function stagingIsTrusted(entries, uid) {
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  return entries.every((st) =>
+    !!st &&
+    !st.isSymbolicLink() &&
+    st.isDirectory() &&
+    (uid === null || st.uid === uid) &&
+    (st.mode & 0o022) === 0
+  );
+}
+
+/**
+ * Decide what "Restart & install" does. Pure: file checks are injected.
+ * Returns { action: 'install', paths } or { action: 'abort', message, clean: true }.
+ * Every abort asks for the staging folder to be deleted so an unusable ~1 GB
+ * bundle is not re-adopted at the next launch.
+ */
+async function decideRestart({ appPath, bundleId, exists, readBundleId, lstat, uid }) {
+  const paths = stagingPaths(appPath);
+  if (lstat) {
+    let entries;
+    try {
+      entries = [lstat(paths.stagingDir), lstat(paths.stagedApp)];
+    } catch {
+      entries = null;
+    }
+    if (!stagingIsTrusted(entries, uid === undefined ? null : uid)) {
+      return { action: 'abort', clean: true, message: 'The downloaded update could not be verified.' };
+    }
+  }
+  if (!exists(paths.scriptPath) || !exists(paths.stagedApp)) {
+    return { action: 'abort', clean: true, message: 'The downloaded update is no longer available.' };
+  }
+  try {
+    if ((await readBundleId(paths.stagedApp)) !== bundleId) throw new Error('different application');
+  } catch {
+    return { action: 'abort', clean: true, message: 'The downloaded update could not be verified.' };
+  }
+  return { action: 'install', paths };
+}
+
 module.exports = {
+  stagingIsTrusted,
+  decideRestart,
+  STAGED_APP_NAME,
+  isNewerVersion,
+  stagingPaths,
   REPO_OWNER,
   REPO_NAME,
   BUNDLE_ID,

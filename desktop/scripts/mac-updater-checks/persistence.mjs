@@ -28,7 +28,7 @@ const check = (label, actual, expected) => {
 
 const appPath = path.join(WORK, 'Redaction Tool.app');
 const stagingDir = path.join(WORK, STAGING_DIR_NAME);
-const stagedApp = path.join(stagingDir, 'Redaction Tool.app');
+const stagedApp = path.join(stagingDir, 'staged.app');
 const scriptPath = path.join(stagingDir, 'swap.sh');
 
 function stage(marker) {

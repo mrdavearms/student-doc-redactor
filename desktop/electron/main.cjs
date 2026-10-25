@@ -29,11 +29,16 @@ const {
   BUNDLE_ID,
   FAILURE_MARKER_NAME,
   SWAP_LOG_NAME,
+  isNewerVersion,
+  decideRestart,
+  buildSwapScript,
 } = require('./macUpdate.cjs');
 const {
   prepareMacUpdate,
   readStagedUpdate,
   cleanStagingDir,
+  readBundleId,
+  writeSwapScript,
 } = require('./macUpdateInstaller.cjs');
 
 // Per-session shared secret between the renderer and the Python backend.
@@ -431,7 +436,9 @@ function reportPreviousSwapFailure() {
 async function adoptStagedUpdate() {
   const appPath = installedAppPath();
   const staged = await readStagedUpdate(appPath, { bundleId: BUNDLE_ID });
-  if (staged && staged.version !== app.getVersion()) {
+  // Only a strictly NEWER version is adopted: a leftover older update must
+  // never be swapped in over a newer copy the user installed by hand.
+  if (staged && isNewerVersion(staged.version, app.getVersion())) {
     pendingMacUpdate = { ...staged, appPath };
     console.log(`Re-using update ${staged.version} staged earlier`);
   } else {
@@ -638,20 +645,33 @@ ipcMain.handle('open-external', async (_event, url) => {
 
 ipcMain.handle('get-api-token', () => API_TOKEN);
 
-ipcMain.handle('restart-and-install', () => {
+ipcMain.handle('restart-and-install', async () => {
   if (pendingMacUpdate) {
     // The swap cannot happen from inside the running bundle, so hand it to a
     // detached script that waits for this process to exit, replaces the app
     // (keeping a backup to roll back to) and relaunches it.
-    const { scriptPath, stagedApp, backupPath, stagingDir, appPath } = pendingMacUpdate;
-
-    // Confirm the staged content is still there BEFORE quitting. Quitting on a
-    // vanished script means the app closes and nothing ever reopens it — from
-    // the user's side it simply disappears when they click Restart.
-    if (!fs.existsSync(scriptPath) || !fs.existsSync(stagedApp)) {
-      console.error('Staged update is missing — not quitting');
+    // Paths come from where the app is installed, never from staged.json.
+    const { appPath } = pendingMacUpdate;
+    const decision = await decideRestart({
+      appPath, bundleId: BUNDLE_ID, exists: fs.existsSync, readBundleId,
+      lstat: fs.lstatSync, uid: typeof process.getuid === 'function' ? process.getuid() : null,
+    });
+    if (decision.action === 'abort') {
+      console.error(`Staged update not installed: ${decision.message}`);
       pendingMacUpdate = null;
-      sendToWindow('update-error', 'The downloaded update is no longer available.');
+      if (decision.clean) await cleanStagingDir(appPath);
+      sendToWindow('update-error', decision.message);
+      return;
+    }
+    const { scriptPath, stagedApp, backupPath, stagingDir } = decision.paths;
+    try {
+      // Rewrite the script from our own text so an edited swap.sh is never run.
+      await writeSwapScript(scriptPath, buildSwapScript());
+    } catch (err) {
+      console.error('Could not prepare the update installer:', err.message);
+      pendingMacUpdate = null;
+      await cleanStagingDir(appPath);
+      sendToWindow('update-error', 'The downloaded update could not be verified.');
       return;
     }
 

@@ -13,6 +13,12 @@ const {
   pickMacAsset,
   selfUpdateBlockedReason,
   stagedUpdateIsUsable,
+  isNewerVersion,
+  stagingPaths,
+  decideRestart,
+  stagingIsTrusted,
+  STAGED_APP_NAME,
+  STAGING_DIR_NAME,
   buildSwapScript,
 } = macUpdate;
 
@@ -201,6 +207,117 @@ describe('stagedUpdateIsUsable', () => {
     expect(stagedUpdateIsUsable(null, {})).toBe(false);
     expect(stagedUpdateIsUsable({ version: '1.6.3' }, {})).toBe(false);
     expect(stagedUpdateIsUsable({ ...marker, scriptPath: undefined }, {})).toBe(false);
+  });
+});
+
+describe('isNewerVersion', () => {
+  it('older staged version is not adopted', () => {
+    expect(isNewerVersion('1.9.4', '1.9.5')).toBe(false);
+    expect(isNewerVersion('1.9.9', '1.10.0')).toBe(false);
+  });
+
+  it('equal version is not adopted', () => {
+    expect(isNewerVersion('1.9.5', '1.9.5')).toBe(false);
+  });
+
+  it('a newer version is adopted, comparing numbers not strings', () => {
+    expect(isNewerVersion('1.10.0', '1.9.9')).toBe(true);
+    expect(isNewerVersion('2.0.0', '1.99.99')).toBe(true);
+  });
+
+  it('a pre-release sorts below its own release', () => {
+    expect(isNewerVersion('1.9.5-beta.1', '1.9.5')).toBe(false);
+    expect(isNewerVersion('1.9.5', '1.9.5-beta.1')).toBe(true);
+  });
+
+  it('rejects anything that is not a dotted version', () => {
+    expect(isNewerVersion('garbage', '1.0.0')).toBe(false);
+    expect(isNewerVersion(undefined, '1.0.0')).toBe(false);
+    expect(isNewerVersion('1.0.0', 'garbage')).toBe(false);
+  });
+});
+
+describe('stagingPaths', () => {
+  it('stagingPaths derives every path from the app folder', () => {
+    const p = stagingPaths('/Applications/Redaction Tool.app');
+    const dir = `/Applications/${STAGING_DIR_NAME}`;
+    expect(p).toEqual({
+      stagingDir: dir,
+      stagedApp: `${dir}/${STAGED_APP_NAME}`,
+      backupPath: `${dir}/previous.app`,
+      scriptPath: `${dir}/swap.sh`,
+    });
+  });
+});
+
+describe('staged name is fixed', () => {
+  it('does not depend on the installed app name', () => {
+    const p = stagingPaths('/Applications/Redaction Tool 2.app');
+    expect(p.stagedApp).toBe(`${p.stagingDir}/${STAGED_APP_NAME}`);
+  });
+
+  it('the installer stages under the same constant', () => {
+    const src = readFileSync(resolve(__dirname, '../electron/macUpdateInstaller.cjs'), 'utf8');
+    expect(src).toContain('path.join(stagingDir, STAGED_APP_NAME)');
+    // dmg and zip paths both stage under it.
+    expect(src.split('path.join(stagingDir, STAGED_APP_NAME)').length - 1).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('decideRestart', () => {
+  const appPath = '/Applications/Redaction Tool 2.app';
+  const p = stagingPaths(appPath);
+  const base = { appPath, bundleId: BUNDLE_ID };
+
+  it('installs when files exist and the bundle id matches, for any installed name', async () => {
+    const r = await decideRestart({
+      ...base, exists: (f: string) => f === p.scriptPath || f === p.stagedApp,
+      readBundleId: async () => BUNDLE_ID,
+    });
+    expect(r.action).toBe('install');
+    expect(r.paths.stagedApp).toBe(p.stagedApp);
+  });
+
+  it('aborts and cleans when the staged files are missing', async () => {
+    const r = await decideRestart({ ...base, exists: () => false, readBundleId: async () => BUNDLE_ID });
+    expect(r).toMatchObject({ action: 'abort', clean: true });
+  });
+
+  it('aborts and cleans on a foreign bundle id', async () => {
+    const r = await decideRestart({ ...base, exists: () => true, readBundleId: async () => 'com.someone.else' });
+    expect(r).toMatchObject({ action: 'abort', clean: true });
+  });
+
+  it('aborts and cleans when the bundle id cannot be read', async () => {
+    const r = await decideRestart({
+      ...base, exists: () => true, readBundleId: async () => { throw new Error('x'); },
+    });
+    expect(r).toMatchObject({ action: 'abort', clean: true });
+  });
+});
+
+describe('stagingIsTrusted', () => {
+  const st = (o = {}) => ({
+    isSymbolicLink: () => false, isDirectory: () => true, uid: 501, mode: 0o40700, ...o,
+  });
+  it('accepts own, private, real directories', () => {
+    expect(stagingIsTrusted([st(), st()], 501)).toBe(true);
+  });
+  it('rejects a symlink, another owner, group/other-writable, or missing', () => {
+    expect(stagingIsTrusted([st({ isSymbolicLink: () => true })], 501)).toBe(false);
+    expect(stagingIsTrusted([st({ uid: 0 })], 501)).toBe(false);
+    expect(stagingIsTrusted([st({ mode: 0o40770 })], 501)).toBe(false);
+    expect(stagingIsTrusted([st({ mode: 0o40707 })], 501)).toBe(false);
+    expect(stagingIsTrusted([st(), null], 501)).toBe(false);
+    expect(stagingIsTrusted([], 501)).toBe(false);
+  });
+  it('decideRestart aborts and cleans on an untrusted staging folder', async () => {
+    const r = await decideRestart({
+      appPath: '/Applications/Redaction Tool.app', bundleId: BUNDLE_ID,
+      exists: () => true, readBundleId: async () => BUNDLE_ID,
+      lstat: () => st({ mode: 0o40777 }), uid: 501,
+    });
+    expect(r).toMatchObject({ action: 'abort', clean: true });
   });
 });
 

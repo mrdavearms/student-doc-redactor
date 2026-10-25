@@ -66,7 +66,7 @@ fs.mkdirSync(stagingDir, { recursive: true });
 const ticks = [];
 const stagedApp = await installer.stageFromDmg(dmgPath, stagingDir, (p) => ticks.push(p));
 
-check('staged bundle name preserved', path.basename(stagedApp), appName);
+check('staged bundle uses the fixed name', path.basename(stagedApp), 'staged.app');
 check('executable present', fs.existsSync(path.join(stagedApp, 'Contents', 'MacOS', 'Redaction Tool')), 'true');
 check(
   'framework symlink preserved (ditto, not cp)',
