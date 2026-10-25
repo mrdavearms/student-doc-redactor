@@ -118,62 +118,88 @@ class TestApiTokenAuth:
         assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
 
-class TestHealthInstanceIdentity:
+class TestHealthIdentityProof:
     """
-    /api/health reports whether the caller reached the process it spawned.
+    /api/health proves which process answered without the caller sending the
+    token.
 
     A healthy port does not mean the backend is ours: an orphan left behind by
     a force-quit, or a second copy of the app, answers first while our own
     uvicorn is still loading spaCy and has not yet failed to bind. Electron's
-    waitForBackend requires instance_match before it opens a window.
+    waitForBackend sends a fresh random nonce in X-Health-Nonce and accepts
+    the listener only if `proof` is HMAC-SHA256(token, nonce). The old design
+    sent X-Api-Token and trusted an `instance_match` flag, which handed the
+    token to whatever held the port and let it answer "yes". See CLAUDE.md
+    rule 55.
     """
 
-    def test_matching_token_is_our_instance(self, monkeypatch):
+    NONCE = "ab" * 32  # 64 hex characters, as backendIdentity.newNonce() makes
+
+    @staticmethod
+    def _expected(token: str, nonce: str) -> str:
+        import hashlib
+        import hmac
+        return hmac.new(token.encode("utf-8"), nonce.encode("ascii"),
+                        hashlib.sha256).hexdigest()
+
+    def test_health_proof_matches_hmac(self, monkeypatch):
         monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
-        r = client.get("/api/health", headers={"X-Api-Token": "sekrit-token"})
+        r = client.get("/api/health", headers={"X-Health-Nonce": self.NONCE})
         assert r.status_code == 200
-        assert r.json()["instance_match"] is True
+        body = r.json()
+        assert body["proof"] == self._expected("sekrit-token", self.NONCE)
+        assert "instance_match" not in body
 
-    def test_foreign_token_is_not_our_instance(self, monkeypatch):
-        """An orphan from a previous run holds a DIFFERENT token."""
-        monkeypatch.setenv("REDACTION_API_TOKEN", "this-run-token")
-        r = client.get("/api/health", headers={"X-Api-Token": "previous-run-token"})
-        assert r.status_code == 200
-        assert r.json()["instance_match"] is False
-
-    def test_missing_token_is_not_our_instance(self, monkeypatch):
-        monkeypatch.setenv("REDACTION_API_TOKEN", "this-run-token")
+    def test_health_without_nonce_has_no_proof(self, monkeypatch):
+        """The renderer's reachability poller sends nothing, and gets plain
+        liveness back."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
         r = client.get("/api/health")
         assert r.status_code == 200
-        assert r.json()["instance_match"] is False
-
-    def test_mismatch_is_reported_in_the_body_never_as_401(self, monkeypatch):
-        """The endpoint must stay unauthenticated (rule 35) so the renderer's
-        backend-down poller keeps working — a mismatch is data, not a refusal."""
-        monkeypatch.setenv("REDACTION_API_TOKEN", "this-run-token")
-        r = client.get("/api/health", headers={"X-Api-Token": "wrong"})
-        assert r.status_code == 200
         assert r.json()["status"] == "ok"
+        assert r.json()["proof"] is None
 
-    def test_no_token_configured_always_matches(self, monkeypatch):
-        """A manually-run uvicorn (or pytest) has no identity to check, and
-        must still look healthy — that dev workflow predates the token."""
-        monkeypatch.delenv("REDACTION_API_TOKEN", raising=False)
-        assert client.get("/api/health").json()["instance_match"] is True
-        r = client.get("/api/health", headers={"X-Api-Token": "anything"})
-        assert r.json()["instance_match"] is True
+    @pytest.mark.parametrize("nonce", [
+        "ab" * 31,            # too short
+        "ab" * 33,            # too long
+        "zz" * 32,            # right length, not hex
+        "AB" * 32,            # upper case: newNonce() never makes it
+        "",
+    ])
+    def test_health_rejects_malformed_nonce(self, monkeypatch, nonce):
+        """Only a nonce of the shape the launcher makes earns a proof, so the
+        endpoint cannot be used to sign arbitrary attacker-chosen strings."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.get("/api/health", headers={"X-Health-Nonce": nonce})
+        assert r.status_code == 200
+        assert r.json()["proof"] is None
 
-    def test_non_ascii_token_header_does_not_500(self, monkeypatch):
-        """Same guard as the middleware: compare_digest raises TypeError on a
-        non-ASCII str, which would turn a junk header into a 500.
-
-        Header passed pre-encoded as UTF-8 bytes for the reason documented on
-        test_non_ascii_token_header_returns_401_not_500 above: httpx rejects a
-        non-ASCII str header client-side, so the bytes form is the only way to
-        put those octets on the wire.
-        """
+    def test_health_rejects_non_ascii_nonce_without_500(self, monkeypatch):
+        """Header passed as UTF-8 bytes because httpx refuses a non-ASCII str
+        header client-side (see test_non_ascii_token_header_returns_401_not_500)."""
         monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
         r = client.get("/api/health",
-                       headers={"X-Api-Token": "tökén".encode("utf-8")})
+                       headers={"X-Health-Nonce": ("é" * 64).encode("utf-8")})
         assert r.status_code == 200
-        assert r.json()["instance_match"] is False
+        assert r.json()["proof"] is None
+
+    def test_health_never_reads_x_api_token(self, monkeypatch):
+        """A wrong token alongside a valid nonce changes nothing: the proof is
+        still right and the response still 200. Health stays unauthenticated
+        (rule 35) and identity rests on the proof alone."""
+        monkeypatch.setenv("REDACTION_API_TOKEN", "sekrit-token")
+        r = client.get("/api/health", headers={"X-Health-Nonce": self.NONCE,
+                                               "X-Api-Token": "wrong"})
+        assert r.status_code == 200
+        assert r.json()["proof"] == self._expected("sekrit-token", self.NONCE)
+
+    def test_no_token_configured_gives_no_proof_but_stays_healthy(self, monkeypatch):
+        """A manually-run uvicorn (or pytest) has no identity to prove. It
+        still answers ok, so the renderer's poller and the dev workflow work;
+        only Electron's launcher checks the proof, and Electron always sets a
+        token."""
+        monkeypatch.delenv("REDACTION_API_TOKEN", raising=False)
+        r = client.get("/api/health", headers={"X-Health-Nonce": self.NONCE})
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+        assert r.json()["proof"] is None

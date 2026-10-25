@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { isAllowedNavigation } = require('./navigation.cjs');
+const { newNonce, healthHeaders, isOwnBackend } = require('./backendIdentity.cjs');
 const { buildMenuTemplate } = require('./menu.cjs');
 const { createRoot, removeRoot, sweepStale } = require('./tempRoot.cjs');
 const os = require('os');
@@ -76,8 +77,8 @@ function waitForBackend(port, timeoutMs = 30000) {
     const check = () => {
       // Our backend dying is terminal, and a healthy port does NOT prove
       // otherwise: an orphaned backend from a force-quit, or a second copy of
-      // the app, answers on the same port with a DIFFERENT api token. Trusting
-      // that check would open a window whose every request 401s.
+      // the app, answers on the same port without knowing THIS run's token.
+      // Trusting it would open a window whose every request 401s.
       if (backendFailure) {
         reject(new Error(backendFailure));
         return;
@@ -95,14 +96,15 @@ function waitForBackend(port, timeoutMs = 30000) {
         setTimeout(check, 500);
       };
 
+      // A fresh nonce per probe, never the token: the listener has not proved
+      // who it is yet. Only our own backend can answer HMAC(token, nonce).
+      const nonce = newNonce();
       const req = http.get(
         {
           host: '127.0.0.1',
           port,
           path: '/api/health',
-          // Proves identity, not permission: /api/health is unauthenticated,
-          // and answers instance_match=false rather than 401 on a mismatch.
-          headers: { 'X-Api-Token': API_TOKEN },
+          headers: healthHeaders(nonce),
         },
         (res) => {
           if (res.statusCode !== 200) {
@@ -116,9 +118,9 @@ function waitForBackend(port, timeoutMs = 30000) {
           res.on('end', () => {
             let ours = false;
             try {
-              // Absent field = an older backend; treat as not ours rather than
-              // assume, since assuming is the bug this exists to fix.
-              ours = JSON.parse(body).instance_match === true;
+              // No proof (an older backend, or a stranger) = not ours, rather
+              // than assume, since assuming is the bug this exists to fix.
+              ours = isOwnBackend(JSON.parse(body), API_TOKEN, nonce);
             } catch {
               ours = false;
             }

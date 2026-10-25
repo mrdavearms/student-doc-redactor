@@ -613,7 +613,7 @@ After a successful write, the output (labels stripped) is swept with the shared 
 
 Four things hold this together, and removing any one restores the trap:
 - `app.requestSingleInstanceLock()` gates the whole `ready` path; the loser quits and `second-instance` focuses the running window.
-- **`/api/health` reports `instance_match`** — whether the caller's `X-Api-Token` matches that process's own token — and `waitForBackend` sends the header and resolves ONLY when it is true. The endpoint stays unauthenticated: a mismatch is a field in the body, never a 401, so rule #35 and the renderer's backend-down poller are untouched. With no token configured (manual `uvicorn`, pytest) it reports a match, which keeps the run-uvicorn-yourself dev workflow working.
+- **`/api/health` answers an HMAC proof, and the token is never sent to an unverified listener.** `waitForBackend` makes a fresh 32-byte nonce per probe and sends only `X-Health-Nonce` (`electron/backendIdentity.cjs`, `healthHeaders`); the backend answers `proof` = HMAC-SHA256(token, nonce) in hex, and `isOwnBackend` compares it with `crypto.timingSafeEqual`. `waitForBackend` resolves ONLY on a correct proof. This replaced `instance_match`, which sent `X-Api-Token` to whatever held the port and believed its "yes": an orphan or impostor received the session token and could simply lie. The endpoint stays unauthenticated and never reads `X-Api-Token`: no proof is a field in the body, never a 401, so rule #35 and the renderer's backend-down poller are untouched (the renderer's `api.health` is a plain `fetch` with no token for the same reason). `proof` is `null` when no token is configured (manual `uvicorn`, pytest) or the nonce is not 64 lowercase hex characters; health still answers `ok` then, so the run-uvicorn-yourself dev workflow works, and only Electron checks the proof, which always sets a token.
 - `backendReady` is set only after that check passes. Before it, a backend exit is a **startup** failure: the handler records `backendFailure` and returns instead of showing its own dialog.
 - `waitForBackend` checks `backendFailure` on every tick and rejects with it, so the user reads "another copy is already running… restarting your computer will clear it" rather than a generic "engine stopped".
 
@@ -1066,7 +1066,7 @@ tests/                                # 890 tests total
 ├── test_detection_failures.py        # 4 tests: one unreadable document is reported, not raised; API failed_documents contract; paste list empty
 ├── test_image_ocr_detection.py       # 9 tests: image_text on native pages (mocked OCR, per-document xref cache), detection reads it, real-Tesseract end-to-end
 ├── test_document_converter.py        # 9 tests: -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough, temp root from Electron, locked profile (rule 82) incl. real-LibreOffice no-network and linked-section checks
-├── test_api_auth.py                  # 15 tests: API token middleware, CORS on 401, health instance_match identity
+├── test_api_auth.py                  # 15 tests: API token middleware, CORS on 401, health HMAC identity proof
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
 ├── test_false_positives.py           # 5 tests: false-positive regression tests

@@ -85,8 +85,27 @@ async function request<T>(
   return res.json();
 }
 
+// Reachability only, and deliberately NOT through request(): that attaches the
+// API token, and /api/health is unauthenticated. The token must never go to a
+// listener that has not proved it is our backend (CLAUDE.md rule 55). Same
+// timeout and BackendUnreachableError distinction as request() (rule 28).
+async function health(): Promise<{ status: string; version: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api/health`, { signal: controller.signal });
+  } catch {
+    throw new BackendUnreachableError();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export const api = {
-  health: () => request<{ status: string; version: string }>('/api/health'),
+  health,
 
   // The first call loads the language model (several seconds on a school
   // laptop with antivirus inspecting every file), so it must not be on the

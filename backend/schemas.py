@@ -340,12 +340,11 @@ class OpenFolderRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
-    # Whether the caller's X-Api-Token matches THIS process's token. Lets the
-    # Electron launcher tell its own freshly-spawned backend apart from an
-    # orphan (or a second copy of the app) already holding the port. True when
-    # no token is configured at all — there is then no identity to check, and
-    # a manually-run uvicorn must still look healthy.
-    instance_match: bool = True
+    # HMAC-SHA256(token, X-Health-Nonce), hex. Lets the Electron launcher tell
+    # its own freshly-spawned backend apart from an orphan (or a second copy of
+    # the app) already holding the port, without ever sending the token. None
+    # when no token is configured or the nonce is missing or malformed.
+    proof: Optional[str] = None
 
 
 # ── Cleanup ──────────────────────────────────────────────────────────────

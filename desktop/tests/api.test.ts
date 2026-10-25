@@ -110,7 +110,7 @@ describe('api token header', () => {
       captured = (opts.headers ?? {}) as Record<string, string>;
       return Promise.resolve(new Response(JSON.stringify({ status: 'ok', version: 'x' })));
     });
-    await api.health();
+    await api.validateFolder('/x');
     expect(captured['X-Api-Token']).toBe('tok-123');
   });
 
@@ -121,7 +121,7 @@ describe('api token header', () => {
       captured = (opts.headers ?? {}) as Record<string, string>;
       return Promise.resolve(new Response(JSON.stringify({ status: 'ok', version: 'x' })));
     });
-    await api.health();
+    await api.validateFolder('/x');
     expect(captured['X-Api-Token']).toBeUndefined();
   });
 
@@ -133,7 +133,7 @@ describe('api token header', () => {
         { status: 401 },
       )),
     );
-    await expect(api.health()).rejects.toThrow('Invalid or missing API token');
+    await expect(api.validateFolder('/x')).rejects.toThrow('Invalid or missing API token');
   });
 });
 
@@ -143,6 +143,34 @@ describe('error bodies', () => {
       JSON.stringify({ detail: [{ loc: ['body', 'student_name'], msg: 'field required' }] }),
       { status: 422, headers: { 'Content-Type': 'application/json' } },
     ));
-    await expect(api.health()).rejects.toThrow(/student_name/);
+    await expect(api.validateFolder('/x')).rejects.toThrow(/student_name/);
+  });
+});
+
+describe('health', () => {
+  // /api/health is unauthenticated and the renderer only needs reachability.
+  // The token must not go to whatever holds the port (CLAUDE.md rule 55).
+  it('never sends the API token, even inside Electron', async () => {
+    let captured: Record<string, string> = {};
+    let called = false;
+    vi.stubGlobal('window', { electronAPI: { getApiToken: () => Promise.resolve('tok-123') } });
+    vi.stubGlobal('fetch', (_url: string, opts: RequestInit = {}) => {
+      called = true;
+      captured = (opts.headers ?? {}) as Record<string, string>;
+      return Promise.resolve(new Response(JSON.stringify({ status: 'ok', version: 'x' })));
+    });
+    await expect(api.health()).resolves.toMatchObject({ status: 'ok' });
+    expect(called).toBe(true);
+    expect(Object.keys(captured).map((k) => k.toLowerCase())).not.toContain('x-api-token');
+  });
+
+  it('reports a refused connection as BackendUnreachableError', async () => {
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')));
+    await expect(api.health()).rejects.toBeInstanceOf(BackendUnreachableError);
+  });
+
+  it('rejects a non-200 answer', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('nope', { status: 503 })));
+    await expect(api.health()).rejects.toThrow();
   });
 });
