@@ -248,3 +248,18 @@ def test_read_only_source_folder_does_not_fail_a_finished_redaction(tmp_path):
         results = RedactionService().execute(request)
     assert results.document_results[0].success
     assert results.log_path is None
+
+
+def test_residue_failure_quarantines(tmp_path):
+    """A hidden-residue failure takes the same quarantine path as an OCR one."""
+    doc = _make_pdf(tmp_path / "report.pdf")
+    service = RedactionService()
+    service._redactor.verify_redaction_ocr = lambda path, texts: (True, [])
+    service._redactor.verify_no_hidden_residue = lambda path, texts: (False, ["x"])
+
+    result = service.execute(_request(tmp_path, doc)).document_results[0]
+
+    assert result.success is False
+    assert result.quarantine_path is not None
+    assert str(result.quarantine_path).endswith(".UNVERIFIED.pdf")
+    assert result.output_path is None

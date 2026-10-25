@@ -388,6 +388,13 @@ class RedactionService:
                 all_clean, ocr_failures = self._redactor.verify_redaction_ocr(
                     output_path, redacted_texts
                 )
+                # The render cannot see image bytes under a black box,
+                # attachments, document properties or thumbnails.
+                residue_clean, residue_failures = (
+                    self._redactor.verify_no_hidden_residue(output_path, redacted_texts)
+                )
+                all_clean = all_clean and residue_clean
+                ocr_failures = list(ocr_failures) + residue_failures
                 if not all_clean:
                     for failure_msg in ocr_failures:
                         logger.add_flagged_file(

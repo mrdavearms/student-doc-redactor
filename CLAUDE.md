@@ -289,18 +289,19 @@ Accepted trade-offs, as rule 7 accepted "Do not…": a capitalised ordinary word
 
 `_init_presidio()` catches all exceptions and sets the analyzer to `None` unless `require_ner=True`. The Streamlit app degrades gracefully to regex-only detection. The bundled desktop app passes `require_ner=True` — if Presidio/spaCy fails to load, it raises `RuntimeError` and the Setup screen shows a blocking error.
 
-### 9. There are two redaction verification methods
+### 9. There are three redaction verification methods
 
 - `verify_redaction(pdf_path, text)` — fast, text-layer only. Used in the main redaction flow for spot-checking.
 - `verify_redaction_ocr(pdf_path, texts)` — slow, renders at 300 DPI and OCRs. More thorough. Used for comprehensive post-redaction checks.
+- `verify_no_hidden_residue(pdf_path, texts)` — reads what a render cannot show: it OCRs every stored `/Image`'s own pixels (a name under a black vector box renders black but is still in the image bytes), and fails on any `/Info` key with a non-empty value (MuPDF's own `Producer` stamp excepted), any embedded file or `_EMBEDDING_ANNOT_TYPES` annotation, and any page `/Thumb`. `RedactionService._process_document` runs it straight after `verify_redaction_ocr` and adds its messages to the same failure list, so a failure quarantines through the rule #67 path. It fails closed: if Tesseract cannot run on an image, the document quarantines. It is the backstop for partial glyph residue: when a scan's drawn name is taller than its hidden-text line, the text-layer redaction blanks only the top of the glyphs, the render verifier passes, and this check reads the rest. Messages for `/Info` name the key, never the value.
 
-Both verifiers use the module-level `_pii_visible_in_text()` whole-word check — never revert to substring matching, which falsely quarantined correctly-redacted files when a short name ('Ann') appeared inside an ordinary word ('Annual'). The helper splits PII on whitespace *and* hyphens so OCR variants like 'smith - jones' are still caught.
+All three verifiers use the module-level `_pii_visible_in_text()` whole-word check — never revert to substring matching, which falsely quarantined correctly-redacted files when a short name ('Ann') appeared inside an ordinary word ('Annual'). The helper splits PII on whitespace *and* hyphens so OCR variants like 'smith - jones' are still caught.
 
 **Straight and curly apostrophes are the same character everywhere.** Detection normalises the page text to `'` and reports "O'Brien"; Word writes "O’Brien" (U+2019) into the PDF, and that is what `search_for`, the OCR word list and the verifiers see. Before `_fold_apostrophes` (redactor) and `_any_apostrophe` (text_deidentifier), every O'Brien, O'Connor and D'Souza in a Word-authored report was reported as redacted with the surname still readable, then quarantined by the OCR verifier. `PIIDetector.__init__` normalises the entered names for the same reason. PyMuPDF's base-14 fonts cannot encode U+2019 (it renders as a middle dot), so a test of this needs an embedded TrueType font — see `tests/test_redactor.py::TestApostrophesAndQuotes`.
 
 ### 10. Metadata stripping happens inside `redact_pdf()`
 
-`_strip_metadata()` is called inside `redact_pdf()` before `doc.save()`. It strips author, title, subject, creator, producer, keywords, creation date, modification date, XMP metadata, and embedded files. It always runs — not optional.
+`_strip_metadata()` is called inside `redact_pdf()` before `doc.save()`. It nulls the whole `/Info` dictionary (`set_metadata({})`, so custom keys like `/StudentName` go too), the document XMP, and embedded files, then `_strip_hidden_carriers()` nulls every page's `/Thumb`, `/Metadata` and `/PieceInfo`, every image's `/Metadata`, and the catalog's `/PieceInfo`. Note that `doc.save()` still writes a trailer `/Info` holding only `/Producer (MuPDF …)`. It always runs — not optional. Page-level file-attachment, sound, movie, rich-media, 3D and screen annotations (`_EMBEDDING_ANNOT_TYPES`) are deleted outright in `_delete_pii_annotations`, on every page.
 
 ### 11. OCR pages ARE automatically redacted via `_redact_ocr_page()`
 
@@ -332,6 +333,8 @@ Detection is per page, and NER can tag "P. Raman" on page 2 while missing "Ms Pr
 
 Two more things in the same area: `_is_whole_word_match` accepts punctuation on BOTH sides of the word (PyMuPDF's word list keeps the quotes, so `("Joe")` is one word — a `startswith` check never matched it), and `_pad_redaction_rect` pads a search rect sideways but pulls it IN vertically. `search_for` returns the font's full line box, which at single spacing already overlaps the lines above and below; the old 1pt padding in every direction deleted letters from neighbouring lines. Header/footer zones on a text-layer page are multiplied by `page.derotation_matrix`: annotation rects are unrotated coordinates, `page.rect` is the displayed page, and on a `/Rotate 90` scan the unconverted zones blanked two vertical stripes of body text.
 
+**A second pass blanks a wider band of image pixels.** Pulling the box in vertically protects neighbouring lines, but on a searchable scan the printed glyphs are often taller than the invisible OCR text box, so their tops and tails stayed in the scan and the residue verifier quarantined the file. After the first `apply_redactions`, `_blank_image_band` re-applies every redaction rect widened by `_widen_for_image` (`IMAGE_BLANK_VPAD_RATIO = 0.2` of the box height above AND below, `IMAGE_BLANK_HPAD_PT = 2.0` each side) with `fill=None`, `text=PDF_REDACT_TEXT_NONE` and `graphics=PDF_REDACT_LINE_ART_NONE`: image pixels only, so no extra black box and no letters lost from neighbouring lines. It runs only when an image's placement rect intersects a redaction, so an ordinary text page gets exactly one `apply_redactions` and is unchanged. The ratio was 0.5 until review: on a real single-spaced scan (12pt text, 13.8pt pitch) that took a sixth of the ink off the line above and Tesseract misread both neighbour lines; 0.2 removes the name's descenders and leaves neighbours at about 99% of their ink (`TestSingleSpacedScan`). Limit: it widens by fixed amounts. A drawn name more than 1.4 times the padded box's height, or more than 2pt past each end of its hidden text, still leaves glyph pixels, and `verify_no_hidden_residue` remains the backstop that quarantines a legible leftover.
+
 ### 12. Every embedded image is OCR-scanned for PII (Stage 2)
 
 After per-page redaction, `_redact_embedded_images()` runs on **every page of the document** with the full document-level redaction item list (not just pages that had detections). Pages already processed by `_redact_ocr_page()` are skipped (their pixels were just OCR'd at 300 DPI), OCR results are cached per image xref for the run, and `_check_tesseract()` is memoised on the instance — without those three mitigations a 50-page scanned report costs ~65s. It extracts each embedded image via `doc.extract_image(xref)`, OCRs it with pytesseract, blacks out PII matches in the image pixels using PIL, and replaces the original via `page.replace_image(xref, stream=png_bytes)`. This catches PII in email screenshots, scanned documents, and even small logos. No image is too small to scan — there is no size threshold.
@@ -346,7 +349,7 @@ Both `_redact_ocr_page()` (full-page image-only OCR) and `_redact_embedded_image
 
 `page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_REMOVE)` will **delete the entire full-page scan image**, leaving a blank white page. This is catastrophic for scanned documents where each page IS a single image.
 
-Always use `images=fitz.PDF_REDACT_IMAGE_NONE` for text-layer redactions, and use the `_redact_ocr_page()` PIL ImageDraw path for image-only pages.
+Use `images=fitz.PDF_REDACT_IMAGE_PIXELS` for text-layer redactions (the main loop and `_redact_zones`), and the `_redact_ocr_page()` PIL ImageDraw path for image-only pages. `PIXELS` blanks only the image pixels under each redaction box (to white; the black box is a vector drawn on top), so on a searchable scan the name is gone from the stored image, not merely covered. `IMAGE_NONE` was used until October 2026 and left the name recoverable from the image bytes whenever Stage 2's OCR missed it. `IMAGE_REMOVE` is still forbidden. Pinned by `tests/test_redaction_residue.py`. The main loop also runs a second, image-only `PIXELS` pass over a wider band (rule 11a, `_blank_image_band`); it uses the same `PIXELS` mode, never `REMOVE`.
 
 ### 15. OCR word matching has two modes — cleaned and exact
 
@@ -372,14 +375,17 @@ page.clean_contents()  # Consolidates content streams
 doc = page.parent
 for xref in page.get_contents():
     doc.update_stream(xref, b"")  # Clear each content stream
+doc.xref_set_key(page.xref, "Resources", "<<>>")  # fresh, page-owned resources
 page.insert_image(page.rect, stream=img_bytes, overlay=True)
 ```
+
+Both rebuild sites call `PDFRedactor._replace_page_with_image()`. The fresh `/Resources` line stops the original scan staying referenced (and so saved) in the output; it replaces the page's own dictionary rather than editing it, because pages can share one. Checked October 2026: `save(clean=True)` already dropped the unreferenced scan, so this makes the result independent of that library default (`TestPageReplacement`).
 
 **Do NOT use `page._cleanContents()`** — this private API does not exist in current PyMuPDF versions. The public `page.clean_contents()` plus content stream clearing handles the same job.
 
 ### 17. Form widget (AcroForm) deletion runs after text/OCR redaction
 
-`_delete_pii_widgets()` iterates over `page.widgets()` and deletes any widget whose field value matches redacted PII text. This runs AFTER text-layer or OCR redaction, as a separate pass. It catches PII stored in interactive form fields that are invisible to `page.search_for()`.
+`_delete_pii_widgets()` iterates over `page.widgets()` and deletes any widget whose field value matches redacted PII text. This runs AFTER text-layer or OCR redaction, as a separate pass. It catches PII stored in interactive form fields that are invisible to `page.search_for()`. After deleting a widget it walks the widget's `/Parent` chain and nulls `/V` and `/DV` on any ancestor field whose value matches, since a kid inherits its value from the parent and deleting the kid alone leaves it in the file.
 
 ### 18. Filename PII redaction is handled by the service layer
 

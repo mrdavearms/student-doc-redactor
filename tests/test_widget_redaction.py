@@ -200,3 +200,41 @@ def test_short_name_does_not_substring_delete_widget():
         assert remaining["Sibling"] == "Joelle attends the same school"
         assert "Student" not in remaining, "widget valued exactly 'Joe' must be deleted"
         doc.close()
+
+
+class TestInheritedFieldValues:
+
+    def test_parent_field_value_removed(self):
+        """A kid widget inheriting /V from a parent field must not leave the parent's value behind."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            out = Path(tmp) / "output.pdf"
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_text((72, 72), "Assessment Report", fontsize=14)
+            widget = fitz.Widget()
+            widget.field_name = "kid"
+            widget.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+            widget.rect = fitz.Rect(72, 150, 300, 170)
+            page.add_widget(widget)
+            kid = page.first_widget.xref
+
+            parent = doc.get_new_xref()
+            doc.update_object(parent, "<</T (parent) /FT /Tx /V (Joe Bloggs) /DV (Joe Bloggs)>>")
+            doc.xref_set_key(parent, "Kids", f"[{kid} 0 R]")
+            doc.xref_set_key(kid, "Parent", f"{parent} 0 R")
+            doc.xref_set_key(kid, "T", "null")
+            doc.xref_set_key(kid, "V", "null")
+            doc.xref_set_key(doc.pdf_catalog(), "AcroForm",
+                             f"<</Fields [{parent} 0 R]>>")
+            doc.save(str(src))
+            doc.close()
+
+            redactor = PDFRedactor()
+            items = [RedactionItem(page_num=1, text="Joe Bloggs")]
+            success, _ = redactor.redact_pdf(src, out, items)
+            assert success
+
+            out_doc = fitz.open(str(out))
+            assert b"Joe Bloggs" not in out_doc.tobytes(expand=255)
+            out_doc.close()

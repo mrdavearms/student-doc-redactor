@@ -39,6 +39,12 @@ def is_same_file(a: Path, b: Path) -> bool:
 HEADER_ZONE_FRACTION = 0.12   # top 12%
 FOOTER_ZONE_FRACTION = 0.08   # bottom 8%
 
+# Second-pass image blanking under text-layer redactions (rule 11a). On a
+# searchable scan the printed glyphs can be taller than the invisible OCR
+# text box, so the image pixels are blanked over a wider band than the text.
+IMAGE_BLANK_VPAD_RATIO = 0.2  # added above AND below, x the rect's height
+IMAGE_BLANK_HPAD_PT = 2.0     # added each side, in points
+
 
 def strip_pii_from_filename(stem: str, name_variations: List[str]) -> str:
     """
@@ -154,6 +160,17 @@ def fuzzy_word_match(ocr_clean: str, pii_lower: str) -> bool:
 # "sarah-williams" is still recognised as visible.
 _PII_SEP = r"[\s\-‐-―]"
 
+# Annotation types that carry a payload the page render does not show. Any of
+# these on a page is deleted outright: the payload can hold the original text.
+_EMBEDDING_ANNOT_TYPES = {
+    fitz.PDF_ANNOT_FILE_ATTACHMENT,
+    fitz.PDF_ANNOT_SOUND,
+    fitz.PDF_ANNOT_MOVIE,
+    fitz.PDF_ANNOT_RICH_MEDIA,
+    fitz.PDF_ANNOT_3D,
+    fitz.PDF_ANNOT_SCREEN,
+}
+
 
 def _fold_apostrophes(text: str) -> str:
     """
@@ -183,6 +200,22 @@ def _pad_redaction_rect(rect: fitz.Rect) -> fitz.Rect:
     """
     dy = min(2.0, rect.height * 0.2)
     return fitz.Rect(rect.x0 - 1, rect.y0 + dy, rect.x1 + 1, rect.y1 - dy)
+
+
+def _widen_for_image(rect: fitz.Rect) -> fitz.Rect:
+    """
+    The band of image pixels to blank under one text-layer redaction.
+
+    _pad_redaction_rect pulls the box IN vertically so neighbouring text lines
+    keep their letters. Image pixels have no such neighbour problem when the
+    second pass touches images only, so this band reaches a little further:
+    a fifth of the box's height above and below (enough for descenders, not
+    enough to reach the neighbouring scan line), and a couple of points each
+    side.
+    """
+    dy = rect.height * IMAGE_BLANK_VPAD_RATIO
+    return fitz.Rect(rect.x0 - IMAGE_BLANK_HPAD_PT, rect.y0 - dy,
+                     rect.x1 + IMAGE_BLANK_HPAD_PT, rect.y1 + dy)
 
 
 def _is_case_sensitive_pii(pii_text: str) -> bool:
@@ -314,8 +347,15 @@ class PDFRedactor:
                         self._redact_text_search(page, text)
 
                     # Apply all redactions on this page (a no-op when the
-                    # searches found nothing here)
-                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                    # searches found nothing here). IMAGE_PIXELS blanks the
+                    # image pixels under each box: on a searchable scan the
+                    # black box alone only covers the name, and the name stays
+                    # recoverable from the image bytes. Never IMAGE_REMOVE.
+                    redacted_rects = [
+                        a.rect for a in page.annots(types=[fitz.PDF_ANNOT_REDACT])
+                    ]
+                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+                    self._blank_image_band(page, redacted_rects)
 
             # ── Stage 2: Embedded-image OCR scan ──
             # Runs on EVERY page with the full document-level item list, so an
@@ -377,6 +417,33 @@ class PDFRedactor:
         finally:
             if doc is not None:
                 doc.close()
+
+    def _blank_image_band(self, page: fitz.Page, redacted_rects: List[fitz.Rect]):
+        """
+        Second pass for searchable scans: blank a wider band of IMAGE pixels
+        under each text-layer redaction (_widen_for_image).
+
+        Printed glyphs are often taller than the invisible OCR text box, so
+        the first pass leaves their tops and tails in the scan. This pass
+        touches image pixels only — text and line art are left alone, so the
+        lines above and below keep every letter (rule 11a) — and draws no
+        extra box. It runs only when an image sits under a redaction, so an
+        ordinary text page is exactly as the first pass left it.
+        """
+        if not redacted_rects:
+            return
+        image_rects = []
+        for img in page.get_images(full=True):
+            image_rects.extend(page.get_image_rects(img[0]))
+        if not any(r.intersects(ir) for r in redacted_rects for ir in image_rects):
+            return
+        for rect in redacted_rects:
+            page.add_redact_annot(_widen_for_image(rect), fill=None)
+        page.apply_redactions(
+            images=fitz.PDF_REDACT_IMAGE_PIXELS,
+            graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+            text=fitz.PDF_REDACT_TEXT_NONE,
+        )
 
     def _redact_bbox(self, page: fitz.Page, bbox: Tuple[float, float, float, float]):
         """
@@ -510,11 +577,7 @@ class PDFRedactor:
             img.save(img_bytes, format="PNG")
             img_bytes.seek(0)
 
-            page.clean_contents()
-            doc = page.parent
-            for xref in page.get_contents():
-                doc.update_stream(xref, b"")
-            page.insert_image(page.rect, stream=img_bytes.read(), overlay=True)
+            self._replace_page_with_image(page, img_bytes.read())
         else:
             # Text-layer path — PyMuPDF redaction annotations.
             # page.rect is the page as displayed, but annotation rects are in
@@ -527,7 +590,24 @@ class PDFRedactor:
 
             page.add_redact_annot(header_rect, fill=(0, 0, 0))
             page.add_redact_annot(footer_rect, fill=(0, 0, 0))
-            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+            # IMAGE_PIXELS, not NONE: see the main loop in redact_pdf.
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+
+    @staticmethod
+    def _replace_page_with_image(page: fitz.Page, png: bytes) -> None:
+        """Make `png` the whole page, leaving no reference to the old scan.
+
+        The page gets its OWN empty resource dictionary first. Dropping only
+        the content stream leaves the original image listed in /Resources, and
+        editing a dictionary shared with other pages would strip their images.
+        """
+        page_rect = page.rect
+        page.clean_contents()
+        doc = page.parent
+        for content_xref in page.get_contents():
+            doc.update_stream(content_xref, b"")
+        doc.xref_set_key(page.xref, "Resources", "<<>>")
+        page.insert_image(page_rect, stream=png, overlay=True)
 
     def _check_tesseract(self) -> bool:
         """Whether Tesseract is installed and accessible (memoised per instance)."""
@@ -896,14 +976,7 @@ class PDFRedactor:
         img_bytes.seek(0)
 
         # Clear the page and insert the modified image at the same dimensions.
-        page_rect = page.rect
-        page.clean_contents()
-        doc = page.parent
-        # Clear the page's content stream(s)
-        for content_xref in page.get_contents():
-            doc.update_stream(content_xref, b"")
-        # Insert the redacted image to fill the page
-        page.insert_image(page_rect, stream=img_bytes.read(), overlay=True)
+        self._replace_page_with_image(page, img_bytes.read())
 
         return redacted_count
 
@@ -942,10 +1015,39 @@ class PDFRedactor:
             try:
                 for w in page.widgets():
                     if w.field_name == name:
+                        xref = w.xref  # capture before deletion
                         page.delete_widget(w)
+                        self._clear_inherited_field_values(page.parent, xref, redacted_texts)
                         break
             except Exception:
                 pass  # Widget already removed or page changed
+
+    @staticmethod
+    def _clear_inherited_field_values(doc: fitz.Document, xref: int, redacted_texts: list):
+        """Null /V and /DV on any /Parent field of a deleted widget whose value holds PII.
+
+        A kid widget can inherit its value from a parent field; deleting the
+        kid leaves the parent's /V in the file.
+        """
+        seen = set()
+        try:
+            while True:
+                kind, ref = doc.xref_get_key(xref, "Parent")
+                if kind != "xref":
+                    return
+                xref = int(ref.split()[0])
+                if xref in seen:
+                    return
+                seen.add(xref)
+                for key in ("V", "DV"):
+                    k, val = doc.xref_get_key(xref, key)
+                    if k == "null":
+                        continue
+                    low = val.lower()
+                    if any(p and re.search(r"\b" + re.escape(p) + r"\b", low) for p in redacted_texts):
+                        doc.xref_set_key(xref, key, "null")
+        except Exception:
+            return
 
     def _delete_pii_links(self, page: fitz.Page, redacted_texts: list):
         """Remove link annotations whose URIs contain PII."""
@@ -964,6 +1066,9 @@ class PDFRedactor:
         annots = list(page.annots()) if page.annots() else []
         for annot in annots:
             if annot.type[0] == fitz.PDF_ANNOT_WIDGET:
+                continue
+            if annot.type[0] in _EMBEDDING_ANNOT_TYPES:
+                page.delete_annot(annot)
                 continue
             info = annot.info
             text_fields = [
@@ -1039,21 +1144,15 @@ class PDFRedactor:
 
     def _strip_metadata(self, doc: fitz.Document):
         """Strip all identifying metadata from the PDF"""
-        doc.set_metadata({
-            "author": "",
-            "title": "",
-            "subject": "",
-            "creator": "",
-            "producer": "",
-            "keywords": "",
-            "creationDate": "",
-            "modDate": "",
-        })
+        # set_metadata({}) nulls the whole /Info dictionary, so custom keys
+        # (e.g. /StudentName) go too, not just the standard eight.
+        doc.set_metadata({})
 
         # Remove XMP metadata
         doc.del_xml_metadata()
 
-        # Remove embedded files
+        # Remove embedded files (the name tree here; page-level file
+        # attachments and media annotations are removed in _delete_pii_annotations)
         if hasattr(doc, 'embfile_count') and doc.embfile_count() > 0:
             for name in list(doc.embfile_names()):
                 doc.embfile_del(name)
@@ -1084,6 +1183,35 @@ class PDFRedactor:
             names_type, _ = doc.xref_get_key(cat_xref, "Names")
             if names_type != "null":
                 doc.xref_set_key(cat_xref, "Names", "null")
+        except Exception:
+            pass
+
+        self._strip_hidden_carriers(doc)
+
+    def _strip_hidden_carriers(self, doc: fitz.Document) -> None:
+        """Null page thumbnails, page/image XMP and PieceInfo, and the catalog's PieceInfo.
+
+        None of these are drawn on the page, so a render never shows a name
+        held in them, but each can carry the original text or a copy of the page.
+        """
+        for page in doc:
+            for key in ("Thumb", "Metadata", "PieceInfo"):
+                try:
+                    if doc.xref_get_key(page.xref, key)[0] != "null":
+                        doc.xref_set_key(page.xref, key, "null")
+                except Exception:
+                    pass
+        for xref in range(1, doc.xref_length()):
+            try:
+                if (
+                    doc.xref_get_key(xref, "Subtype")[1] == "/Image"
+                    and doc.xref_get_key(xref, "Metadata")[0] != "null"
+                ):
+                    doc.xref_set_key(xref, "Metadata", "null")
+            except Exception:
+                pass
+        try:
+            doc.xref_set_key(doc.pdf_catalog(), "PieceInfo", "null")
         except Exception:
             pass
 
@@ -1132,6 +1260,98 @@ class PDFRedactor:
                 doc.close()
 
         return (len(failures) == 0, failures)
+
+    def verify_no_hidden_residue(self, pdf_path: Path, redacted_texts: List[str]) -> Tuple[bool, List[str]]:
+        """
+        Check the layers a page render cannot show.
+
+        verify_redaction_ocr reads the rendered page, so an image whose name
+        pixels sit under a black vector box, a file attachment, the document
+        properties and a page thumbnail all pass it. This reads each of them
+        directly. Same contract as verify_redaction_ocr: (all_clean, failures),
+        and the handle is released in `finally`.
+
+        Image text goes through _pii_visible_in_text, so the case rules
+        (rules 7, 7a) apply here exactly as they do to the rendered page:
+        a disagreement would quarantine correct output.
+        """
+        failures = []
+        doc = None
+        try:
+            doc = fitz.open(str(pdf_path))
+            failures.extend(self._image_residue(doc, redacted_texts))
+            failures.extend(self._info_residue(doc))
+            if doc.embfile_count() > 0:
+                failures.append(
+                    f"{doc.embfile_count()} embedded file(s) still attached"
+                )
+            for page in doc:
+                if any(a.type[0] in _EMBEDDING_ANNOT_TYPES for a in page.annots()):
+                    failures.append(
+                        f"Page {page.number + 1}: file attachment or media annotation still present"
+                    )
+                if doc.xref_get_key(page.xref, "Thumb")[0] != "null":
+                    failures.append(f"Page {page.number + 1}: page thumbnail still present")
+        except Exception as e:
+            failures.append(f"Hidden-residue verification error: {str(e)}")
+        finally:
+            if doc is not None:
+                doc.close()
+
+        return (len(failures) == 0, failures)
+
+    def _image_residue(self, doc: fitz.Document, redacted_texts: List[str]) -> List[str]:
+        """OCR every stored image's own pixels, not the page they are drawn on."""
+        texts = [t for t in redacted_texts if len(t.strip()) >= 2]
+        failures = []
+        try:
+            for xref in range(1, doc.xref_length()):
+                if doc.xref_get_key(xref, "Subtype")[1] != "/Image":
+                    continue
+                ocr_text = pytesseract.image_to_string(self._image_for_ocr(doc, xref))
+                for text in texts:
+                    if _pii_visible_in_text(text, ocr_text):
+                        failures.append(
+                            f"Stored image {xref}: '{text}' still readable in the image data"
+                        )
+        except Exception as e:
+            # Fail closed: an image nobody could read may still hold the name.
+            failures.append(f"Stored-image check could not run: {str(e)}")
+        return failures
+
+    @staticmethod
+    def _image_for_ocr(doc: fitz.Document, xref: int) -> Image.Image:
+        """The image's stored pixels; MuPDF decodes any format Pillow cannot."""
+        try:
+            img = Image.open(io.BytesIO(doc.extract_image(xref)["image"]))
+            img.load()
+            return img
+        except Exception:
+            pix = fitz.Pixmap(doc, xref)
+            if pix.alpha or (pix.colorspace and pix.colorspace.n not in (1, 3)):
+                pix = fitz.Pixmap(fitz.csRGB, pix, 0)
+            return Image.open(io.BytesIO(pix.tobytes("png")))
+
+    @staticmethod
+    def _info_residue(doc: fitz.Document) -> List[str]:
+        """Any /Info key with a value, except MuPDF's own Producer stamp."""
+        kind, value = doc.xref_get_key(-1, "Info")
+        if kind == "null":
+            return []
+        if kind != "xref":
+            return ["Document properties (/Info) still present"]
+        info = int(value.split()[0])
+        keys = []
+        for key in doc.xref_get_keys(info):
+            vkind, v = doc.xref_get_key(info, key)
+            if vkind == "null" or not v.strip() or v.strip() in ("()", "<>"):
+                continue
+            if key == "Producer" and v.startswith("MuPDF"):
+                continue
+            keys.append(key)
+        if keys:
+            return [f"Document properties still set: {', '.join(keys)}"]
+        return []
 
     def create_redacted_copy(self, input_pdf: Path, output_folder: Path, redactions: List[RedactionItem]) -> Tuple[bool, str, Path]:
         """

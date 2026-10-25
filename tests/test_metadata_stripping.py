@@ -185,3 +185,122 @@ class TestMetadataStripping:
             # Verify metadata is gone
             assert doc.metadata.get("author", "") == ""
             doc.close()
+
+
+def _redact(src, out, text):
+    redactor = PDFRedactor()
+    success, _ = redactor.redact_pdf(src, out, [RedactionItem(page_num=1, text=text)])
+    assert success
+
+
+class TestPageAttachments:
+
+    def test_file_attachment_annotation_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            out = Path(tmp) / "output.pdf"
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_text((72, 72), "Joe Bloggs attended", fontsize=14)
+            page.add_file_annot(
+                fitz.Point(500, 50), b"Joe Bloggs original draft", "orig.txt", desc="attachment"
+            )
+            doc.save(str(src))
+            doc.close()
+
+            _redact(src, out, "Joe Bloggs")
+
+            out_doc = fitz.open(str(out))
+            types = [a.type[0] for p in out_doc for a in p.annots()]
+            assert fitz.PDF_ANNOT_FILE_ATTACHMENT not in types
+            assert b"Joe Bloggs" not in out_doc.tobytes(expand=255)
+            out_doc.close()
+
+
+class TestHiddenCarriers:
+
+    def _base(self, src):
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Joe Bloggs attended", fontsize=14)
+        return doc, page
+
+    def _stream(self, doc, text):
+        xref = doc.get_new_xref()
+        doc.update_object(xref, "<<>>")
+        doc.update_stream(xref, text.encode())
+        return xref
+
+    def test_custom_info_key_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            out = Path(tmp) / "output.pdf"
+            doc, page = self._base(src)
+            doc.set_metadata({"author": "x"})
+            info = int(doc.xref_get_key(-1, "Info")[1].split()[0])
+            doc.xref_set_key(info, "StudentName", "(Joe Bloggs)")
+            doc.xref_set_key(info, "Company", "(Dummy School)")
+            doc.save(str(src))
+            doc.close()
+
+            _redact(src, out, "Joe Bloggs")
+
+            out_doc = fitz.open(str(out))
+            assert out_doc.xref_get_key(-1, "Info")[0] == "null"
+            assert b"Joe Bloggs" not in out_doc.tobytes(expand=255)
+            assert b"Dummy School" not in out_doc.tobytes(expand=255)
+            out_doc.close()
+
+    def test_page_thumbnail_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            out = Path(tmp) / "output.pdf"
+            doc, page = self._base(src)
+            thumb = self._stream(doc, "thumbnail of Joe Bloggs")
+            doc.xref_set_key(page.xref, "Thumb", f"{thumb} 0 R")
+            doc.save(str(src))
+            doc.close()
+
+            _redact(src, out, "Joe Bloggs")
+
+            out_doc = fitz.open(str(out))
+            assert out_doc.xref_get_key(out_doc[0].xref, "Thumb")[0] == "null"
+            out_doc.close()
+
+    def test_page_and_image_xmp_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            out = Path(tmp) / "output.pdf"
+            doc, page = self._base(src)
+            pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 4, 4), False)
+            pix.set_rect(pix.irect, (200, 200, 200))
+            page.insert_image(fitz.Rect(300, 300, 340, 340), pixmap=pix)
+            img_xref = page.get_images()[0][0]
+            xmp = self._stream(doc, "<x>Joe Bloggs</x>")
+            doc.xref_set_key(page.xref, "Metadata", f"{xmp} 0 R")
+            xmp2 = self._stream(doc, "<x>Joe Bloggs</x>")
+            doc.xref_set_key(img_xref, "Metadata", f"{xmp2} 0 R")
+            doc.save(str(src))
+            doc.close()
+
+            _redact(src, out, "Joe Bloggs")
+
+            out_doc = fitz.open(str(out))
+            assert b"Joe Bloggs" not in out_doc.tobytes(expand=255)
+            out_doc.close()
+
+    def test_piece_info_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "input.pdf"
+            out = Path(tmp) / "output.pdf"
+            doc, page = self._base(src)
+            doc.xref_set_key(page.xref, "PieceInfo", "<</App <</Private (Joe Bloggs)>>>>")
+            doc.xref_set_key(doc.pdf_catalog(), "PieceInfo", "<</App <</Private (Joe Bloggs)>>>>")
+            doc.save(str(src))
+            doc.close()
+
+            _redact(src, out, "Joe Bloggs")
+
+            out_doc = fitz.open(str(out))
+            assert b"Joe Bloggs" not in out_doc.tobytes(expand=255)
+            out_doc.close()
