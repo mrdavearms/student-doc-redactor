@@ -693,11 +693,11 @@ ipcMain.handle('get-app-version', () => {
 
 ipcMain.handle('log-error', async (_event, payload) => {
   try {
-    const fs = require('fs');
     const path = require('path');
+    const { appendBounded } = require('./errorLog.cjs');
     const logPath = path.join(app.getPath('userData'), 'error.log');
     const line = JSON.stringify({ ...payload, recordedAt: new Date().toISOString() }) + '\n';
-    fs.appendFileSync(logPath, line, 'utf8');
+    appendBounded(logPath, line);
   } catch (err) {
     console.error('Failed to write error log:', err);
   }

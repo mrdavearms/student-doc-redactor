@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitiseForReport, recordRawError, buildFaultReportUrl } from '../src/lib/faultReport';
+import { sanitiseForReport, recordRawError, buildFaultReportUrl, errorLogPayload } from '../src/lib/faultReport';
 
 describe('faultReport sanitisation', () => {
   // File paths carry STUDENT NAMES in this app — none may reach the email.
@@ -95,5 +95,17 @@ describe('buildFaultReportUrl', () => {
     expect(body).toContain('deidentify');
     expect(body).not.toContain('Billy');
     expect(body).toContain('[path removed]');
+  });
+});
+
+describe('ErrorBoundary payload', () => {
+  it('ErrorBoundary payload is sanitised', () => {
+    const err = new Error('Cannot open /Users/dave/Documents/Billy Bob.pdf');
+    err.stack = 'Error: x\n    at load (/Users/dave/Billy Bob/app.js:1:1)';
+    const p = errorLogPayload(err, 'at Foo (C:\\school\\Billy Bob\\x.tsx)');
+    const all = JSON.stringify(p);
+    expect(all).not.toContain('Billy');
+    expect(all).toContain('[path removed]');
+    expect(typeof p.timestamp).toBe('string');
   });
 });

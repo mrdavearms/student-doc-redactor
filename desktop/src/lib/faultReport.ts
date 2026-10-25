@@ -57,6 +57,20 @@ let lastRawError: string | null = null;
 let lastErrorAt: string | null = null;
 
 /** Called by friendlyError — the single funnel every caught error goes through. */
+/**
+ * What the error boundary writes to the local error log. File paths in an
+ * error carry student names, so every text field goes through
+ * sanitiseForReport first.
+ */
+export function errorLogPayload(error: Error, componentStack?: string | null) {
+  return {
+    message: sanitiseForReport(error.message),
+    stack: error.stack ? sanitiseForReport(error.stack) : undefined,
+    componentStack: componentStack ? sanitiseForReport(componentStack) : undefined,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export function recordRawError(raw: string): void {
   lastRawError = raw;
   lastErrorAt = new Date().toISOString();

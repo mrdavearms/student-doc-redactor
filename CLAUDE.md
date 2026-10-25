@@ -196,7 +196,7 @@ Streamlit shares the same 5 workflow steps (no setup or mode screen — de-ident
 | `desktop/src/components/ErrorBoundary.tsx` | Top-level React error boundary, wrapped around `<App/>` in `main.tsx` |
 | `desktop/src/components/ErrorFallback.tsx` | What the boundary renders after a render crash |
 | `desktop/src/components/UpdateCard.tsx` | Prominent update panel on the landing screen (the banner is used on every other screen) |
-| `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **A path root swallows the rest of the line** — file paths in this app contain student names, and a token-bounded (`\S+`) match stopped at the first space and left the surname behind |
+| `desktop/src/lib/faultReport.ts` | "Report this problem" → `mailto:` only, no telemetry. **A path root swallows the rest of the line** — file paths in this app contain student names, and a token-bounded (`\S+`) match stopped at the first space and left the surname behind. `errorLogPayload` runs the same sanitiser over what the error boundary writes to the local `error.log`, and `electron/errorLog.cjs` `appendBounded` caps each entry at 8 KB and rotates the file to `error.log.1` past 1 MB |
 | `desktop/src/lib/peopleRoles.ts` | `effectiveRoleMap` — the role map a run actually uses; see rule #54b |
 | `desktop/src/lib/documentSummary.ts` | Per-document selected-item counts for the completion cards, keyed by PATH — see rule #78 |
 | `desktop/src/lib/reviewNavigation.ts` | `previousDocWithMatches` — null when no earlier document has anything to review, so the button is hidden rather than bouncing (rule #79) |
