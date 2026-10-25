@@ -914,6 +914,19 @@ uv pip compile requirements-desktop.txt -c constraints-desktop.txt --python-vers
 
 Both scripts end the Python step with an engine self-check: `import backend.main` plus `spacy.load('en_core_web_lg')`, after the Mac script's stdlib pruning. The Windows script also checks `$LASTEXITCODE` after pip and the model download. `$ErrorActionPreference = "Stop"` does not apply to native programs, so a failed pip install used to carry on and package an incomplete engine.
 
+### 82. LibreOffice opens Word files with a LOCKED profile: no macros, no active content, no remote links
+
+The Word files come from outside the school, and a fresh LibreOffice profile has the defaults chosen for a person opening their own files: macros at medium security, OLE and DDE allowed, linked pictures and remote templates kept as links. The app's promise is that nothing leaves the machine, so a hostile `.docx` must not be able to make the conversion fetch a URL or run code.
+
+`_profile_dir()` (rule #79's private profile) now calls `_write_locked_profile()`, which writes `<profile>/user/registrymodifications.xcu` before EVERY `soffice` call, not once: rewriting a few hundred bytes is cheaper than trusting LibreOffice left the file alone. The five settings, with paths taken from the installed schema (`main.xcd`):
+- `/org.openoffice.Office.Common/Security/Scripting/DisableMacrosExecution` = `true`
+- `/org.openoffice.Office.Common/Security/Scripting/MacroSecurityLevel` = `3` (very high; ignored while the first is true)
+- `/org.openoffice.Office.Common/Security/Scripting/BlockUntrustedRefererLinks` = `true` (the profile has no trusted locations, so every document's links are blocked)
+- `/org.openoffice.Office.Common/Security/Scripting/DisableActiveContent` = `true` (OLE objects and DDE)
+- `/org.openoffice.Office.Writer/Content/Update/Link` = `0`, the value LibreOffice's source code documents as "never" (`LinkUpdateMode`: NEVER=0, MANUAL=1, AUTOMATIC=2). The schema gives no numeric mapping, and it cannot be observed in headless conversion: on LibreOffice 26.8 a section linked to a local file kept its cached text with this set to 0, 1 or 2, and even with the document's own `LinkUpdateMode` set to "always". `test_writer_link_never_does_not_update_linked_section` guards that the locked profile keeps the cached text.
+
+Measured on LibreOffice 26.8 (25 Oct 2026): a `.docx` with an externally linked picture (`r:link`, `TargetMode="External"`) and a remote attached template made NO request during headless conversion even before this change, and not with Writer link update set to "always" either; LibreOffice keeps the link in the document but does not fetch it. So the lock is defence in depth for other versions and link types, not a fix for an observed leak. `tests/test_document_converter.py::test_no_remote_fetch_from_linked_image` is the guard: real LibreOffice converts that synthetic file with the "remote" URLs pointing at a listener on `127.0.0.1`, asserts the listener saw nothing, and checks the PDF still holds the text. It is skipped when LibreOffice is not installed. `test_profile_written_before_conversion` checks the five values are on disk when `subprocess.run` is called.
+
 ## Session State Keys (Streamlit)
 
 All keys initialised in `session_state.init_session_state()`:
@@ -1052,7 +1065,7 @@ tests/                                # 890 tests total
 ├── test_backend_redact.py            # 11 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape, source_path per document
 ├── test_detection_failures.py        # 4 tests: one unreadable document is reported, not raised; API failed_documents contract; paste list empty
 ├── test_image_ocr_detection.py       # 9 tests: image_text on native pages (mocked OCR, per-document xref cache), detection reads it, real-Tesseract end-to-end
-├── test_document_converter.py        # 3 tests: -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough
+├── test_document_converter.py        # 9 tests: -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough, temp root from Electron, locked profile (rule 82) incl. real-LibreOffice no-network and linked-section checks
 ├── test_api_auth.py                  # 15 tests: API token middleware, CORS on 401, health instance_match identity
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions

@@ -58,8 +58,86 @@ def _profile_dir() -> Path:
     LibreOffice 26.8), but a damaged one exits 0 with no PDF and NO error
     text, so the user saw "Conversion failed:" and nothing after it. With its
     own profile the job runs in its own process and reports its own error.
+
+    The profile is locked (see _write_locked_profile) before it is handed to
+    soffice, every time: rewriting a few hundred bytes is cheaper than
+    trusting that LibreOffice left the file as we wrote it.
     """
-    return _temp_root() / "lo-profile"
+    profile = _temp_root() / "lo-profile"
+    _write_locked_profile(profile)
+    return profile
+
+
+# (configuration path, property, value). Paths are from the
+# installed schema (/Applications/LibreOffice.app/Contents/Resources/registry/
+# main.xcd, LibreOffice 26.8); see _write_locked_profile for what each does.
+_LOCKED_SETTINGS = (
+    ("/org.openoffice.Office.Common/Security/Scripting", "DisableMacrosExecution", "true"),
+    ("/org.openoffice.Office.Common/Security/Scripting", "MacroSecurityLevel", "3"),
+    ("/org.openoffice.Office.Common/Security/Scripting", "BlockUntrustedRefererLinks", "true"),
+    ("/org.openoffice.Office.Common/Security/Scripting", "DisableActiveContent", "true"),
+    ("/org.openoffice.Office.Writer/Content/Update", "Link", "0"),
+)
+
+
+def _write_locked_profile(profile: Path) -> None:
+    """
+    Write profile/user/registrymodifications.xcu so LibreOffice opens a
+    third-party Word file with macros, active content and remote links off.
+
+    The documents come from outside the school (clinicians, other schools),
+    and the app's promise is that nothing leaves the machine. A fresh profile
+    has LibreOffice's ordinary defaults, which were chosen for a person
+    opening their own files, not for a converter.
+
+    - /org.openoffice.Office.Common/Security/Scripting/DisableMacrosExecution
+      = true. No Basic, BeanShell, JavaScript or Python macro runs at all;
+      the schema says MacroSecurityLevel is then ignored.
+    - /org.openoffice.Office.Common/Security/Scripting/MacroSecurityLevel
+      = 3 ("very high": only macros from trusted locations, and the profile
+      lists none). Belt and braces in case the first setting is ever dropped.
+    - /org.openoffice.Office.Common/Security/Scripting/BlockUntrustedRefererLinks
+      = true. Blocks links (linked images, remote templates and the like) that
+      originate from a document outside the trusted locations; the profile
+      lists none, so every document's links are blocked.
+    - /org.openoffice.Office.Common/Security/Scripting/DisableActiveContent
+      = true. Disables embedded OLE objects and DDE links.
+    - /org.openoffice.Office.Writer/Content/Update/Link = 0, the value
+      LibreOffice's source code documents as "never" (its LinkUpdateMode
+      enum: NEVER=0, MANUAL=1, AUTOMATIC=2). The schema itself gives no
+      numeric mapping (default 1, "Always/On request/Never"), and the mapping
+      is NOT observable in headless conversion: on LibreOffice 26.8 a section
+      linked to a local file kept its cached text with this set to 0, 1 or 2,
+      and even with the document's own LinkUpdateMode set to "always".
+      Kept as defence in depth. Word files open in Writer.
+
+    Not set: /org.openoffice.Office.Calc/Content/Update/Link, because a Word
+    file never opens in Calc. No separate "load external graphics" setting
+    exists in the schema; BlockUntrustedRefererLinks is what covers that.
+
+    Measured on LibreOffice 26.8 (25 Oct 2026): a .docx with an externally
+    linked picture and a remote attached template made no request during a
+    headless conversion even WITHOUT these settings. The lock is defence in
+    depth against other versions and other link types, and
+    tests/test_document_converter.py::test_no_remote_fetch_from_linked_image
+    guards the behaviour.
+    """
+    items = "".join(
+        f'<item oor:path="{path}"><prop oor:name="{name}" oor:op="fuse">'
+        f'<value>{value}</value></prop></item>\n'
+        for path, name, value in _LOCKED_SETTINGS
+    )
+    xcu = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+        'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+        f'{items}'
+        '</oor:items>\n'
+    )
+    user = profile / "user"
+    user.mkdir(parents=True, exist_ok=True)
+    (user / "registrymodifications.xcu").write_text(xcu, encoding="utf-8")
 
 
 def _conversion_dir() -> Path:
