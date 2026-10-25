@@ -25,22 +25,19 @@ Built for Australian teachers, psychologists, and support staff who handle sensi
 
 ---
 
-## What's New in v1.9.4
+## What's New in v1.9.6
 
-**This covers v1.9.3 and v1.9.4.** One new ability, one fix that matters if you use a Mac, and a long list of accuracy improvements from a full audit of the detection and redaction code.
+**This covers v1.9.5 and v1.9.6.** v1.9.5 brought the security updates for the parts the app is built on. v1.9.6 is the result of a full security review of the app itself, and every change below makes the files you share safer.
 
-- **Text inside pictures is now found.** A screenshot of an email, or a pasted image with a name and phone number in it, used to be invisible to the checker on an ordinary page — nothing was offered for it, so nothing was removed. The tool now reads the text inside every picture and offers what it finds for redaction, just like text on the page. (In de-identify mode, pictures are still left out of the text file, as before — the app tells you when that happens.)
-- **Mac: OCR now works without Homebrew.** Versions up to v1.9.2 shipped a Tesseract that only ran on a Mac with a matching Homebrew install. On any other Mac the first-run check said *"Tesseract OCR: Not available"* and **every** redaction was set aside as `.UNVERIFIED` — "0 of 2 documents redacted". If you saw that on a Mac, this version fixes it. Nothing else needs installing.
-- **One unreadable file no longer stops the whole folder.** A damaged PDF used to halt the scan for every document in the folder. The others are now scanned, and the review screen tells you which file was skipped and why.
-- **A name is removed on every page, not only the page it was spotted on.** The final check always looked at the whole document, so a name found on page 2 but missed by the detector on page 1 was a guaranteed `.UNVERIFIED` with no way through. Once you approve a name, it goes wherever it appears.
-- **More names are caught.** Two-letter names ("Jo", and surnames like Li, Wu, Ng, Do) are now removed — they used to be skipped everywhere. "Mr John Bob", "Smith, John", "O'Brien" as Word writes it, initials like "J.S." and hyphenated names are all matched. Parent and family names you enter get the same treatment as the student's.
-- **Fewer wrong guesses.** "Parent Teacher Interview" is not a parent, "Discrimination Act 1992" is not an address, "Osborne" is not a date-of-birth label, and a misread word on a scanned page is now a warning to check rather than a reason to set the whole file aside.
-- **De-identify mode sorts out who is who more reliably.** A doctor and a practice sharing a surname ("Dr Jane Smith", "Smith Family Practice") no longer turns the bare "Smith" into `[Organisation]`. A first name seen before the full name, a possessive ("Sarah's"), and "Marcus Van" as the start of "Marcus Van Der Berg" all resolve to the right person.
-- **Small things that were annoying.** The app no longer opens as a blank white window — it says *Starting up…* while the language model loads. A `Report.docx` and a `Report.pdf` in the same folder get their own summary cards. The **Previous** button on the review screen no longer bounces back and clears what you typed into *Add a missed item*. A damaged Word file now gets a proper message instead of "Conversion failed:" with nothing after it. On a Mac, the window can be dragged by its top-left corner, copy and paste work in every text box, and the sidebar footer stays visible on a small screen.
+- **A blacked-out name is really gone.** On a scanned page that also has hidden searchable text, the black box used to cover the name on screen while the picture of the name stayed in the file underneath. The picture is now wiped too, and the tops and tails of tall letters along with it. A new check runs after every save and looks inside the file, not just at the page. If a name has survived anywhere, the file is set aside as `.UNVERIFIED` instead of being passed as safe.
+- **Hidden extras are stripped.** Attached files, document properties, page thumbnails and form-field values are now removed from every redacted PDF.
+- **Honest warnings about where you saved.** If you save into the folder that holds your original documents, or into a folder above it, both modes now tell you not to share that folder, because it also holds your originals, the name key or the redaction log. The de-identify log no longer contains folder or file names.
+- **No unredacted copies left behind.** Word files are converted into a temporary copy before they are checked. That copy is now deleted when you quit, even after a crash or a forced quit, and **Start over** deletes it straight away.
+- **Word files cannot reach the internet or run macros.** Documents are opened with all online and macro features switched off.
+- **The app trusts only its own engine.** At start-up it checks the engine's identity without handing over its private password, and the engine refuses requests the app never makes.
+- **Safer updates on Mac.** The app will never install an older version over a newer one, and it checks the downloaded update has not been tampered with before installing it.
 
-See the [Releases page](https://github.com/mrdavearms/student-doc-redactor/releases) for what changed in earlier versions.
-
----
+Nothing changes in how you use the app.
 
 ## What Is This?
 
