@@ -36,6 +36,7 @@ function isAllowedNavigation(target, appUrl) {
     // are ignored: the renderer may legitimately add them, and neither changes
     // which document is loaded.
     try {
+      if (url.host !== app.host) return false;
       return decodeURIComponent(url.pathname) === decodeURIComponent(app.pathname);
     } catch {
       return false;

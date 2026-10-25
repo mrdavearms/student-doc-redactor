@@ -31,6 +31,11 @@ describe('isAllowedNavigation — packaged (file:)', () => {
     expect(isAllowedNavigation('file:///etc/passwd', MAC_APP)).toBe(false);
   });
 
+  it('file URL with a different host is refused', () => {
+    const otherHost = MAC_APP.replace('file:///', 'file://otherhost/');
+    expect(isAllowedNavigation(otherHost, MAC_APP)).toBe(false);
+  });
+
   it('blocks a sibling file in the same directory', () => {
     const sibling = MAC_APP.replace('index.html', 'other.html');
     expect(isAllowedNavigation(sibling, MAC_APP)).toBe(false);

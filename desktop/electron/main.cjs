@@ -3,7 +3,7 @@
  * Spawns the Python FastAPI backend and creates the app window.
  */
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { isAllowedNavigation } = require('./navigation.cjs');
+const { isPermissionAllowed } = require('./permissions.cjs');
 const { newNonce, healthHeaders, isOwnBackend } = require('./backendIdentity.cjs');
 const { buildMenuTemplate } = require('./menu.cjs');
 const { createRoot, removeRoot, sweepStale } = require('./tempRoot.cjs');
@@ -317,8 +318,15 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
+
+  // The app asks for no camera, microphone, location or notification access.
+  // The one allowance is the clipboard write behind every Copy button; see
+  // permissions.cjs.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(isPermissionAllowed(permission)));
 
   const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
   const appUrl = isDev ? DEV_SERVER : pathToFileURL(indexPath).href;
