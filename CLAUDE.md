@@ -15,9 +15,9 @@ Two frontends exist:
 - **Run (desktop)**: `cd desktop && npm run dev:electron` (starts Vite + Electron + auto-spawns backend)
 - **Run (backend only)**: `./venv/bin/python3.13 -m uvicorn backend.main:app --port 8765`
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
-- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (890 tests; runtime varies by machine/Tesseract availability)
+- **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (976 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 231 tests across 18 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/menu.cjs`, `electron/macUpdate.cjs`, and `electron/startupRescue.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 296 tests across 24 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/permissions.cjs`, `electron/menu.cjs`, `electron/macUpdate.cjs`, and `electron/startupRescue.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -57,7 +57,8 @@ redact_pdf(input_pdf, output_pdf, redaction_items)
 │   ├── _is_image_only_page(page)?
 │   │   ├── YES → _redact_ocr_page(page, items)    # PIL ImageDraw path
 │   │   └── NO  → _redact_text_search(page, text)  # PyMuPDF annotation path
-│   │             + page.apply_redactions(images=PDF_REDACT_IMAGE_NONE)
+│   │             + page.apply_redactions(images=PDF_REDACT_IMAGE_PIXELS)
+│   │             + _blank_image_band(page, rects)     # wider image-only PIXELS pass (rule 11a)
 │   │
 │   └── _delete_pii_widgets(page, redacted_texts)   # AcroForm cleanup (always)
 │
@@ -293,7 +294,7 @@ Accepted trade-offs, as rule 7 accepted "Do not…": a capitalised ordinary word
 
 - `verify_redaction(pdf_path, text)` — fast, text-layer only. Used in the main redaction flow for spot-checking.
 - `verify_redaction_ocr(pdf_path, texts)` — slow, renders at 300 DPI and OCRs. More thorough. Used for comprehensive post-redaction checks.
-- `verify_no_hidden_residue(pdf_path, texts)` — reads what a render cannot show: it OCRs every stored `/Image`'s own pixels (a name under a black vector box renders black but is still in the image bytes), and fails on any `/Info` key with a non-empty value (MuPDF's own `Producer` stamp excepted), any embedded file or `_EMBEDDING_ANNOT_TYPES` annotation, and any page `/Thumb`. `RedactionService._process_document` runs it straight after `verify_redaction_ocr` and adds its messages to the same failure list, so a failure quarantines through the rule #67 path. It fails closed: if Tesseract cannot run on an image, the document quarantines. It is the backstop for partial glyph residue: when a scan's drawn name is taller than its hidden-text line, the text-layer redaction blanks only the top of the glyphs, the render verifier passes, and this check reads the rest. Messages for `/Info` name the key, never the value.
+- `verify_no_hidden_residue(pdf_path, texts)` — reads what a render cannot show: it OCRs every stored `/Image`'s own pixels (a name under a black vector box renders black but is still in the image bytes) except one the render already shows in full (`_images_the_render_shows`: the sole image on a page with no text layer and no drawings, placed once, page-sized and on the page, used by no other page). Those are a scanned page or a page `_replace_page_with_image` rebuilt, whose pixels `verify_redaction_ocr` has just OCR'd at 300 DPI; reading them twice cost about 14s on a 10-page scan, now about 1s. Every image on a text-layer page, or on a page with a second image or a drawing, is still read, and fails on any `/Info` key with a non-empty value, in the trailer's `/Info` or an `/Info` inside the catalog where MuPDF writes it (rule 10) (MuPDF's own `Producer` stamp excepted), any embedded file or `_EMBEDDING_ANNOT_TYPES` annotation, and any page `/Thumb`. `RedactionService._process_document` runs it straight after `verify_redaction_ocr` and adds its messages to the same failure list, so a failure quarantines through the rule #67 path. It fails closed: if Tesseract cannot run on an image, the document quarantines. It is the backstop for partial glyph residue: when a scan's drawn name is taller than its hidden-text line, the text-layer redaction blanks only the top of the glyphs, the render verifier passes, and this check reads the rest. Messages for `/Info` name the key, never the value.
 
 All three verifiers use the module-level `_pii_visible_in_text()` whole-word check — never revert to substring matching, which falsely quarantined correctly-redacted files when a short name ('Ann') appeared inside an ordinary word ('Annual'). The helper splits PII on whitespace *and* hyphens so OCR variants like 'smith - jones' are still caught.
 
@@ -301,7 +302,7 @@ All three verifiers use the module-level `_pii_visible_in_text()` whole-word che
 
 ### 10. Metadata stripping happens inside `redact_pdf()`
 
-`_strip_metadata()` is called inside `redact_pdf()` before `doc.save()`. It nulls the whole `/Info` dictionary (`set_metadata({})`, so custom keys like `/StudentName` go too), the document XMP, and embedded files, then `_strip_hidden_carriers()` nulls every page's `/Thumb`, `/Metadata` and `/PieceInfo`, every image's `/Metadata`, and the catalog's `/PieceInfo`. Note that `doc.save()` still writes a trailer `/Info` holding only `/Producer (MuPDF …)`. It always runs — not optional. Page-level file-attachment, sound, movie, rich-media, 3D and screen annotations (`_EMBEDDING_ANNOT_TYPES`) are deleted outright in `_delete_pii_annotations`, on every page.
+`_strip_metadata()` is called inside `redact_pdf()` before `doc.save()`. It nulls the whole `/Info` dictionary (`set_metadata({})`, so custom keys like `/StudentName` go too), the document XMP, and embedded files, then `_strip_hidden_carriers()` nulls every page's `/Thumb`, `/Metadata` and `/PieceInfo`, every image's `/Metadata`, and the catalog's `/PieceInfo`. Note that `doc.save()` (MuPDF 1.27.2) then writes no trailer `/Info` at all, but puts a non-standard `/Info << /Producer (MuPDF 1.27.2) >>` inside the catalog; PDF readers ignore it, but `verify_no_hidden_residue` checks it with the same rules as a trailer `/Info`. It always runs — not optional. Page-level file-attachment, sound, movie, rich-media, 3D and screen annotations (`_EMBEDDING_ANNOT_TYPES`) are deleted outright in `_delete_pii_annotations`, on every page.
 
 ### 11. OCR pages ARE automatically redacted via `_redact_ocr_page()`
 
@@ -310,9 +311,10 @@ All three verifiers use the module-level `_pii_visible_in_text()` whole-word che
 Image-only pages (detected by `_is_image_only_page()`: no text words, but images present) are redacted using a completely different code path from text-layer pages:
 
 ```python
-# Text-layer pages:
+# Text-layer pages (rule 14):
 page.add_redact_annot(rect)
-page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+_blank_image_band(page, rects)  # second, wider image-only PIXELS pass (rule 11a)
 
 # Image-only pages:
 _redact_ocr_page(page, items)  # renders → OCR → PIL ImageDraw → replace page
@@ -1037,7 +1039,7 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 ## Test Structure
 
 ```
-tests/                                # 890 tests total
+tests/                                # 976 tests total
 ├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
 ├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
 ├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
@@ -1046,36 +1048,39 @@ tests/                                # 890 tests total
 ├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
 ├── test_ocr_redaction.py             # 41 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching, common-word case rule
 ├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
-├── test_metadata_stripping.py        # 8 tests: PDF metadata removal (author, XMP, embedded files)
-├── test_widget_redaction.py          # 7 tests: AcroForm widget deletion (incl. word-boundary match)
+├── test_metadata_stripping.py        # 13 tests: PDF metadata removal (author, XMP, embedded files)
+├── test_widget_redaction.py          # 8 tests: AcroForm widget deletion (incl. word-boundary match)
 ├── test_filename_redaction.py        # 15 tests: PII in filenames → [REDACTED] replacement, case-insensitive for common-word names
 ├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
 ├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_folder_scan.py               # 10 tests: case-insensitive folder scan, conversions stay out of the user's folder
-├── test_quarantine.py                # 7 tests: failed-verification quarantine (os.replace), per-run name claiming, verify handle released
+├── test_folder_scan.py               # 14 tests: case-insensitive folder scan, conversions stay out of the user's folder
+├── test_quarantine.py                # 10 tests: failed-verification quarantine (os.replace), per-run name claiming, verify handle released
 ├── test_pseudonym_map.py             # 103 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
 ├── test_text_deidentifier.py         # 43 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip, common-word names
 ├── test_text_pdf.py                  # 23 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
 ├── test_text_cleanup_service.py      # 8 tests: blackout/de-identify over a string, leftover checks, all_labels() strip-list
-├── test_deidentification_service.py  # 48 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
+├── test_deidentification_service.py  # 56 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
 ├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
 ├── test_backend_paste.py             # 24 tests: /api/text/* contract, reserved-key rejection, ocr_pages empty, save endpoint, manual-PII round trip
 ├── test_output_read_api.py           # 8 tests: /api/output/read guards — *_deidentified.txt only, never .UNVERIFIED.txt or the key file
 ├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
 ├── test_person_roles_api.py          # 12 tests: /people + /labels contracts, roles reaching output, renumbering
-├── test_single_document.py           # 25 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
+├── test_single_document.py           # 30 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
 ├── test_cleanup_api.py               # 21 tests: cleanup path-traversal guards, .txt patterns, key file undeletable
 ├── test_session_state.py             # 2 tests: session state key initialisation
 ├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
 ├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing
-├── test_backend_redact.py            # 11 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape, source_path per document
+├── test_backend_redact.py            # 14 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape, source_path per document
 ├── test_detection_failures.py        # 4 tests: one unreadable document is reported, not raised; API failed_documents contract; paste list empty
 ├── test_image_ocr_detection.py       # 9 tests: image_text on native pages (mocked OCR, per-document xref cache), detection reads it, real-Tesseract end-to-end
 ├── test_document_converter.py        # 9 tests: -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough, temp root from Electron, locked profile (rule 82) incl. real-LibreOffice no-network and linked-section checks
-├── test_api_auth.py                  # 15 tests: API token middleware, CORS on 401, health HMAC identity proof
+├── test_api_auth.py                  # 37 tests: API token middleware, CORS on 401, health HMAC identity proof
 ├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
 ├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
 ├── test_false_positives.py           # 5 tests: false-positive regression tests
+├── test_redaction_residue.py        # 32 tests: name pixels blanked in stored scan images (rotated, shared images, header zone, wider image band), plus verify_no_hidden_residue — image bytes, properties, attachments, thumbnails, Tesseract missing
+├── test_endpoint_narrowing.py       # 14 tests: token holder's reach — preflight bypass, folder open, relative paths, preview and detect only for prepared documents
+├── test_security_fixtures.py        # 8 tests: the synthetic-PDF helpers in tests/security_fixtures.py
 ├── test_case_rules.py                # 11 tests: every detection site uses the shared case rule; case_mode / case_allows
 └── test_common_word_names.py         # 19 tests: rule 7a — word list pinning, detection, no-quarantine end to end (both pathways + paste), scanned-page note, review badge flag
 ```

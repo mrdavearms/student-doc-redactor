@@ -263,6 +263,51 @@ class TestResidueVerifier:
 
         assert self._verify(pdf, ["Joe Bloggs"]) == (True, [])
 
+    def _catalog_info(self, tmp_path, info):
+        pdf = tmp_path / "catalog_info.pdf"
+        doc = fitz.open()
+        doc.new_page()
+        doc.save(str(pdf))
+        doc.close()
+        doc = fitz.open(str(pdf))
+        doc.xref_set_key(doc.pdf_catalog(), "Info", info)
+        doc.saveIncr()
+        doc.close()
+        return pdf
+
+    def test_flags_catalog_info_key(self, tmp_path):
+        """MuPDF writes /Info inside the catalog, not the trailer, so that
+        is where a leftover value would sit."""
+        pdf = self._catalog_info(tmp_path, "<</StudentName(Joe Bloggs)/Producer(MuPDF 1.27.2)>>")
+
+        clean, failures = self._verify(pdf, ["Joe Bloggs"])
+        assert clean is False
+        assert len(failures) == 1
+        assert "StudentName" in failures[0]
+        assert "Bloggs" not in failures[0]
+
+    def test_catalog_info_mupdf_producer_alone_is_not_flagged(self, tmp_path):
+        pdf = self._catalog_info(tmp_path, "<</Producer(MuPDF 1.27.2)>>")
+
+        assert self._verify(pdf, ["Joe Bloggs"]) == (True, [])
+
+    def test_real_redact_output_catalog_info_passes(self, tmp_path):
+        src, out = tmp_path / "in.pdf", tmp_path / "out.pdf"
+        doc = fitz.open()
+        doc.new_page().insert_text((72, 72), "Student Joe Bloggs")
+        doc.set_metadata({"author": "Joe Bloggs", "producer": "Word"})
+        doc.save(str(src))
+        doc.close()
+        ok, _ = PDFRedactor().redact_pdf(src, out, [RedactionItem(page_num=1, text="Joe Bloggs")])
+        assert ok
+        # Precondition: the output really carries a catalog /Info, so this
+        # test exercises the new branch rather than passing vacuously.
+        doc = fitz.open(str(out))
+        assert doc.xref_get_key(doc.pdf_catalog(), "Info")[0] == "dict"
+        doc.close()
+
+        assert self._verify(out, ["Joe Bloggs"]) == (True, [])
+
     def test_flags_file_attachment(self, tmp_path):
         pdf = tmp_path / "attach.pdf"
         doc = fitz.open()
@@ -306,15 +351,19 @@ class TestResidueVerifier:
         assert self._verify(out, ["Joe Bloggs"]) == (True, [])
 
     def test_lowercase_common_word_not_flagged(self, tmp_path):
+        # A text-layer page, so the image really is OCR'd (a lone image on a
+        # page with no text is left to the render check).
         pdf = tmp_path / "young.pdf"
-        make_image_only_pdf(pdf, text_png("young people", at=(150, 900)))
+        make_searchable_scan_pdf(pdf, text_png("young people", at=(150, 900), font_size=24),
+                                 "young people", NAME_RECT)
 
         assert self._verify(pdf, ["Young"], "young people") == (True, [])
 
     def test_tesseract_missing_quarantines(self, tmp_path):
         import pytesseract
         pdf = tmp_path / "scan.pdf"
-        make_image_only_pdf(pdf, text_png("Joe Bloggs", at=(150, 900)))
+        make_searchable_scan_pdf(pdf, text_png("Joe Bloggs", at=(150, 900), font_size=24),
+                                 "Joe Bloggs", NAME_RECT)
 
         with patch("redactor.pytesseract.image_to_string",
                    side_effect=pytesseract.TesseractNotFoundError()):
@@ -322,6 +371,52 @@ class TestResidueVerifier:
         assert clean is False
         assert len(failures) == 1
         assert "image check" in failures[0].lower()
+
+    def test_rebuilt_scan_page_image_not_reocrd(self, tmp_path):
+        """A rebuilt image-only page holds one full-page image and nothing
+        else. verify_redaction_ocr has just OCR'd exactly those pixels from
+        the 300 DPI render, so OCRing the stored image again only costs time
+        (about +45% on a 10-page scan)."""
+        src, out = tmp_path / "scan.pdf", tmp_path / "out.pdf"
+        make_image_only_pdf(src, text_png("Joe Bloggs", at=(150, 900)), pages=2)
+        with patch("redactor.pytesseract.image_to_data",
+                   return_value=ocr_words_for("Joe Bloggs", TestPageReplacement.NAME_BOX)):
+            ok, _ = PDFRedactor().redact_pdf(
+                src, out, [RedactionItem(page_num=1, text="Joe Bloggs"),
+                           RedactionItem(page_num=2, text="Joe Bloggs")])
+        assert ok
+
+        with patch("redactor.pytesseract.image_to_string", return_value="") as ocr:
+            assert PDFRedactor().verify_no_hidden_residue(out, ["Joe Bloggs"]) == (True, [])
+        ocr.assert_not_called()
+
+    def test_text_layer_page_images_still_checked(self, tmp_path):
+        """Hidden residue lives on text-layer pages: the image's pixels can sit
+        under a black box the render shows. Those images are always read."""
+        pdf = tmp_path / "searchable.pdf"
+        make_searchable_scan_pdf(pdf, text_png("Joe Bloggs", at=(150, 900), font_size=24),
+                                 "Joe Bloggs", NAME_RECT)
+
+        with patch("redactor.pytesseract.image_to_string", return_value="Joe Bloggs") as ocr:
+            clean, failures = PDFRedactor().verify_no_hidden_residue(pdf, ["Joe Bloggs"])
+        assert ocr.call_count == 1
+        assert clean is False
+        assert failures and "image" in failures[0]
+
+    def test_image_only_page_with_two_images_still_checked(self, tmp_path):
+        """With a second image on the page, one can hide the other in the
+        render, so both are read."""
+        pdf = tmp_path / "two.pdf"
+        make_image_only_pdf(pdf, text_png("Joe Bloggs", at=(150, 900)))
+        doc = fitz.open(str(pdf))
+        doc[0].insert_image(fitz.Rect(72, 72, 272, 172), stream=text_png("Dummy School", at=(10, 10)))
+        doc.saveIncr()
+        doc.close()
+
+        with patch("redactor.pytesseract.image_to_string", return_value="Joe Bloggs") as ocr:
+            clean, _ = PDFRedactor().verify_no_hidden_residue(pdf, ["Joe Bloggs"])
+        assert ocr.call_count == 2
+        assert clean is False
 
     def test_flags_partial_glyphs_outside_hidden_box(self, tmp_path):
         """The drawn name is taller than its 12pt hidden-text line, so the

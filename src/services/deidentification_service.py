@@ -11,7 +11,6 @@ anyone: the key file is written next to the ORIGINALS instead, and the audit
 log records labels rather than the names they replaced.
 """
 
-import os
 import re
 import shutil
 from dataclasses import dataclass, field

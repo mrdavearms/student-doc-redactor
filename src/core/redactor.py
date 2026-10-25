@@ -1338,12 +1338,20 @@ class PDFRedactor:
         return (len(failures) == 0, failures)
 
     def _image_residue(self, doc: fitz.Document, redacted_texts: List[str]) -> List[str]:
-        """OCR every stored image's own pixels, not the page they are drawn on."""
+        """OCR every stored image's own pixels, not the page they are drawn on.
+
+        The one exception is an image the page render already shows in full
+        (_images_the_render_shows): verify_redaction_ocr OCRs that render at
+        300 DPI, so reading the same pixels again only costs time.
+        """
         texts = [t for t in redacted_texts if len(t.strip()) >= 2]
         failures = []
         try:
+            skip = self._images_the_render_shows(doc)
             for xref in range(1, doc.xref_length()):
                 if doc.xref_get_key(xref, "Subtype")[1] != "/Image":
+                    continue
+                if xref in skip:
                     continue
                 ocr_text = pytesseract.image_to_string(self._image_for_ocr(doc, xref))
                 for text in texts:
@@ -1355,6 +1363,40 @@ class PDFRedactor:
             # Fail closed: an image nobody could read may still hold the name.
             failures.append(f"Stored-image check could not run: {str(e)}")
         return failures
+
+    @staticmethod
+    def _images_the_render_shows(doc: fitz.Document) -> set:
+        """Images whose every pixel the 300 DPI page render shows, unhidden.
+
+        That is the sole image on a page with no text layer and no vector
+        drawings, drawn once, at about page size, wholly on the page: a
+        scanned page, and every page _replace_page_with_image rebuilt.
+        Anything else is still read: on a text-layer page the image can sit
+        under a black box (the hidden residue this check exists for), a
+        second image or a drawing can cover it, and a small or off-page
+        placement shows less than the stored pixels hold. An image also
+        used by any other page is read too.
+        """
+        candidates, must_read = set(), set()
+        for page in doc:
+            images = {img[0] for img in page.get_images(full=True)}
+            xref = next(iter(images)) if len(images) == 1 else None
+            shown = False
+            if xref is not None and not page.get_text("words") and not page.get_drawings():
+                rects = page.get_image_rects(xref)
+                box = page.cropbox
+                if len(rects) == 1:
+                    r = rects[0]
+                    inside = (r.x0 >= box.x0 - 1 and r.y0 >= box.y0 - 1
+                              and r.x1 <= box.x1 + 1 and r.y1 <= box.y1 + 1)
+                    page_sized = (r.width >= 0.9 * box.width
+                                  or r.height >= 0.9 * box.height)
+                    shown = inside and page_sized
+            if shown:
+                candidates.add(xref)
+            else:
+                must_read.update(images)
+        return candidates - must_read
 
     @staticmethod
     def _image_for_ocr(doc: fitz.Document, xref: int) -> Image.Image:
@@ -1371,24 +1413,37 @@ class PDFRedactor:
 
     @staticmethod
     def _info_residue(doc: fitz.Document) -> List[str]:
-        """Any /Info key with a value, except MuPDF's own Producer stamp."""
-        kind, value = doc.xref_get_key(-1, "Info")
-        if kind == "null":
-            return []
-        if kind != "xref":
-            return ["Document properties (/Info) still present"]
-        info = int(value.split()[0])
-        keys = []
-        for key in doc.xref_get_keys(info):
-            vkind, v = doc.xref_get_key(info, key)
-            if vkind == "null" or not v.strip() or v.strip() in ("()", "<>"):
+        """Any /Info key with a value, except MuPDF's own Producer stamp.
+
+        Checks the trailer's /Info and an /Info inside the catalog: MuPDF
+        1.27.2 writes the second, not the first (CLAUDE.md rule 10). Readers
+        ignore a catalog /Info, but it still carries whatever is in it.
+        """
+        failures = []
+        for owner, where in ((-1, ""), (doc.pdf_catalog(), " (catalog /Info)")):
+            kind, value = doc.xref_get_key(owner, "Info")
+            if kind == "null":
                 continue
-            if key == "Producer" and v.startswith("MuPDF"):
+            if kind == "xref":
+                keys = doc.xref_get_keys(int(value.split()[0]))
+            elif kind == "dict":
+                # No API lists an inline dictionary's keys. Every name in its
+                # text is a candidate; a name that is not a key reads as null.
+                keys = sorted(set(re.findall(r"/([^\s/<>\[\]()]+)", value)))
+            else:
+                failures.append(f"Document properties{where} still present")
                 continue
-            keys.append(key)
-        if keys:
-            return [f"Document properties still set: {', '.join(keys)}"]
-        return []
+            set_keys = []
+            for key in keys:
+                vkind, v = doc.xref_get_key(owner, f"Info/{key}")
+                if vkind == "null" or not v.strip() or v.strip() in ("()", "<>"):
+                    continue
+                if key == "Producer" and v.startswith("MuPDF"):
+                    continue
+                set_keys.append(key)
+            if set_keys:
+                failures.append(f"Document properties{where} still set: {', '.join(set_keys)}")
+        return failures
 
     def create_redacted_copy(self, input_pdf: Path, output_folder: Path, redactions: List[RedactionItem]) -> Tuple[bool, str, Path]:
         """

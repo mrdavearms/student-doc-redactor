@@ -295,8 +295,9 @@ def render(text: str, out_path, block: str) -> list:
         for page in doc:
             for hit in page.search_for(sentinel):
                 page.add_redact_annot(hit, fill=(0, 0, 0))
-            # PDF_REDACT_IMAGE_NONE per CLAUDE.md rule 14. A generated text PDF
-            # has no images, but the constant must not drift across the codebase.
+            # A generated text PDF holds no images, so the image mode changes
+            # nothing here; NONE simply leaves images alone. (Rule 14's
+            # PIXELS mode is for redacting real documents, which do.)
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
         _strip_metadata(doc)

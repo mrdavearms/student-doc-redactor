@@ -56,7 +56,6 @@ export function sanitiseForReport(text: string): string {
 let lastRawError: string | null = null;
 let lastErrorAt: string | null = null;
 
-/** Called by friendlyError — the single funnel every caught error goes through. */
 /**
  * What the error boundary writes to the local error log. File paths in an
  * error carry student names, so every text field goes through
@@ -71,6 +70,7 @@ export function errorLogPayload(error: Error, componentStack?: string | null) {
   };
 }
 
+/** Called by friendlyError — the single funnel every caught error goes through. */
 export function recordRawError(raw: string): void {
   lastRawError = raw;
   lastErrorAt = new Date().toISOString();
