@@ -96,6 +96,53 @@ class TestOcrWarningsResponse:
             {"filename": "scanned report.pdf", "count": 1}
         ]
 
+    def _redact(self, tmp_path, pdf, keys):
+        return client.post("/api/redact", json={
+            "folder_path": str(tmp_path),
+            "student_name": "Joe Bloggs",
+            "parent_names": [], "family_names": [], "organisation_names": [],
+            "redact_header_footer": False,
+            "documents": [str(pdf)],
+            "detected_pii": {},
+            "selected_keys": keys,
+            "folder_action": None,
+        })
+
+    def _seed(self, pdf, items, ocr_pages):
+        from backend import main as backend_main
+        from src.core.pii_detector import PIIMatch
+        backend_main._detection_cache[str(pdf)] = {
+            "matches": [PIIMatch(
+                text=t, category="Student name", confidence=0.95,
+                page_num=p, line_num=1, context=t, source="regex", bbox=None,
+            ) for t, p in items],
+            "text_data": {"pages": {}, "ocr_pages": ocr_pages},
+        }
+
+    def test_count_is_items_on_scanned_pages_not_warning_lines(self, tmp_path):
+        """The summary says "N item(s) on image-only pages". N used to be the
+        number of warning LINES, so three scanned-page items read as 1."""
+        pdf = tmp_path / "scan.pdf"
+        _make_pdf(pdf, "Joe Bloggs, Jane Bloggs and Ann Bloggs attended.")
+        self._seed(pdf, [("Joe Bloggs", 1), ("Jane Bloggs", 1), ("Ann Bloggs", 1)], [1])
+
+        resp = self._redact(tmp_path, pdf, [f"{pdf}_{i}" for i in range(3)])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ocr_warnings"] == [{"filename": "scan.pdf", "count": 3}]
+
+    def test_common_word_note_without_scanned_items_counts_zero(self, tmp_path):
+        """A selected common-word name warns about the scanned page even with
+        no item on it. That must not be reported as "1 item(s)"."""
+        pdf = tmp_path / "mixed.pdf"
+        _make_pdf(pdf, "Grace attended.")
+        self._seed(pdf, [("Grace", 1)], [2])
+
+        resp = self._redact(tmp_path, pdf, [f"{pdf}_0"])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ocr_warnings"] == [{"filename": "mixed.pdf", "count": 0}]
+        doc = resp.json()["document_results"][0]
+        assert any("scanned" in w for w in doc["ocr_warnings"])
+
     def test_response_model_accepts_a_string_filename(self):
         """Guards the schema directly, so the shape can't regress to Dict[str, int]."""
         from backend.schemas import RedactionResultsResponse

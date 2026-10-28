@@ -11,6 +11,7 @@ import HelpTip from '../components/HelpTip';
 import DocumentCard from '../components/DocumentCard';
 import PreviewSection from '../components/PreviewSection';
 import { showFolderHoldsOriginals } from '../lib/redactFolderWarning';
+import { ocrWarningLine } from '../lib/ocrWarningLine';
 import { selectedCountsByPath, type DocumentSummaryMeta } from '../lib/documentSummary';
 
 export default function Completion() {
@@ -156,7 +157,7 @@ export default function Completion() {
           </div>
           {r.ocr_warnings.map((w, i) => (
             <p key={i} className="text-xs text-amber-600 py-0.5">
-              {w.filename}: {w.count} item(s) on image-only pages
+              {ocrWarningLine(w.filename, w.count)}
             </p>
           ))}
           {selectedCommonWord && (

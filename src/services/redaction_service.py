@@ -55,6 +55,9 @@ class DocumentResult:
     items_redacted: int
     verification_failures: List[str] = field(default_factory=list)
     ocr_warnings: List[str] = field(default_factory=list)
+    # Selected items on image-only (scanned) pages. Can be 0 while
+    # ocr_warnings is not empty: the common-word note warns without one.
+    ocr_item_count: int = 0
     error_message: Optional[str] = None
     quarantine_path: Optional[Path] = None
     # The input document this result is for. document_name alone is not
@@ -101,11 +104,11 @@ class RedactionResults:
 
     @property
     def ocr_warnings(self) -> List[Tuple[str, int]]:
-        """All OCR warnings as (filename, count) tuples"""
+        """Documents with OCR warnings, as (filename, items on scanned pages)."""
         warnings = []
         for r in self.document_results:
             if r.ocr_warnings:
-                warnings.append((r.document_name, len(r.ocr_warnings)))
+                warnings.append((r.document_name, r.ocr_item_count))
         return warnings
 
 
@@ -313,6 +316,7 @@ class RedactionService:
         ocr_item_count = sum(
             1 for m in selected_matches if m.page_num in ocr_pages
         )
+        result.ocr_item_count = ocr_item_count
         if ocr_item_count > 0 or common_word:
             if ocr_item_count > 0:
                 warning_msg = (
