@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import fitz  # PyMuPDF
 
 from src.core.logger import RedactionLogger, LogEntry
-from src.core.case_rules import SCANNED_PAGE_NOTE, has_common_word_name
+from case_rules import SCANNED_PAGE_NOTE, has_common_word_name  # bare: one copy of its per-request state
 from src.core.pseudonym_map import (
     ASSIGNABLE_ROLES,
     PseudonymMap,

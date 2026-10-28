@@ -19,7 +19,7 @@ from src.core.redactor import (
     strip_pii_from_filename,
 )
 from src.core.logger import RedactionLogger, LogEntry
-from src.core.case_rules import SCANNED_PAGE_NOTE, has_common_word_name
+from case_rules import SCANNED_PAGE_NOTE, has_common_word_name  # bare: one copy of its per-request state
 
 
 @dataclass

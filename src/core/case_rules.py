@@ -16,7 +16,15 @@ Three modes:
   redacts a selected string on every page, so without this a teacher could not
   keep "young people" by unticking it.
 - IGNORE: everything else, including every multi-word string ("Will Young").
+
+One exception to NOT_LOWERCASE: a word the teacher ADDED BY HAND in all
+lowercase ("grace") has been declared the name as written, so for that run it
+is IGNORE. The redact, de-identify and paste-clean endpoints set it with
+any_case_for(); it lasts for that request only.
 """
+
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from common_words import COMMON_WORDS
 
@@ -26,6 +34,9 @@ IGNORE = 'ignore'
 
 EXACT_MAX_LEN = 2
 
+# Lowercased common words matched in any case for the current request.
+_ANY_CASE: ContextVar[frozenset] = ContextVar('case_rules_any_case', default=frozenset())
+
 
 def case_mode(text: str) -> str:
     """The case rule for one PII string."""
@@ -34,9 +45,25 @@ def case_mode(text: str) -> str:
         return EXACT
     # isalpha() is False for spaces, hyphens, apostrophes and digits, so only
     # a single plain word can be an ordinary word.
-    if t.isalpha() and t.lower() in COMMON_WORDS:
+    if t.isalpha() and t.lower() in COMMON_WORDS and t.lower() not in _ANY_CASE.get():
         return NOT_LOWERCASE
     return IGNORE
+
+
+def is_lowercase_manual_word(text: str, source: str) -> bool:
+    """A common word the teacher typed in by hand, in all lowercase."""
+    t = (text or '').strip()
+    return source == 'manual' and t.islower() and case_mode(t) == NOT_LOWERCASE
+
+
+@contextmanager
+def any_case_for(words):
+    """Match these common words in any case until the block ends."""
+    token = _ANY_CASE.set(frozenset(w.strip().lower() for w in words))
+    try:
+        yield
+    finally:
+        _ANY_CASE.reset(token)
 
 
 def case_allows(pii_text: str, found: str) -> bool:

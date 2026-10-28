@@ -35,7 +35,9 @@ from src.services.deidentification_service import (
 )
 from src.core.pseudonym_map import ASSIGNABLE_ROLES, ROLE_LABELS
 from src.core.pii_detector import PIIMatch
-from src.core.case_rules import is_common_word_name
+# The bare name, not src.core.case_rules: that would be a second copy of the
+# module with its own per-request state, and the redactor reads this one.
+from case_rules import any_case_for, is_common_word_name, is_lowercase_manual_word
 from src.services.text_cleanup_service import BLOCK, blackout, deidentify_paste
 from src.core.text_deidentifier import strip_labels
 from src.core.pii_orchestrator import find_person_entities
@@ -650,7 +652,11 @@ def add_manual_pii(req: AddManualPIIRequest):
             context=match.context,
             source=match.source,
             bbox=None,
-            common_word=is_common_word_name(match.text),
+            # A lowercase common word typed by hand is matched in any case
+            # (_typed_lowercase_words), so the "only when capitalised" badge
+            # would be untrue for it.
+            common_word=(is_common_word_name(match.text)
+                         and not is_lowercase_manual_word(match.text, match.source)),
         ),
         index=index,
     )
@@ -735,6 +741,23 @@ def _resolve_cached_selections(documents: List[str], selected_keys: List[str]):
     return detected_pii, user_selections
 
 
+def _typed_lowercase_words(detected_pii: Dict[Path, dict], user_selections: Dict[str, bool]):
+    """
+    Selected manual items that are a common word typed in all lowercase.
+
+    Rule 7a declines all-lowercase hits for those words, which is right for a
+    detector's guess and wrong here: the teacher typed "grace" because that
+    is how the name appears. The run matches these in any case (any_case_for).
+    """
+    return [
+        m.text
+        for doc_path, cached in detected_pii.items()
+        for idx, m in enumerate(cached.get("matches", []))
+        if user_selections.get(f"{doc_path}_{idx}")
+        and is_lowercase_manual_word(m.text, m.source)
+    ]
+
+
 @app.post("/api/redact", response_model=RedactionResultsResponse)
 def redact_documents(req: RedactRequest):
     if PASTE_KEY in req.documents:
@@ -765,10 +788,11 @@ def redact_documents(req: RedactRequest):
             redact_header_footer=req.redact_header_footer,
         )
 
-        results = service.execute(
-            request,
-            should_cancel=lambda: _redaction_control["cancel_requested"],
-        )
+        with any_case_for(_typed_lowercase_words(detected_pii, user_selections)):
+            results = service.execute(
+                request,
+                should_cancel=lambda: _redaction_control["cancel_requested"],
+            )
 
         for r in results.document_results:
             if r.output_path:
@@ -923,11 +947,13 @@ def clean_text(req: CleanTextRequest):
     chosen = set(req.selected_keys)
     selected = [m for i, m in enumerate(matches) if f"{PASTE_KEY}_{i}" in chosen]
 
+    typed_lowercase = [m.text for m in selected if is_lowercase_manual_word(m.text, m.source)]
     try:
         if req.mode == "deidentify":
             request = _deidentify_request_from(_paste_deidentify_body(req))
             pmap, _ = DeidentificationService.build_map(request)
-            cleaned, count, leftovers = deidentify_paste(text, selected, pmap)
+            with any_case_for(typed_lowercase):
+                cleaned, count, leftovers = deidentify_paste(text, selected, pmap)
             # Same convention as deidentification_service.py:662 — the
             # strip-list before the NER sweep is every label the map can
             # emit, not just the ones used for people. A narrower list would
@@ -938,7 +964,8 @@ def clean_text(req: CleanTextRequest):
             key_entries = [KeyEntry(label=l, real_name=n) for l, n in pmap.key_entries()]
             notes = pmap.ambiguity_notes()
         else:
-            cleaned, count, leftovers = blackout(text, selected)
+            with any_case_for(typed_lowercase):
+                cleaned, count, leftovers = blackout(text, selected)
             labels = [BLOCK]
             key_entries, notes = [], []
     except HTTPException:
@@ -1035,10 +1062,12 @@ def deidentify_documents(req: DeidentifyRequestBody):
 
     try:
         service = DeidentificationService()
-        results = service.execute(
-            request,
-            should_cancel=lambda: _redaction_control["cancel_requested"],
-        )
+        with any_case_for(_typed_lowercase_words(
+                request.detected_pii, request.user_selections)):
+            results = service.execute(
+                request,
+                should_cancel=lambda: _redaction_control["cancel_requested"],
+            )
 
         return DeidentifyResultsResponse(
             output_folder=str(results.output_folder),
