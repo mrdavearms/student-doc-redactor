@@ -239,7 +239,7 @@ def _pad_redaction_rect(rect: fitz.Rect) -> fitz.Rect:
     return fitz.Rect(rect.x0 - 1, rect.y0 + dy, rect.x1 + 1, rect.y1 - dy)
 
 
-def _widen_for_image(rect: fitz.Rect) -> fitz.Rect:
+def _widen_for_image(rect: fitz.Rect, page: fitz.Page) -> fitz.Rect:
     """
     The band of image pixels to blank under one text-layer redaction.
 
@@ -249,10 +249,16 @@ def _widen_for_image(rect: fitz.Rect) -> fitz.Rect:
     a fifth of the box's height above and below (enough for descenders, not
     enough to reach the neighbouring scan line), and a couple of points each
     side.
+
+    "Above and below" means as the page is DISPLAYED. `rect` is in unrotated
+    coordinates, and on a /Rotate 90 or 270 page the line runs along unrotated
+    y, so the padding is worked out on the displayed rect and mapped back.
     """
-    dy = rect.height * IMAGE_BLANK_VPAD_RATIO
-    return fitz.Rect(rect.x0 - IMAGE_BLANK_HPAD_PT, rect.y0 - dy,
-                     rect.x1 + IMAGE_BLANK_HPAD_PT, rect.y1 + dy)
+    shown = rect * page.rotation_matrix
+    dy = shown.height * IMAGE_BLANK_VPAD_RATIO
+    shown = fitz.Rect(shown.x0 - IMAGE_BLANK_HPAD_PT, shown.y0 - dy,
+                      shown.x1 + IMAGE_BLANK_HPAD_PT, shown.y1 + dy)
+    return shown * page.derotation_matrix
 
 
 def _is_case_sensitive_pii(pii_text: str) -> bool:
@@ -475,7 +481,7 @@ class PDFRedactor:
         if not any(r.intersects(ir) for r in redacted_rects for ir in image_rects):
             return
         for rect in redacted_rects:
-            page.add_redact_annot(_widen_for_image(rect), fill=None)
+            page.add_redact_annot(_widen_for_image(rect, page), fill=None)
         page.apply_redactions(
             images=fitz.PDF_REDACT_IMAGE_PIXELS,
             graphics=fitz.PDF_REDACT_LINE_ART_NONE,

@@ -492,6 +492,45 @@ class TestWidenedImageBlanking:
             _redact(src, out, [RedactionItem(page_num=1, text="Joe Bloggs")])
         assert len(calls) == 1
 
+    @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+    def test_band_widens_across_the_line_not_along_it(self, rotation):
+        """The extra band reaches above and below the line AS DISPLAYED.
+
+        Annotation rects are unrotated coordinates, so on a /Rotate 90 page
+        the line runs along unrotated y. Padding unrotated y blanked 20% of
+        the name's length into the next word and only 2pt across the line,
+        leaving the descenders the band exists to remove."""
+        import io
+        from PIL import Image
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=800)
+        buf = io.BytesIO()
+        Image.new("L", (600, 800), 0).save(buf, "PNG")   # black, 1px per pt
+        page.insert_image(page.rect, stream=buf.getvalue())
+        page.set_rotation(rotation)
+        page.insert_text(fitz.Point(100, 300) * page.derotation_matrix,
+                         "Billy Bob here", fontsize=12, rotate=rotation)
+        hit = page.search_for("Billy Bob")[0]
+        page.add_redact_annot(hit)
+        rects = [a.rect for a in page.annots(types=[fitz.PDF_ANNOT_REDACT])]
+        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+        PDFRedactor()._blank_image_band(page, rects)
+
+        img = Image.open(io.BytesIO(
+            doc.extract_image(page.get_images(full=True)[0][0])["image"])).convert("L")
+        shown = hit * page.rotation_matrix            # the name as displayed
+        white = [fitz.Point(x + 0.5, y + 0.5) * page.rotation_matrix
+                 for x in range(img.width) for y in range(img.height)
+                 if img.getpixel((x, y)) > 128]
+        xs = [p.x for p in white]
+        ys = [p.y for p in white]
+        # Across the line: at least most of the 20% band above and below.
+        assert min(ys) <= shown.y0 - 0.15 * shown.height
+        assert max(ys) >= shown.y1 + 0.15 * shown.height
+        # Along the line: no more than a few points past either end.
+        assert min(xs) >= shown.x0 - 4
+        assert max(xs) <= shown.x1 + 4
+
     def test_second_pass_draws_no_extra_box(self, tmp_path):
         """The widened band blanks image pixels only: the page's vector
         drawings are the first pass's black boxes and nothing more."""
