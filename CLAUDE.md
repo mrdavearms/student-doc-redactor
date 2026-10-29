@@ -17,7 +17,7 @@ Two frontends exist:
 - **Run (Streamlit)**: `source venv/bin/activate && streamlit run app.py`
 - **Test**: `venv/bin/python3.13 -m pytest tests/ -v` (986 tests; runtime varies by machine/Tesseract availability)
   Note: `venv/bin/pytest` has a broken shebang pointing to a non-existent `venv_new/` path — always use `venv/bin/python3.13 -m pytest` directly.
-- **Test (desktop)**: `cd desktop && npm test` (vitest, 298 tests across 25 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, routing, `electron/navigation.cjs`, `electron/permissions.cjs`, `electron/menu.cjs`, `electron/macUpdate.cjs`, and `electron/startupRescue.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
+- **Test (desktop)**: `cd desktop && npm test` (vitest, 298 tests across 25 files). Covers **pure modules only** — `api.ts`, `errorMessage.ts`, `store.ts`, `types.ts` (`screensFor`), `filename.ts`, `paths.ts`, `context.ts`, `faultReport.ts`, `digest.ts`, `documentSummary.ts`, `reviewNavigation.ts`, `failedDocuments.ts`, `ocrWarningLine.ts`, `keyPanelWording.ts`, routing, `electron/navigation.cjs`, `electron/permissions.cjs`, `electron/menu.cjs`, `electron/macUpdate.cjs`, and `electron/startupRescue.cjs`. Note the macOS updater's **I/O half** (`macUpdateInstaller.cjs` — download, checksum, mount, staging) has no unit tests; it is covered by `cd desktop && npm run verify:mac-updater` (43 checks, macOS only, not part of `npm test` because it needs `hdiutil`/`ditto` and one network call — see `desktop/scripts/mac-updater-checks/README.md`). There is no **React-component** harness, so verify React changes via `npm run build` (tsc) + `npm run lint`. Electron **main-process** code is testable only where the logic has been extracted into a pure CJS module that `main.cjs` imports — `navigation.cjs` is the worked example, and `navigation.test.ts` imports it directly. Prefer that split over adding logic inline to `main.cjs`, which stays unit-testable only via `node --check electron/main.cjs`.
 - **Stale desktop deps**: if `npm test`/`npm run build` errors with `vitest: command not found` or `Cannot find module 'vitest/config'`, run `cd desktop && npm install` first.
 - **Build DMG (Mac)**: `cd desktop && npm run dist:mac`
 - **Build installer (Windows)**: `cd desktop && npm run dist:win`
@@ -84,7 +84,7 @@ React (Vite)
 ├── Layout.tsx        → sidebar + animated page transitions (AnimatePresence)
 ├── store.ts          → Zustand single store (mirrors Streamlit session_state)
 ├── api.ts            → fetch wrapper for all backend endpoints
-├── pages/            → 8 wizard pages (setup + mode choice + 5 steps, 2 completion variants)
+├── pages/            → 12 page components (setup, mode choice, the workflow steps, 3 completion variants, no-PII branch)
 └── components/       → reusable UI components
 
 FastAPI (backend/main.py)
@@ -1041,49 +1041,51 @@ Single store in `desktop/src/store.ts`. `setDetectionResults` auto-initialises a
 
 ```
 tests/                                # 986 tests total
-├── test_pii_detector.py              # 71 tests: phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
-├── test_pii_detector_names.py        # 68 tests: name variations, contextual detection, possessives, family, nicknames
-├── test_pii_orchestrator.py          # 48 tests: orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
-├── test_presidio_recognizers.py      # 23 tests: 6 custom AU Presidio recognizer unit tests
-├── test_redactor.py                  # 41 tests: text-layer redaction routing, possessive+punctuation, hyphenated words, common-word names, redact_pdf robustness
-├── test_signature_detection.py       # 16 tests: heuristic signature detection (unit + integration)
-├── test_ocr_redaction.py             # 41 tests: image-only page detection, OCR redaction, word matching, fuzzy OCR matching, common-word case rule
-├── test_ocr_verification.py          # 7 tests: post-redaction OCR verification (300 DPI re-scan)
-├── test_metadata_stripping.py        # 13 tests: PDF metadata removal (author, XMP, embedded files)
-├── test_widget_redaction.py          # 8 tests: AcroForm widget deletion (incl. word-boundary match)
-├── test_filename_redaction.py        # 15 tests: PII in filenames → [REDACTED] replacement, case-insensitive for common-word names
-├── test_zone_redaction.py            # 5 tests: header/footer zone blanking (Stage 0)
-├── test_manual_pii.py                # 4 tests: manual PII addition endpoint (validation, cache append, redact round-trip)
-├── test_folder_scan.py               # 14 tests: case-insensitive folder scan, conversions stay out of the user's folder
-├── test_quarantine.py                # 10 tests: failed-verification quarantine (os.replace), per-run name claiming, verify handle released
-├── test_pseudonym_map.py             # 103 tests: label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
-├── test_text_deidentifier.py         # 43 tests: longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip, common-word names
-├── test_text_pdf.py                  # 23 tests: blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
-├── test_text_cleanup_service.py      # 8 tests: blackout/de-identify over a string, leftover checks, all_labels() strip-list
-├── test_deidentification_service.py  # 56 tests: end-to-end text output, key file location, source-filename leaks, zones, cancel
-├── test_backend_deidentify.py        # 7 tests: /api/deidentify contract, key file outside output, cache-miss 400
-├── test_backend_paste.py             # 24 tests: /api/text/* contract, reserved-key rejection, ocr_pages empty, save endpoint, manual-PII round trip
-├── test_output_read_api.py           # 8 tests: /api/output/read guards — *_deidentified.txt only, never .UNVERIFIED.txt or the key file
-├── test_role_suggester.py            # 27 tests: role keywords, guardian ambiguity, no false positives
-├── test_person_roles_api.py          # 12 tests: /people + /labels contracts, roles reaching output, renumbering
-├── test_single_document.py           # 30 tests: single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
-├── test_cleanup_api.py               # 21 tests: cleanup path-traversal guards, .txt patterns, key file undeletable
-├── test_session_state.py             # 2 tests: session state key initialisation
-├── test_binary_resolver.py           # 6 tests: cross-platform Tesseract/LibreOffice path resolution
-├── test_text_extractor.py            # 4 tests: coord extraction + /api/preview fitz handle closing
-├── test_backend_redact.py            # 14 tests: detect→redact selection, clean-500 error wrapping, OCR-warning response shape, source_path per document
-├── test_detection_failures.py        # 4 tests: one unreadable document is reported, not raised; API failed_documents contract; paste list empty
-├── test_image_ocr_detection.py       # 9 tests: image_text on native pages (mocked OCR, per-document xref cache), detection reads it, real-Tesseract end-to-end
-├── test_document_converter.py        # 9 tests: -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough, temp root from Electron, locked profile (rule 82) incl. real-LibreOffice no-network and linked-section checks
-├── test_api_auth.py                  # 37 tests: API token middleware, CORS on 401, health HMAC identity proof
-├── test_integration.py               # 6 tests: end-to-end redaction pipeline (links, bookmarks, structure)
-├── test_adversarial.py               # 7 tests: unicode edge cases, boundary conditions
-├── test_false_positives.py           # 5 tests: false-positive regression tests
-├── test_redaction_residue.py        # 32 tests: name pixels blanked in stored scan images (rotated, shared images, header zone, wider image band), plus verify_no_hidden_residue — image bytes, properties, attachments, thumbnails, Tesseract missing
-├── test_endpoint_narrowing.py       # 14 tests: token holder's reach — preflight bypass, folder open, relative paths, preview and detect only for prepared documents
-├── test_security_fixtures.py        # 8 tests: the synthetic-PDF helpers in tests/security_fixtures.py
-├── test_case_rules.py                # 11 tests: every detection site uses the shared case rule; case_mode / case_allows
-└── test_common_word_names.py         # 19 tests: rule 7a — word list pinning, detection, no-quarantine end to end (both pathways + paste), scanned-page note, review badge flag
+├── test_pii_detector.py              # phone, email, address, Medicare, CRN, Student ID, DOB, NDIS, ABN, cross-line
+├── test_pii_detector_names.py        # name variations, contextual detection, possessives, family, nicknames
+├── test_pii_orchestrator.py          # orchestrator merge, dedup, NER-primary coordination, line-number resolution vs the old formula
+├── test_presidio_recognizers.py      # 6 custom AU Presidio recognizer unit tests
+├── test_redactor.py                  # text-layer redaction routing, possessive+punctuation, hyphenated words, common-word names, redact_pdf robustness
+├── test_signature_detection.py       # heuristic signature detection (unit + integration)
+├── test_ocr_redaction.py             # image-only page detection, OCR redaction, word matching, fuzzy OCR matching, common-word case rule
+├── test_ocr_verification.py          # post-redaction OCR verification (300 DPI re-scan)
+├── test_metadata_stripping.py        # PDF metadata removal (author, XMP, embedded files)
+├── test_widget_redaction.py          # AcroForm widget deletion (incl. word-boundary match)
+├── test_filename_redaction.py        # PII in filenames → [REDACTED] replacement, case-insensitive for common-word names
+├── test_zone_redaction.py            # header/footer zone blanking (Stage 0)
+├── test_manual_pii.py                # manual PII addition endpoint (validation, cache append, redact round-trip)
+├── test_folder_endpoints.py          # /api/folder/validate and /process refuse relative paths and file paths
+├── test_folder_scan.py               # case-insensitive folder scan, conversions stay out of the user's folder
+├── test_quarantine.py                # failed-verification quarantine (os.replace), per-run name claiming, verify handle released
+├── test_pseudonym_map.py             # label privacy invariant, person-identity merge, shared tokens, junk NER spans, valid role keys
+├── test_text_deidentifier.py         # longest-first replacement, label re-match guard, exact + fuzzy verification, form-label skip, common-word names
+├── test_text_pdf.py                  # blackout PDF rendering, per-render sentinel choice, pagination, metadata stripping
+├── test_text_cleanup_service.py      # blackout/de-identify over a string, leftover checks, all_labels() strip-list
+├── test_deidentification_service.py  # end-to-end text output, key file location, source-filename leaks, zones, cancel
+├── test_backend_deidentify.py        # /api/deidentify contract, key file outside output, cache-miss 400
+├── test_backend_paste.py             # /api/text/* contract, reserved-key rejection, ocr_pages empty, save endpoint, manual-PII round trip
+├── test_output_read_api.py           # /api/output/read guards — *_deidentified.txt only, never .UNVERIFIED.txt or the key file
+├── test_role_suggester.py            # role keywords, guardian ambiguity, no false positives
+├── test_person_roles_api.py          # /people + /labels contracts, roles reaching output, renumbering
+├── test_single_document.py           # single-file conversion, /api/file/* endpoints, custom output filename, save-over-source guard
+├── test_cleanup_api.py               # cleanup path-traversal guards, .txt patterns, key file undeletable
+├── test_session_state.py             # session state key initialisation
+├── test_binary_resolver.py           # cross-platform Tesseract/LibreOffice path resolution
+├── test_text_extractor.py            # coord extraction + /api/preview fitz handle closing
+├── test_backend_detection_race.py    # overlapping scans: the newest-started detection wins the cache, an older one gets 409; discard supersedes an abandoned scan
+├── test_backend_redact.py            # detect→redact selection, clean-500 error wrapping, OCR-warning response shape, source_path per document
+├── test_detection_failures.py        # one unreadable document is reported, not raised; API failed_documents contract; paste list empty
+├── test_image_ocr_detection.py       # image_text on native pages (mocked OCR, per-document xref cache), detection reads it, real-Tesseract end-to-end
+├── test_document_converter.py        # -env:UserInstallation under the temp root, empty-message fallback, LibreOffice error passthrough, temp root from Electron, locked profile (rule 82) incl. real-LibreOffice no-network and linked-section checks
+├── test_api_auth.py                  # API token middleware, CORS on 401, health HMAC identity proof
+├── test_integration.py               # end-to-end redaction pipeline (links, bookmarks, structure)
+├── test_adversarial.py               # unicode edge cases, boundary conditions
+├── test_false_positives.py           # false-positive regression tests
+├── test_redaction_residue.py        # name pixels blanked in stored scan images (rotated, shared images, header zone, wider image band), plus verify_no_hidden_residue — image bytes, properties, attachments, thumbnails, Tesseract missing
+├── test_endpoint_narrowing.py       # token holder's reach — preflight bypass, folder open, relative paths, preview and detect only for prepared documents
+├── test_security_fixtures.py        # the synthetic-PDF helpers in tests/security_fixtures.py
+├── test_case_rules.py                # every detection site uses the shared case rule; case_mode / case_allows
+└── test_common_word_names.py         # rule 7a — word list pinning, detection, no-quarantine end to end (both pathways + paste), scanned-page note, review badge flag
 ```
 
 Tests use `sys.path.insert` to locate `src/core/` modules — this is required because the test runner runs from the repo root, not from within `src/`.
